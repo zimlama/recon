@@ -59,6 +59,7 @@ def run(
 
     # Create job
     from datetime import datetime
+from app.models import _now
     with SessionLocal() as db:
         job = Job(
             target=target,
@@ -67,7 +68,7 @@ def run(
             user_consent=True,
             typed_confirmation=target,
             consent_modal_version="cli-v1",
-            consent_timestamp=datetime.utcnow(),
+            consent_timestamp=_now(),
         )
         db.add(job)
         db.commit()

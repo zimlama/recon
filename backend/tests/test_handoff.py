@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -23,7 +23,7 @@ def test_handoff_packet_minimal() -> None:
         source=HandoffSource(
             version="0.1.0",
             job_id="test-123",
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
         ),
         target=HandoffTarget(
             primary_domain="example.com",
@@ -41,7 +41,7 @@ def test_handoff_packet_with_confirmed_targets() -> None:
         source=HandoffSource(
             version="0.1.0",
             job_id="test-123",
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
         ),
         target=HandoffTarget(primary_domain="example.com"),
         confirmed_targets=[
@@ -65,7 +65,7 @@ def test_handoff_packet_serialization() -> None:
         source=HandoffSource(
             version="0.1.0",
             job_id="test-123",
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
         ),
         target=HandoffTarget(primary_domain="example.com"),
     )
@@ -82,7 +82,7 @@ def test_handoff_packet_rejects_extra_fields() -> None:
             "source": {
                 "version": "0.1.0",
                 "job_id": "x",
-                "completed_at": datetime.utcnow().isoformat(),
+                "completed_at": datetime.now(timezone.utc).isoformat(),
             },
             "target": {"primary_domain": "example.com"},
             "unknown_field": "should fail",  # extra="forbid"
@@ -95,7 +95,7 @@ def test_import_handoff_validates_schema(tmp_path: Path) -> None:
         source=HandoffSource(
             version="0.1.0",
             job_id="test-123",
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
         ),
         target=HandoffTarget(primary_domain="example.com"),
     )

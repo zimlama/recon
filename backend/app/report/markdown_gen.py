@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from app.models import _now
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -88,7 +89,7 @@ class MarkdownReportGenerator:
         return f"""---
 title: "Reconocimiento Pasivo — {self.job.target}"
 target: "{self.job.target}"
-date: "{datetime.utcnow().strftime('%Y-%m-%d')}"
+date: "{_now().strftime('%Y-%m-%d')}"
 job_id: "{self.job.id}"
 phase: "01-recon-osint"
 ai_validated: true
@@ -102,7 +103,7 @@ generator: "zimlama/recon v0.1.0"
             "",
             f"**Target:** `{self.job.target}`  ",
             f"**Job ID:** `{self.job.id}`  ",
-            f"**Fecha:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}  ",
+            f"**Fecha:** {_now().strftime('%Y-%m-%d %H:%M UTC')}  ",
             f"**Phase:** 01-recon-osint (passive)  ",
             "",
             "---",
@@ -242,7 +243,7 @@ generator: "zimlama/recon v0.1.0"
             "",
             "---",
             "",
-            f"_Reporte generado por zimlama/recon v0.1.0 — {datetime.utcnow().isoformat()}Z_",
+            f"_Reporte generado por zimlama/recon v0.1.0 — {_now().isoformat()}Z_",
             "",
         ]
 

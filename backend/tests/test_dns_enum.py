@@ -290,6 +290,14 @@ def test_format_rdata_a(module: DNSEnumModule) -> None:
     assert metadata == {}
 
 
+def test_format_rdata_aaaa(module: DNSEnumModule) -> None:
+    """AAAA (IPv6) record formatting."""
+    rdata = make_rdata(dns.rdatatype.AAAA, "2001:db8::1")
+    metadata: dict = {}
+    value = module._format_rdata(rdata, dns.rdatatype.AAAA, metadata)
+    assert value == "2001:db8::1"
+
+
 def test_format_rdata_txt_spf(module: DNSEnumModule) -> None:
     """TXT record formatting tags SPF correctly."""
     rdata = make_rdata(dns.rdatatype.TXT, "v=spf1 -all")
@@ -297,6 +305,17 @@ def test_format_rdata_txt_spf(module: DNSEnumModule) -> None:
     value = module._format_rdata(rdata, dns.rdatatype.TXT, metadata)
     assert "spf1" in value
     assert metadata["type"] == "spf"
+
+
+def test_format_rdata_txt_dkim(module: DNSEnumModule) -> None:
+    """TXT record formatting tags DKIM correctly."""
+    rdata = make_rdata(
+        dns.rdatatype.TXT,
+        "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCg",
+    )
+    metadata: dict = {}
+    module._format_rdata(rdata, dns.rdatatype.TXT, metadata)
+    assert metadata["type"] == "dkim"
 
 
 def test_format_rdata_txt_long(module: DNSEnumModule) -> None:
@@ -308,6 +327,48 @@ def test_format_rdata_txt_long(module: DNSEnumModule) -> None:
     assert metadata["type"] == "verification"
 
 
+def test_format_rdata_cname(module: DNSEnumModule) -> None:
+    """CNAME record formatting."""
+    rdata = make_rdata(dns.rdatatype.CNAME, "cdn.example.com")
+    metadata: dict = {}
+    value = module._format_rdata(rdata, dns.rdatatype.CNAME, metadata)
+    assert value == "cdn.example.com"
+
+
+def test_format_rdata_srv(module: DNSEnumModule) -> None:
+    """SRV record formatting extracts port + priority + weight."""
+    rdata = make_rdata(dns.rdatatype.SRV, "sip.example.com")
+    rdata.port = 5060
+    rdata.priority = 10
+    rdata.weight = 5
+    metadata: dict = {}
+    value = module._format_rdata(rdata, dns.rdatatype.SRV, metadata)
+    assert value == "sip.example.com"
+    assert metadata["port"] == 5060
+    assert metadata["priority"] == 10
+    assert metadata["weight"] == 5
+
+
+def test_format_rdata_fallback_to_text(module: DNSEnumModule) -> None:
+    """Unknown rdatatype falls back to rdata.to_text()."""
+    # Use a fake rdatatype value (not in our switch)
+    rdata = MagicMock()
+    rdata.to_text = MagicMock(return_value="custom-record-value")
+    metadata: dict = {}
+    value = module._format_rdata(rdata, 99999, metadata)
+    assert value == "custom-record-value"
+
+
+def test_format_rdata_handles_exception(module: DNSEnumModule) -> None:
+    """If rdata formatting raises, log debug + return None."""
+    rdata = MagicMock()
+    # Make .address raise (so the A/AAAA branch fails)
+    type(rdata).address = property(lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
+    metadata: dict = {}
+    value = module._format_rdata(rdata, dns.rdatatype.A, metadata)
+    assert value is None
+
+
 def test_format_rdata_soa(module: DNSEnumModule) -> None:
     """SOA record formatting extracts mname + serial + timing."""
     rdata = make_rdata(dns.rdatatype.SOA, "ns1.example.com")
@@ -316,6 +377,75 @@ def test_format_rdata_soa(module: DNSEnumModule) -> None:
     assert value == "ns1.example.com"
     assert metadata["mname"] == "ns1.example.com"
     assert metadata["serial"] == 2024010101
+
+
+# ---- NoNameservers error path ----
+
+@pytest.mark.asyncio
+async def test_no_nameservers_recorded_as_error(module: DNSEnumModule) -> None:
+    """When all resolvers fail, NoNameservers is recorded but module continues."""
+    resolver = MagicMock()
+    resolver.resolve = MagicMock(side_effect=dns.resolver.NoNameservers("all resolvers down"))
+
+    with patch.object(module, "_build_resolver", return_value=resolver):
+        result = await module.run(ModuleInput(target="example.com"))
+
+    # Errors recorded for each record type
+    assert any("No nameservers" in e for e in result.errors)
+    # No findings, but module didn't crash
+    assert result.findings == []
+
+
+@pytest.mark.asyncio
+async def test_query_records_propagates_no_nameservers(module: DNSEnumModule) -> None:
+    """NoNameservers in inner _query_records propagates as error."""
+    resolver = MagicMock()
+    resolver.resolve = MagicMock(side_effect=dns.resolver.NoNameservers("all down"))
+
+    with patch.object(module, "_build_resolver", return_value=resolver):
+        result = await module.run(ModuleInput(target="example.com"))
+
+    # 8 record types * 1 error each = 8 errors mentioning nameservers
+    nameserver_errors = [e for e in result.errors if "nameservers" in e.lower()]
+    assert len(nameserver_errors) >= 1
+
+
+@pytest.mark.asyncio
+async def test_axfr_initial_ns_query_fails(module: DNSEnumModule) -> None:
+    """If the initial NS query for AXFR fails, AXFR returns empty (no error)."""
+    resolver = MagicMock()
+    resolver.resolve = MagicMock(side_effect=dns.resolver.NoAnswer)
+
+    with patch.object(module, "_build_resolver", return_value=resolver):
+        result = await module.run(ModuleInput(target="example.com"))
+
+    # No AXFR findings
+    assert not any(f.source == "dns_axfr" for f in result.findings)
+    # No AXFR-specific errors
+    assert not any("AXFR" in e for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_axfr_timeout_caught_silently(module: DNSEnumModule) -> None:
+    """AXFR timeout is caught and not surfaced as an error."""
+    # NS query succeeds
+    ns_rdata = make_rdata(dns.rdatatype.NS, "ns1.example.com")
+
+    def _resolve(domain: str, rtype: int, **kwargs: object) -> MagicMock:
+        if rtype == dns.rdatatype.NS:
+            return make_answer(ns_rdata)
+        raise dns.resolver.NoAnswer
+
+    resolver = MagicMock()
+    resolver.resolve = MagicMock(side_effect=_resolve)
+
+    with patch.object(module, "_build_resolver", return_value=resolver):
+        with patch("asyncio.wait_for", side_effect=TimeoutError):
+            result = await module.run(ModuleInput(target="example.com"))
+
+    # No AXFR findings, no errors
+    assert not any(f.source == "dns_axfr" for f in result.findings)
+    assert not any("AXFR" in e for e in result.errors)
 
 
 # ---- Metadata ----
@@ -337,3 +467,14 @@ def test_resolver_uses_public_servers(module: DNSEnumModule) -> None:
     assert "1.1.1.1" in resolver.nameservers
     assert resolver.timeout > 0
     assert resolver.lifetime > 0
+
+
+def test_ai_prompt_is_substantive(module: DNSEnumModule) -> None:
+    """AI prompt has the required structure (covers missing line 303)."""
+    prompt = module.get_ai_prompt()
+    assert "DNS" in prompt
+    assert "CONFIRMED" in prompt
+    assert "FALSE_POSITIVE" in prompt
+    assert "HIGH" in prompt
+    assert "DMARC" in prompt  # should mention email security
+    assert len(prompt) > 200

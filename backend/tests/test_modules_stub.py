@@ -8,8 +8,9 @@ from app.modules import MODULE_REGISTRY
 from app.modules.base import BaseReconModule
 from app.models import ModuleTier
 
-# Mark all tests in this module as asyncio
-pytestmark = pytest.mark.asyncio
+# Note: we use @pytest.mark.asyncio per-test instead of pytestmark, because
+# pytest-asyncio in "auto" mode already detects async functions, and
+# pytestmark-asyncio would mark non-async tests as well (causing warnings).
 
 
 def test_all_14_modules_registered() -> None:

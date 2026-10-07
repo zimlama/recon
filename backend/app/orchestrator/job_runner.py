@@ -17,6 +17,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
+from app.models import _now
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -66,7 +67,7 @@ class JobRunner:
                 raise ValueError(f"Job {job_id} not found")
 
             job.status = JobStatus.RUNNING
-            job.started_at = datetime.utcnow()
+            job.started_at = _now()
             db.commit()
             db.refresh(job)
             target = job.target
@@ -104,7 +105,7 @@ class JobRunner:
             if job:
                 if job.status == JobStatus.VALIDATING:
                     job.status = JobStatus.COMPLETED
-                job.completed_at = datetime.utcnow()
+                job.completed_at = _now()
                 if job.started_at:
                     job.duration_seconds = (job.completed_at - job.started_at).total_seconds()
                 db.commit()
@@ -127,7 +128,7 @@ class JobRunner:
                 module_name=module_name,
                 module_tier=module.tier,
                 status=ModuleStatus.RUNNING,
-                started_at=datetime.utcnow(),
+                started_at=_now(),
             )
             db.add(module_run)
             db.commit()
@@ -159,7 +160,7 @@ class JobRunner:
                 module_run.status = (
                     ModuleStatus.FAILED if output.errors else ModuleStatus.COMPLETED
                 )
-                module_run.completed_at = datetime.utcnow()
+                module_run.completed_at = _now()
                 module_run.duration_seconds = duration
                 module_run.findings_count = len(output.findings)
                 module_run.errors = output.errors

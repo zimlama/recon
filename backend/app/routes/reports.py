@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from app.models import _now
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -58,7 +59,7 @@ async def generate_report(
         job_id=job_id,
         md_path=str(md_path),
         pdf_path=str(pdf_path) if pdf_path else None,
-        generated_at=datetime.utcnow(),
+        generated_at=_now(),
     )
 
 

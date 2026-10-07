@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -31,20 +30,17 @@ from app.database import Base, SessionLocal, engine  # noqa: E402
 settings = get_settings()
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Single event loop for all tests."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
 @pytest_asyncio.fixture
 async def db() -> AsyncIterator:
-    """In-memory SQLite session with fresh tables per test."""
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    """In-memory SQLite session with fresh tables per test.
+
+    Note: we drop_all BEFORE create_all to ensure a clean slate even if
+    the engine was previously populated by another test.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: F401
 
     # Use sync engine for tests (simpler)
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
@@ -60,7 +56,8 @@ async def client() -> AsyncIterator[AsyncClient]:
     # Import inside fixture to avoid circular issues
     from app.main import app
 
-    # Init DB tables before tests
+    # Init DB tables before tests (drop first to ensure clean state)
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -80,7 +77,7 @@ def mock_llm_response() -> dict:
                 "verdict": "CONFIRMED",
                 "priority": "HIGH",
                 "confidence": 0.95,
-                "reasoning": "Public-facing API with confirmed DNS resolution.",
+                "reasoning": "Public-facing API with confirmed DNS resolution and clean history.",
                 "enrichment": {"tech_hint": "Express"},
             }
         ],

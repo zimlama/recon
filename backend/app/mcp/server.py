@@ -195,6 +195,7 @@ class ReconMCPServer:
     ) -> dict[str, Any]:
         """Create a new job and trigger background execution."""
         from datetime import datetime
+from app.models import _now
 
         if modules is None:
             modules = [m for m, mod in MODULE_REGISTRY.items() if mod.enabled_by_default]
@@ -207,7 +208,7 @@ class ReconMCPServer:
                 user_consent=True,  # MCP caller is implicitly authorized
                 typed_confirmation=target,
                 consent_modal_version="mcp-v1",
-                consent_timestamp=datetime.utcnow(),
+                consent_timestamp=_now(),
             )
             db.add(job)
             db.commit()

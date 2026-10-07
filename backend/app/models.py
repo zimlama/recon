@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Index, Integer, String, Text
@@ -23,8 +23,13 @@ def _uuid() -> str:
 
 
 def _now() -> datetime:
-    """UTC now."""
-    return datetime.utcnow()
+    """Current UTC time as a naive datetime.
+
+    Python 3.12+ deprecates `datetime.utcnow()` (naive). We use the
+    timezone-aware `datetime.now(timezone.utc)` but strip tzinfo for
+    SQLite storage (SQLite DateTime columns don't preserve tzinfo).
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 # ---- Enums ----

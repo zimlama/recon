@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from app.models import _now
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
@@ -55,7 +56,7 @@ async def create_job(
         user_consent=payload.user_consent,
         typed_confirmation=payload.typed_confirmation,
         consent_modal_version=payload.consent_modal_version,
-        consent_timestamp=datetime.utcnow(),
+        consent_timestamp=_now(),
         status=JobStatus.PENDING,
     )
     db.add(job)
@@ -147,7 +148,7 @@ async def cancel_job(
             detail=f"Job is already in terminal state: {job.status.value}",
         )
     job.status = JobStatus.CANCELLED
-    job.completed_at = datetime.utcnow()
+    job.completed_at = _now()
     db.commit()
     db.refresh(job)
     return job

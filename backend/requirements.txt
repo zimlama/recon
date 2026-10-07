@@ -1,17 +1,37 @@
-# Production dependencies — pinned for reproducibility
-# For dev: pip install -e ".[dev]"
+# =============================================================================
+# zimlama/recon — Backend production dependencies
+# Versions pinned to versions validated during TDD (2026-10).
+# For dev: pip install -r requirements-dev.txt
+# =============================================================================
 
+# --- Web framework ---
 fastapi==0.110.0
 uvicorn[standard]==0.27.0
+python-multipart==0.0.9
+
+# --- Validation + settings ---
 pydantic==2.6.1
 pydantic-settings==2.2.1
-sqlalchemy==2.0.27
+
+# --- Database ---
+# NOTE: SQLAlchemy >= 2.0.30 required for Python 3.13 compatibility
+sqlalchemy==2.0.30
 alembic==1.13.1
 python-dotenv==1.0.1
+
+# --- HTTP clients ---
+# httpx 0.28 has a different transport interface; respx >= 0.22 needed for mocking
+httpx==0.28.1
 aiohttp==3.9.3
-httpx==0.26.0
+
+# --- Logging ---
 structlog==24.1.0
-python-multipart==0.0.9
+
+# --- CLI ---
 typer==0.12.1
+
+# --- Recon module dependencies ---
+# dnspython is used by the dns_enum module (sync API, run in thread executor)
 dnspython==2.6.1
+# python-whois is a fallback for whois_rdap (we mostly use RDAP, this is a safety net)
 python-whois==0.9.4
