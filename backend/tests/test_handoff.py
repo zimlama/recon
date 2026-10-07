@@ -43,7 +43,10 @@ def test_handoff_packet_with_confirmed_targets() -> None:
             job_id="test-123",
             completed_at=datetime.now(timezone.utc),
         ),
-        target=HandoffTarget(primary_domain="example.com"),
+        target=HandoffTarget(
+            primary_domain="example.com",
+            authorization_scope="domain example.com",
+        ),
         confirmed_targets=[
             HandoffConfirmedTarget(
                 subdomain="api.example.com",
@@ -67,7 +70,10 @@ def test_handoff_packet_serialization() -> None:
             job_id="test-123",
             completed_at=datetime.now(timezone.utc),
         ),
-        target=HandoffTarget(primary_domain="example.com"),
+        target=HandoffTarget(
+            primary_domain="example.com",
+            authorization_scope="domain example.com",
+        ),
     )
     json_str = original.model_dump_json()
     parsed = HandoffPacket.model_validate_json(json_str)
@@ -97,7 +103,10 @@ def test_import_handoff_validates_schema(tmp_path: Path) -> None:
             job_id="test-123",
             completed_at=datetime.now(timezone.utc),
         ),
-        target=HandoffTarget(primary_domain="example.com"),
+        target=HandoffTarget(
+            primary_domain="example.com",
+            authorization_scope="domain example.com",
+        ),
     )
     json_path = tmp_path / "handoff.json"
     json_path.write_text(packet.model_dump_json(indent=2), encoding="utf-8")
@@ -110,3 +119,113 @@ def test_import_handoff_missing_file(tmp_path: Path) -> None:
     """import_handoff raises FileNotFoundError for missing files."""
     with pytest.raises(FileNotFoundError):
         import_handoff(tmp_path / "nonexistent.json")
+
+
+# ---------------------------------------------------------------------------
+# Security regressions — path traversal + filename sanitization (Fix #1, #2)
+# ---------------------------------------------------------------------------
+
+
+def test_safe_filename_part_strips_crlf() -> None:
+    """CRLF and other unsafe chars are stripped to '_'."""
+    from app.utils.network import safe_filename_part
+
+    # Classic CRLF header-injection payload
+    assert "\r" not in safe_filename_part("foo\r\nX-Evil: bar")
+    assert "\n" not in safe_filename_part("foo\r\nbar")
+    # All replaced with underscores, no control chars survive
+    assert safe_filename_part("foo\r\nbar").replace("_", "") == "foobar"
+
+
+def test_safe_filename_part_keeps_safe_chars() -> None:
+    """Allowed chars (A-Za-z0-9._-) pass through unchanged."""
+    from app.utils.network import safe_filename_part
+
+    assert safe_filename_part("example.com") == "example.com"
+    assert safe_filename_part("sub-domain_1") == "sub-domain_1"
+    assert safe_filename_part("a1.2_b-3") == "a1.2_b-3"
+
+
+def test_safe_filename_part_rejects_path_separators_and_quotes() -> None:
+    """Path separators and quotes are replaced, never passed verbatim."""
+    from app.utils.network import safe_filename_part
+
+    # '../' .. 'passwd' would be a path-traversal vector in a filename
+    out = safe_filename_part("../etc/passwd")
+    assert "/" not in out
+    assert ".." not in out  # stripped trailing dots
+    assert "\\" not in safe_filename_part("..\\windows\\system")
+    assert '"' not in safe_filename_part('foo"bar')
+    assert "'" not in safe_filename_part("foo'bar")
+    assert ":" not in safe_filename_part("foo:bar")
+
+
+def test_safe_filename_part_caps_length() -> None:
+    """Long inputs are truncated to 63 chars."""
+    from app.utils.network import safe_filename_part
+
+    long_input = "a" * 500
+    assert len(safe_filename_part(long_input)) == 63
+
+
+def test_safe_filename_part_handles_empty_or_unsafe_only() -> None:
+    """Empty / unsafe-only inputs fall back to 'unknown'."""
+    from app.utils.network import safe_filename_part
+
+    assert safe_filename_part("") == "unknown"
+    # Inputs that strip down to nothing after .strip().strip('.') → "unknown".
+    assert safe_filename_part("...") == "unknown"
+    # Whitespace-only becomes all underscores — `_` IS a safe char, so it
+    # stays. This is intentional: defense-in-depth keeps the field
+    # non-empty rather than silently dropping it.
+    assert safe_filename_part("   ") == "___"
+    # Non-strings short-circuit to "unknown" (no exception).
+    assert safe_filename_part(None) == "unknown"  # type: ignore[arg-type]
+    assert safe_filename_part(123) == "unknown"  # type: ignore[arg-type]
+    # Slashes (path traversal) get replaced, not kept verbatim.
+    assert "/" not in safe_filename_part("///")
+    assert "\\" not in safe_filename_part("\\\\\\")
+
+
+def test_safe_filename_part_strips_leading_trailing_dots() -> None:
+    """Leading/trailing dots are stripped to avoid hidden files / .. escapes."""
+    from app.utils.network import safe_filename_part
+
+    assert safe_filename_part("...example.com...") == "example.com"
+    assert not safe_filename_part(".bashrc").startswith(".")
+
+
+def test_resolve_under_handoffs_rejects_traversal(tmp_path: Path) -> None:
+    """Path traversal escapes from HANDOFFS_DIR return 403."""
+    from fastapi import HTTPException
+
+    from app.routes.handoff import _resolve_under_handoffs
+    from app.config import Settings
+
+    cfg = Settings(HANDOFFS_DIR=str(tmp_path / "handoffs"))
+    (tmp_path / "handoffs").mkdir()
+
+    # Inside root → resolved Path returned
+    inside = tmp_path / "handoffs" / "abc.json"
+    assert _resolve_under_handoffs(str(inside), cfg) == inside.resolve()
+
+    # Outside root (parent traversal) → 403
+    evil = tmp_path / "handoffs" / ".." / "secret.json"
+    with pytest.raises(HTTPException) as exc:
+        _resolve_under_handoffs(str(evil), cfg)
+    assert exc.value.status_code == 403
+
+
+def test_resolve_under_handoffs_rejects_absolute_escape(tmp_path: Path) -> None:
+    """Absolute paths outside HANDOFFS_DIR return 403."""
+    from fastapi import HTTPException
+
+    from app.routes.handoff import _resolve_under_handoffs
+    from app.config import Settings
+
+    cfg = Settings(HANDOFFS_DIR=str(tmp_path / "handoffs"))
+    (tmp_path / "handoffs").mkdir()
+
+    with pytest.raises(HTTPException) as exc:
+        _resolve_under_handoffs("/etc/passwd", cfg)
+    assert exc.value.status_code == 403

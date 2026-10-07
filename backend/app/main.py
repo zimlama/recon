@@ -59,6 +59,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     """Application factory."""
+    # ---- CORS startup validation (fail closed) ----
+    # Browsers reject responses whose Access-Control-Allow-Origin is "*"
+    # when credentials are enabled. Allowing that combo silently in the
+    # backend is misleading and dangerous. Refuse to boot instead.
+    if "*" in settings.cors_origins_list:
+        raise RuntimeError(
+            "CORS misconfiguration: '*' is not a permitted value in "
+            "CORS_ORIGINS when allow_credentials=True. Use an explicit "
+            "allowlist of origins."
+        )
+
     app = FastAPI(
         title="zimlama recon API",
         description="Phase 1 ethical hacking reconnaissance framework — backend API",
@@ -69,13 +80,13 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS middleware
+    # CORS middleware — explicit allowlist (no wildcard methods/headers).
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Content-Type", "Authorization"],
     )
 
     # Audit middleware

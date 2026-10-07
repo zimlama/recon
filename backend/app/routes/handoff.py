@@ -2,18 +2,40 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
+from app.config import Settings, get_settings
 from app.database import get_db
 from app.handoff.exporter import export_handoff
 from app.handoff.schema import HandoffPacket
 from app.models import Handoff, Job
 from app.schemas import HandoffResponse, PaginatedResponse
+from app.utils.network import safe_filename_part
 
 router = APIRouter()
+settings = get_settings()
+
+
+def _resolve_under_handoffs(raw_path: str, cfg: Settings) -> Path:
+    """Resolve a handoff file path and assert it lives under HANDOFFS_DIR.
+
+    Guards against path traversal in stored handoff paths: a crafted
+    ``handoff.file_path`` (or symlink pointing outside the configured root)
+    is rejected with 403 instead of being streamed back to the client.
+    """
+    handoffs_root = Path(cfg.HANDOFFS_DIR).resolve()
+    resolved = Path(raw_path).resolve()
+    if not resolved.is_relative_to(handoffs_root):
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden",
+        )
+    return resolved
 
 
 @router.get("/jobs/{job_id}/handoff", response_model=HandoffPacket)
@@ -61,15 +83,14 @@ async def download_handoff(
     if not handoff or not handoff.file_path:
         raise HTTPException(status_code=500, detail="Handoff generation failed")
 
-    from pathlib import Path
-    path = Path(handoff.file_path)
+    path = _resolve_under_handoffs(handoff.file_path, settings)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Handoff file not found on disk")
 
     return FileResponse(
         path=path,
         media_type="application/json",
-        filename=f"handoff-{job.target}-{job_id[:8]}.json",
+        filename=f"handoff-{safe_filename_part(job.target)}-{job_id[:8]}.json",
     )
 
 

@@ -1,12 +1,17 @@
-"""IP address validation — SSRF defense.
+"""Network + filesystem safety helpers — SSRF defense, filename sanitization.
 
 Used by modules to ensure target IPs are public (not RFC 1918, loopback,
 link-local, multicast, reserved). Defense-in-depth for SSRF.
+
+Also provides filename helpers to defend against header-injection / CRLF
+attacks when constructing Content-Disposition filenames from user-controlled
+fields (e.g. job.target).
 """
 
 from __future__ import annotations
 
 import ipaddress
+import re
 from typing import Iterable
 
 
@@ -65,3 +70,32 @@ def is_public_ip(ip_str: str) -> bool:
 def filter_public_ips(ip_strings: Iterable[str]) -> list[str]:
     """Return only the public (routable) IPs from an iterable of strings."""
     return [ip for ip in ip_strings if is_public_ip(ip)]
+
+
+# Allow only filename-safe chars: ASCII letters, digits, dot, underscore, dash.
+# Anything else (whitespace, CRLF, '/', '\\', ':', ';', quotes, non-ASCII,
+# control chars, etc.) is collapsed to '_'. Cap length to keep the final
+# filename within typical filesystem limits and avoid header-bloat attacks.
+_FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]")
+_FILENAME_MAX_LEN = 63
+
+
+def safe_filename_part(s: str) -> str:
+    """Return a filename-safe version of ``s``.
+
+    - Replaces any character outside ``[A-Za-z0-9._-]`` with ``_``.
+    - Strips leading/trailing whitespace and dots (defense against ``..``,
+      leading-dot hidden files, and stray whitespace in Content-Disposition).
+    - Caps the result at 63 chars.
+    - Returns ``"unknown"`` if the input is empty or fully stripped.
+
+    Use this whenever you embed user-controlled data (e.g. ``job.target``)
+    into a ``Content-Disposition`` filename to prevent CRLF / header
+    injection and path traversal via crafted inputs.
+    """
+    if not isinstance(s, str):
+        return "unknown"
+    cleaned = _FILENAME_SAFE_RE.sub("_", s).strip().strip(".")
+    if not cleaned:
+        return "unknown"
+    return cleaned[:_FILENAME_MAX_LEN]
