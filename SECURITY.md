@@ -1,5 +1,7 @@
 # Security Policy
 
+> Applies to [v0.1.0](https://github.com/zimlama/recon/releases/tag/v0.1.0) and later. The tool is Apache-2.0 licensed — see [LICENSE](LICENSE).
+
 ## Authorized Use Only
 
 `zimlama/recon` is a security testing tool. It sends real network requests to your target — both passive (third-party APIs) and active (when Tier 3 modules are explicitly enabled).
