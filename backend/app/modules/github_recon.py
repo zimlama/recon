@@ -89,11 +89,11 @@ class GitHubReconModule(BaseReconModule):
         except Exception as e:  # noqa: BLE001
             errors.append(f"GitHub commit search failed: {e!s}")
 
-        # 3. Run gitleaks if installed
+        # 3. Check if gitleaks is available (does NOT actually run it — see docstring)
         gitleaks_findings = await self._run_gitleaks(target)
         if gitleaks_findings:
             findings.extend(gitleaks_findings)
-            sources_used.append("gitleaks")
+            sources_used.append("gitleaks_check")
 
         # Dedupe
         unique = self._dedupe(findings)
@@ -262,9 +262,12 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         return findings
 
     async def _run_gitleaks(self, domain: str) -> list[Finding]:
-        """Run gitleaks if installed. Note: gitleaks works on a local repo path,
-        so for remote GitHub this is mostly useful if you have a local clone.
-        Here we just check if it's installed and document that.
+        """Check if gitleaks is installed. Does NOT actually run gitleaks.
+
+        NOTE: gitleaks requires a local repo to scan, which we don't have
+        from a domain name. For remote GitHub code, we'd need to clone
+        repos first (out of scope for this passive module). This method
+        only reports gitleaks availability so operators know the tool exists.
         """
         if not shutil.which("gitleaks"):
             return []

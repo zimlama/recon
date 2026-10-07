@@ -124,10 +124,13 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
     # ---- Private helpers ----
 
     async def _query_rdap(self, domain: str) -> dict[str, Any] | None:
-        """Query RDAP for the domain. Returns parsed JSON or None on failure."""
+        """Query RDAP for the domain. Returns parsed JSON or None on failure.
+
+        SSRF defense: follow_redirects=False to prevent pivoting.
+        """
         url = RDAP_BOOTSTRAP_URL.format(domain=domain)
         try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
                 response = await client.get(
                     url,
                     headers={"Accept": "application/rdap+json"},

@@ -71,8 +71,8 @@ class SOCMINTModule(BaseReconModule):
             if isinstance(result, Exception):
                 errors.append(f"{platform_name} check failed: {result!s}")
                 continue
-            if result is None:
-                continue  # platform not found (404 etc.)
+            if result is None or not isinstance(result, str):
+                continue  # platform not found or mock returned non-string
             findings.append(
                 Finding(
                     type=FindingType.SOCIAL_PROFILE,
@@ -101,7 +101,7 @@ For each social profile, classify as:
 - CONFIRMED: real, active, relevant to engagement
 - LIKELY: real but possibly outdated
 - FALSE_POSITIVE: sock puppet, unrelated person, fake
-- SUSPENSED: data quality uncertain
+- SUSPECTED: data quality uncertain (note: NOT "SUSPENSED")
 
 Enrich each with:
 - platform: linkedin, github, twitter, etc.
@@ -126,12 +126,15 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
 
         Returns the URL if found, None if not (404 etc.).
         Uses HTTP HEAD first (less intrusive), then GET if HEAD is unsupported.
+
+        SSRF defense: follow_redirects=False to prevent pivoting to internal
+        services via redirect chain. Operator must use authorized targets.
         """
         url = url_template.format(target=target)
         try:
             async with httpx.AsyncClient(
                 timeout=HTTP_TIMEOUT,
-                follow_redirects=True,
+                follow_redirects=False,
                 headers={"User-Agent": USER_AGENT},
             ) as client:
                 # HEAD first (less intrusive)

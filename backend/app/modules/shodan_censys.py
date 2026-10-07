@@ -50,10 +50,11 @@ class ShodanCensysModule(BaseReconModule):
         """Query Shodan InternetDB + Censys for the target.
 
         Strategy:
-        1. Resolve target to IP(s) via DNS (we already have dns_enum findings)
-        2. Query Shodan InternetDB for each IP (free, no key)
-        3. If Censys API keys are set, query Censys too (free tier)
-        4. Convert each result to a finding
+        1. Resolve target domain to IPs (we already have dns_enum findings)
+        2. Filter to IP range only (SSRF defense: no RFC 1918)
+        3. Query Shodan InternetDB for each IP (free, no key)
+        4. If Censys API keys are set, query Censys too (free tier)
+        5. Convert each result to a finding
         """
         target = self.validate_target_format(input.target)
         findings: list[Finding] = []
@@ -71,8 +72,20 @@ class ShodanCensysModule(BaseReconModule):
                 errors=errors,
             )
 
-        # 2. Query Shodan InternetDB for each IP
-        for ip in ips:
+        # 2. SSRF defense: only query public IPs
+        from app.utils.network import filter_public_ips
+        public_ips = filter_public_ips(ips)
+        if not public_ips:
+            errors.append(f"No public IPs found for {target} (all resolved IPs are private/reserved)")
+            return ModuleOutput(
+                module=self.name,
+                findings=findings,
+                duration_seconds=time.time() - start,
+                errors=errors,
+            )
+
+        # 3. Query Shodan InternetDB for each public IP (SSRF defense: no RFC 1918)
+        for ip in public_ips:
             try:
                 shodan_data = await self._query_shodan_internetdb(ip)
                 if shodan_data:
@@ -80,10 +93,10 @@ class ShodanCensysModule(BaseReconModule):
             except Exception as e:  # noqa: BLE001
                 errors.append(f"Shodan InternetDB query for {ip} failed: {e!s}")
 
-        # 3. Query Censys if keys are set
+        # 4. Query Censys if keys are set (also only public IPs)
         settings = get_settings()
         if settings.CENSYS_API_ID and settings.CENSYS_API_SECRET:
-            for ip in ips:
+            for ip in public_ips:
                 try:
                     censys_data = await self._query_censys(ip, settings.CENSYS_API_ID, settings.CENSYS_API_SECRET)
                     if censys_data:
@@ -102,6 +115,8 @@ class ShodanCensysModule(BaseReconModule):
             duration_seconds=time.time() - start,
             errors=errors,
         )
+
+    # ---- AI prompt (used by /system/ AI validation) ----
 
     def get_ai_prompt(self) -> str:
         """System prompt for AI validation of Shodan/Censys findings."""

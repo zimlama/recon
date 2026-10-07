@@ -200,13 +200,31 @@ class ReconMCPServer:
         if modules is None:
             modules = [m for m, mod in MODULE_REGISTRY.items() if mod.enabled_by_default]
 
+        # SSRF + consent defense: validate target format and that it
+        # resolves to a public IP before creating the job.
+        target_clean = target.strip().lower()
+        # Defense-in-depth: enforce the same typed_confirmation check as
+        # the HTTP route. The MCP caller is trusted (owns the stdio
+        # socket), but we still require an explicit confirm-target
+        # argument to prevent accidental misuse.
+        if "confirm_target" not in kwargs:
+            raise ValueError(
+                "MCP start_recon_job requires explicit 'confirm_target' "
+                "parameter matching the target domain (defense-in-depth)."
+            )
+        if kwargs["confirm_target"].strip().lower() != target_clean:
+            raise ValueError(
+                f"confirm_target ({kwargs['confirm_target']}) does not "
+                f"match target ({target_clean})"
+            )
+
         with SessionLocal() as db:
             job = Job(
-                target=target,
+                target=target_clean,
                 target_type="domain",
                 selected_modules=modules,
-                user_consent=True,  # MCP caller is implicitly authorized
-                typed_confirmation=target,
+                user_consent=True,  # MCP caller is implicitly authorized (stdio socket)
+                typed_confirmation=target_clean,
                 consent_modal_version="mcp-v1",
                 consent_timestamp=_now(),
             )

@@ -101,13 +101,73 @@ def test_get_module_unknown_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_all_modules_run_returns_module_output() -> None:
-    """Every module's run() returns a ModuleOutput (even if it's a stub)."""
+    """Every module's run() returns a ModuleOutput (even if it's a stub).
+
+    Network-dependent modules (Wayback CDX, Wayback Machine, metadata_analysis
+    exiftool subprocess, etc.) are patched to return empty results.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
     from app.modules.base import ModuleInput
     from app.modules.base import ModuleOutput
-    for name, module in MODULE_REGISTRY.items():
-        result = await module.run(ModuleInput(target="example.com"))
-        assert isinstance(result, ModuleOutput), f"{name} run() did not return ModuleOutput"
-        assert result.module == name, f"{name} returned wrong module name in output"
+
+    # Methods on each module that would otherwise hit live services
+    network_methods = (
+        "_query_wayback",
+        "_query_crtsh",
+        "_find_documents_via_wayback",
+        "_extract_metadata",  # metadata_analysis — returns dict|None
+        "_search_ahmia",
+        "_search_via_tor",
+        "_search_code",
+        "_search_commits",
+        "_query_shodan_internetdb",
+        "_query_censys",
+        "_query_pgp",
+        "_query_rdap",
+        "_query_whois",
+        "_check_platform",
+        "_search_serpapi",
+        "_search_github_api",
+    )
+
+    # Subprocess-executing modules need create_subprocess_exec mocked
+    subprocess_modules = {
+        "wayback_machine", "whois_rdap", "metadata_analysis",
+        "email_harvesting", "employee_osint", "subdomain_enum",
+    }
+
+    original_methods: dict[tuple[str, str], object] = {}
+    try:
+        for name, module in MODULE_REGISTRY.items():
+            for method_name in network_methods:
+                if hasattr(module, method_name):
+                    original_methods[(name, method_name)] = getattr(module, method_name)
+                    setattr(module, method_name, AsyncMock(return_value=[]))
+
+            if name in subprocess_modules:
+                # Save the original subprocess exec
+                original_methods[(name, "subprocess_exec")] = (
+                    __import__("asyncio").create_subprocess_exec
+                )
+                mock_exec = MagicMock()
+                mock_proc = MagicMock()
+                mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+                mock_exec.return_value = mock_proc
+                __import__("asyncio").create_subprocess_exec = mock_exec
+
+        for name, module in MODULE_REGISTRY.items():
+            result = await module.run(ModuleInput(target="example.com"))
+            assert isinstance(result, ModuleOutput), f"{name} run() did not return ModuleOutput"
+            assert result.module == name, f"{name} returned wrong module name in output"
+    finally:
+        # Restore all originals
+        for name, module in MODULE_REGISTRY.items():
+            for method_name in network_methods:
+                if (name, method_name) in original_methods:
+                    setattr(module, method_name, original_methods[(name, method_name)])
+            if name in subprocess_modules and (name, "subprocess_exec") in original_methods:
+                __import__("asyncio").create_subprocess_exec = original_methods[(name, "subprocess_exec")]
 
 
 @pytest.mark.asyncio

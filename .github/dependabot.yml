@@ -1,43 +1,49 @@
+# Dependabot configuration for zimlama/recon
+# Auto-merge patch updates; review minor + major updates manually.
+
 version: 2
+
 updates:
-  - package-ecosystem: "pip"
-    directory: "/backend"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    groups:
-      backend-deps:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "npm"
-    directory: "/frontend"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    groups:
-      frontend-deps:
-        patterns:
-          - "*"
-
+  # GitHub Actions — keep on patch, review minor/major
   - package-ecosystem: "github-actions"
     directory: "/.github/workflows"
     schedule:
       interval: "weekly"
       day: "monday"
     groups:
-      github-actions:
+      patch:
         patterns:
           - "*"
+        update-types:
+          - "patch"
+      minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
 
-  - package-ecosystem: "docker"
-    directory: "/"
+  # Frontend npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/frontend"
     schedule:
       interval: "weekly"
       day: "monday"
     groups:
-      docker:
+      patch:
         patterns:
-          - "Dockerfile"
-          - "**/Dockerfile"
-          - "docker-compose.yml"
+          - "*"
+        update-types:
+          - "patch"
+
+  # Backend pip dependencies
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+    groups:
+      patch:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"

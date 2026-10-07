@@ -1,0 +1,18 @@
+# CODEOWNERS for zimlama/recon
+# Auto-assigns reviewers and notifies on PRs.
+
+# Default owner for everything
+* @zimlama
+
+# Frontend requires frontend review
+/frontend/   @zimlama
+
+# Backend requires backend review
+/backend/    @zimlama
+
+# CI/CD changes need explicit review
+/.github/    @zimlama
+
+# Documentation can be merged without review (markdown)
+/docs/       @zimlama
+/*.md        @zimlama

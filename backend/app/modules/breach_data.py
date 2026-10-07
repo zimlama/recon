@@ -21,7 +21,6 @@ import httpx
 from app.config import get_settings
 from app.models import ModuleTier
 from app.modules.base import BaseReconModule, Finding, FindingType, ModuleInput, ModuleOutput
-from app.modules.email_harvesting import EmailHarvestingModule
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +67,7 @@ class BreachDataModule(BaseReconModule):
                 module=self.name,
                 findings=findings,
                 duration_seconds=time.time() - start,
-                errors=["No emails found to check (try running email_harvesting first)"],
+                errors=["No role-based patterns to check (configure emails via BREACH_EMAILS env var or run email_harvesting first)"],
             )
 
         # 2. Check each email via HIBP k-anonymity

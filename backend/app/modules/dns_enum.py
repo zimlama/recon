@@ -300,9 +300,12 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                             },
                         )
                     )
-            except (TimeoutError, Exception):  # noqa: BLE001
-                # AXFR refused or failed — expected, not an error
-                pass
+            except TimeoutError:
+                # AXFR timed out — common with slow nameservers
+                logger.debug("axfr_timeout", nameserver=ns_host)
+            except dns.exception.FormError:
+                # AXFR refused — expected on most servers
+                logger.debug("axfr_refused", nameserver=ns_host)
 
         return findings
 

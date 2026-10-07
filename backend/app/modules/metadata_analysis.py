@@ -143,7 +143,8 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
             "limit": 50,
         }
         try:
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            # SSRF defense: follow_redirects=False
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False) as client:
                 response = await client.get(WAYBACK_CDX_URL, params=params)
                 if response.status_code != 200:
                     return []
@@ -153,7 +154,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
 
         if not data or len(data) < 2:
             return []
-        # First row is header
+
         header = data[0]
         try:
             original_idx = header.index("original")
@@ -169,6 +170,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                 urls.append(url)
         return urls
 
+
     async def _extract_metadata(self, url: str) -> dict[str, Any] | None:
         """Extract metadata from a document URL.
 
@@ -176,6 +178,9 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         1. Try `exiftool` if installed (best for PDFs, Office docs, images)
         2. Fall back to python-docx (for .docx)
         3. Fall back to pypdf (for .pdf)
+
+        SSRF defense: follow_redirects=False to prevent pivoting to
+        internal services via HTTP redirect chain.
         """
         if shutil.which("exiftool"):
             return await self._extract_with_exiftool(url)
@@ -189,12 +194,15 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         return None
 
     async def _extract_with_exiftool(self, url: str) -> dict[str, Any] | None:
-        """Download URL to temp file, run exiftool, parse JSON output."""
+        """Download URL to temp file, run exiftool, parse JSON output.
+
+        SSRF defense: follow_redirects=False.
+        """
         import httpx
         import tempfile
 
         try:
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False) as client:
                 response = await client.get(url)
                 if response.status_code != 200:
                     return None
@@ -388,4 +396,4 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         return ".bin"
 
 
-__all__ = ["MetadataAnalysisModule"]
+    __all__ = ["MetadataAnalysisModule"]
