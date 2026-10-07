@@ -33,7 +33,7 @@
 │   │  └─ RateLimiter: token bucket per (target, mod)│        │
 │   └────────────────────────────────────────────────┘        │
 │   ┌────────────────────────────────────────────────┐        │
-│   │  Modules (14) — BaseReconModule ABC            │        │
+│   │  Modules (14) — BaseReconModule ABC        │        │
 │   │  Tier 1 (6): whois, dns, subdomain, ct,        │        │
 │   │              wayback, email                    │        │
 │   │  Tier 2 (4): shodan, github, metadata, dorking│        │
@@ -82,7 +82,7 @@ zimlama-recon/
 │   │   ├── cli.py              # Typer CLI
 │   │   ├── audit/              # Audit middleware
 │   │   ├── orchestrator/       # Job runner, AI validator, rate limiter
-│   │   ├── modules/            # 14 recon modules
+│   │   ├── modules/            # 14 recon modules + 1 aggregator (person_dossier, on developer branch)
 │   │   ├── llm/                # MiniMax M3 client + prompts
 │   │   ├── handoff/            # Public handoff contract
 │   │   ├── routes/             # FastAPI routers
