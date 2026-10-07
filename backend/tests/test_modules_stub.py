@@ -114,8 +114,8 @@ async def test_all_modules_run_returns_module_output() -> None:
 async def test_stub_modules_have_not_implemented_error() -> None:
     """Stub modules (Day 1 placeholders) report 'Not implemented' in errors."""
     from app.modules.base import ModuleInput
-    # Modules that are still stubs (not yet implemented beyond Day 1)
-    stubs_at_day2 = {
+    # Modules that are still stubs (Day 3: only Tier 2 + Tier 3 remain)
+    stubs_at_day3 = {
         "breach_data",
         "socmint",
         "employee_osint",
@@ -124,11 +124,8 @@ async def test_stub_modules_have_not_implemented_error() -> None:
         "github_recon",
         "metadata_analysis",
         "google_dorking",
-        "email_harvesting",
-        "wayback_machine",
-        "certificate_transparency",
     }
-    for name in stubs_at_day2:
+    for name in stubs_at_day3:
         if name in MODULE_REGISTRY:
             module = MODULE_REGISTRY[name]
             result = await module.run(ModuleInput(target="example.com"))
