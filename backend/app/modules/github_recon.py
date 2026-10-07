@@ -161,8 +161,30 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                     url, params=params, headers=self._get_headers()
                 )
                 if response.status_code == 403:
-                    # Rate limit or auth required
-                    logger.debug("github_code_search_403", domain=domain)
+                    # Rate limit or auth required — parse GitHub rate-limit headers
+                    # so we can warn clearly with the reset time instead of silent failure.
+                    remaining = response.headers.get("X-RateLimit-Remaining")
+                    reset = response.headers.get("X-RateLimit-Reset")
+                    if remaining == "0" and reset:
+                        try:
+                            reset_dt = time.strftime(
+                                "%Y-%m-%d %H:%M:%S", time.gmtime(int(reset))
+                            )
+                        except (ValueError, TypeError, OSError):
+                            reset_dt = str(reset)
+                        logger.warning(
+                            "github_rate_limited",
+                            extra={"reset_at_utc": reset_dt},
+                        )
+                    else:
+                        logger.warning(
+                            "github_403",
+                            extra={
+                                "remaining": remaining,
+                                "reset": reset,
+                                "domain": domain,
+                            },
+                        )
                     return []
                 if response.status_code != 200:
                     logger.debug("github_code_search_non_200", status=response.status_code)
@@ -232,7 +254,30 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                     url, params=params, headers=self._get_headers()
                 )
                 if response.status_code == 403:
-                    logger.debug("github_commit_search_403", domain=domain)
+                    # Rate limit or auth required — parse GitHub rate-limit headers
+                    # so we can warn clearly with the reset time instead of silent failure.
+                    remaining = response.headers.get("X-RateLimit-Remaining")
+                    reset = response.headers.get("X-RateLimit-Reset")
+                    if remaining == "0" and reset:
+                        try:
+                            reset_dt = time.strftime(
+                                "%Y-%m-%d %H:%M:%S", time.gmtime(int(reset))
+                            )
+                        except (ValueError, TypeError, OSError):
+                            reset_dt = str(reset)
+                        logger.warning(
+                            "github_rate_limited",
+                            extra={"reset_at_utc": reset_dt},
+                        )
+                    else:
+                        logger.warning(
+                            "github_403",
+                            extra={
+                                "remaining": remaining,
+                                "reset": reset,
+                                "domain": domain,
+                            },
+                        )
                     return []
                 if response.status_code != 200:
                     return []

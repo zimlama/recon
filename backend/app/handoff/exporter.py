@@ -30,6 +30,7 @@ from app.models import (
     Finding,
     FindingType,
     Handoff,
+    HandoffStatus,
     Job,
     ModuleRun,
 )
@@ -42,6 +43,14 @@ async def export_handoff(job_id: str) -> HandoffPacket:
     """Build a HandoffPacket from a completed job and persist it.
 
     Returns the HandoffPacket (also written to disk + DB).
+
+    Side effects:
+      - Marks `Job.handoff_status = PENDING` on entry so a partial export
+        (crash between mark and write) leaves the DB in a recoverable
+        state rather than the ambiguous NOT_GENERATED.
+      - Marks `Job.handoff_status = GENERATED` on success.
+      - Leaves the status untouched on failure — the caller (`bridge.py`)
+        is responsible for setting FAILED so we don't double-write.
     """
     with SessionLocal() as db:
         job = db.get(Job, job_id)
@@ -49,6 +58,10 @@ async def export_handoff(job_id: str) -> HandoffPacket:
             raise ValueError(f"Job {job_id} not found")
         if not job.completed_at:
             raise ValueError(f"Job {job_id} not yet completed")
+
+        # Mark PENDING up-front so a crash mid-export is observable.
+        job.handoff_status = HandoffStatus.PENDING
+        db.commit()
 
         packet = _build_packet(db, job)
 
@@ -59,6 +72,21 @@ async def export_handoff(job_id: str) -> HandoffPacket:
         handoffs_dir.mkdir(parents=True, exist_ok=True)
         handoff_id = f"h-{job.completed_at.strftime('%Y%m%d')}-{job.id[:8]}"
         file_path = handoffs_dir / f"{handoff_id}.json"
+
+        # SSRF defense (defense in depth): verify the resolved path is under
+        # the configured HANDOFFS_DIR. The route layer guards against caller-
+        # controlled job_id, but this writer-level check protects against any
+        # future code path that constructs file_path from untrusted sources.
+        handoffs_dir_resolved = Path(settings.HANDOFFS_DIR).resolve()
+        file_path_resolved = file_path.resolve()
+        try:
+            file_path_resolved.relative_to(handoffs_dir_resolved)
+        except ValueError as e:
+            raise ValueError(
+                f"Refusing to write handoff file outside {handoffs_dir_resolved}: "
+                f"{file_path_resolved} ({e})"
+            ) from e
+
         json_data = json.dumps(
             packet.model_dump(mode="json"), indent=2, ensure_ascii=False
         )
@@ -90,6 +118,10 @@ async def export_handoff(job_id: str) -> HandoffPacket:
         else:
             existing.packet = packet.model_dump(mode="json")
             existing.file_path = str(file_path)
+        # Mark GENERATED only after both the file and the DB row are committed.
+        # If we crash before this line, the next startup sweeper (or a manual
+        # re-export) can detect handoff_status=PENDING and recover.
+        job.handoff_status = HandoffStatus.GENERATED
         db.commit()
 
     logger.info("handoff_exported", job_id=job_id, file_path=str(file_path))
