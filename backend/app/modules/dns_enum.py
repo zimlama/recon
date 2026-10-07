@@ -96,10 +96,12 @@ class DNSEnumModule(BaseReconModule):
                 # Domain doesn't exist — stop early
                 errors.append(f"NXDOMAIN for {target}")
                 break
-            except dns.resolver.NoNameservers:
-                errors.append(f"No nameservers available for {label} query")
-            except dns.exception.Timeout:
-                errors.append(f"Timeout querying {label} records")
+            except (dns.resolver.NoNameservers, dns.exception.Timeout) as e:
+                # If the resolver chain is dead or one query hangs, every
+                # remaining record type will fail the same way — stop now
+                # to avoid piling up work in the executor queue.
+                errors.append(f"DNS query failed at {label}: {e!s}")
+                break
             except Exception as e:  # noqa: BLE001
                 errors.append(f"{label} query failed: {e!s}")
 
@@ -170,10 +172,11 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                 answers = resolver.resolve(domain, rdatatype, raise_on_no_answer=False)
             except dns.resolver.NXDOMAIN:
                 raise  # propagate to caller
-            except dns.resolver.NoNameservers:
-                raise
-            except dns.exception.Timeout:
-                raise
+            except (dns.resolver.NoNameservers, dns.exception.Timeout) as e:
+                logger.debug(
+                    "dns_query_terminated", rdatatype=rdatatype, error=str(e)
+                )
+                raise  # propagate so run() can break early
 
             for rdata in answers:
                 metadata: dict[str, Any] = {}

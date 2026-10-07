@@ -66,6 +66,21 @@ class JobRunner:
             if not job:
                 raise ValueError(f"Job {job_id} not found")
 
+            # Idempotency: refuse re-run for terminal states.
+            # Calling run_job() twice on a finished job used to silently
+            # create duplicate ModuleRuns and corrupt findings counts.
+            if job.status in (JobStatus.COMPLETED, JobStatus.CANCELLED, JobStatus.FAILED):
+                logger.info(
+                    "job_already_terminal",
+                    job_id=job_id,
+                    status=job.status.value,
+                )
+                return
+            # Another worker is already running this job — don't double-execute.
+            if job.status == JobStatus.RUNNING:
+                logger.warning("job_already_running", job_id=job_id)
+                return
+
             job.status = JobStatus.RUNNING
             job.started_at = _now()
             db.commit()
@@ -75,13 +90,43 @@ class JobRunner:
 
         logger.info("job_started", job_id=job_id, target=target, modules=selected_modules)
 
-        # Run modules in parallel
+        # Run modules in parallel (with per-module timeout — audit resilience)
         module_tasks = [
-            self._run_single_module(job_id, module_name, target)
+            asyncio.wait_for(
+                self._run_single_module(job_id, module_name, target),
+                timeout=600.0,  # 10 minutes max per module
+            )
             for module_name in selected_modules
             if module_name in self.module_registry
         ]
         await asyncio.gather(*module_tasks, return_exceptions=True)
+
+        # If every module failed or timed out, mark the job FAILED and stop early
+        # (avoids running AI validation / handoff generation on empty results).
+        with SessionLocal() as db:
+            job = db.get(Job, job_id)
+            if job:
+                completed_count = (
+                    db.query(ModuleRun)
+                    .filter(
+                        ModuleRun.job_id == job_id,
+                        ModuleRun.status == ModuleStatus.COMPLETED,
+                    )
+                    .count()
+                )
+                if completed_count == 0 and len(selected_modules) > 0:
+                    job.status = JobStatus.FAILED
+                    job.error_message = "All modules failed or timed out"
+                    job.completed_at = _now()
+                    if job.started_at:
+                        job.duration_seconds = (
+                            job.completed_at - job.started_at
+                        ).total_seconds()
+                    db.commit()
+                    logger.error(
+                        "job_all_modules_failed", job_id=job_id, target=target
+                    )
+                    return
 
         # Validate with AI
         with SessionLocal() as db:
@@ -121,19 +166,35 @@ class JobRunner:
             logger.error("unknown_module", module=module_name)
             return None
 
-        # Create ModuleRun record
-        with SessionLocal() as db:
-            module_run = ModuleRun(
-                job_id=job_id,
-                module_name=module_name,
-                module_tier=module.tier,
-                status=ModuleStatus.RUNNING,
-                started_at=_now(),
+        # Create ModuleRun record. Wrap in try/except: if the insert fails,
+        # asyncio.gather(return_exceptions=True) would otherwise swallow the
+        # exception silently and we'd lose the entire module's record.
+        start = time.time()
+        try:
+            with SessionLocal() as db:
+                module_run = ModuleRun(
+                    job_id=job_id,
+                    module_name=module_name,
+                    module_tier=module.tier,
+                    status=ModuleStatus.RUNNING,
+                    started_at=_now(),
+                )
+                db.add(module_run)
+                db.commit()
+                db.refresh(module_run)
+                module_run_id = module_run.id
+        except Exception as e:  # noqa: BLE001
+            logger.exception(
+                "module_run_creation_failed",
+                module=module_name,
+                error=str(e),
             )
-            db.add(module_run)
-            db.commit()
-            db.refresh(module_run)
-            module_run_id = module_run.id
+            return ModuleOutput(
+                module=module_name,
+                findings=[],
+                duration_seconds=time.time() - start,
+                errors=[f"ModuleRun creation failed: {e!s}"],
+            )
 
         # Acquire rate limit
         await self.rate_limiter.acquire(target, module_name)

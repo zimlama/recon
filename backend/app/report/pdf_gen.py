@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
+import signal
 from pathlib import Path
 
 from app.config import get_settings
@@ -54,11 +56,24 @@ class PDFGenerator:
                 cwd=md_path.parent,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,  # child gets its own process group
             )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
             except asyncio.TimeoutError:
-                proc.kill()
+                # Kill the entire process group (npx spawns child processes),
+                # not just the parent — prevents leaked Chromium/node workers.
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    proc.kill()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
                 logger.error("pdf_conversion_timeout", md=str(md_path))
                 return None
 

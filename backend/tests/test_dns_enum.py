@@ -202,14 +202,14 @@ async def test_nxdomain_aborts_early(module: DNSEnumModule) -> None:
 
 
 @pytest.mark.asyncio
-async def test_timeout_recorded_as_error(module: DNSEnumModule) -> None:
-    """Timeout is recorded but doesn't crash the whole job."""
-    # Make the A query timeout, MX succeed
+async def test_timeout_aborts_remaining_record_types(module: DNSEnumModule) -> None:
+    """Timeout on one record type aborts the remaining record queries (resilience fix)."""
+    # A succeeds, then MX times out (loop breaks before TXT/CNAME/SOA/SRV/etc.)
     def _resolve(domain: str, rtype: int, **kwargs: object) -> MagicMock:
         if rtype == dns.rdatatype.A:
-            raise dns.exception.Timeout
+            return make_answer(make_rdata(dns.rdatatype.A, "1.2.3.4"))
         if rtype == dns.rdatatype.MX:
-            return make_answer(make_rdata(dns.rdatatype.MX, "mail.example.com"))
+            raise dns.exception.Timeout
         raise dns.resolver.NoAnswer
 
     resolver = MagicMock()
@@ -218,10 +218,12 @@ async def test_timeout_recorded_as_error(module: DNSEnumModule) -> None:
     with patch.object(module, "_build_resolver", return_value=resolver):
         result = await module.run(ModuleInput(target="example.com"))
 
-    # MX succeeded
-    assert any(f.source == "dns_mx" for f in result.findings)
-    # A timed out — recorded in errors
-    assert any("Timeout" in e or "timeout" in e.lower() for e in result.errors)
+    # A succeeded
+    assert any(f.source == "dns_a" for f in result.findings)
+    # MX timed out — loop broke before MX could be recorded
+    assert not any(f.source == "dns_mx" for f in result.findings)
+    # Timeout error recorded (dnspython formats it as "The DNS operation timed out")
+    assert any("timeout" in e.lower() or "timed out" in e.lower() for e in result.errors)
 
 
 # ---- AXFR ----
@@ -382,32 +384,33 @@ def test_format_rdata_soa(module: DNSEnumModule) -> None:
 # ---- NoNameservers error path ----
 
 @pytest.mark.asyncio
-async def test_no_nameservers_recorded_as_error(module: DNSEnumModule) -> None:
-    """When all resolvers fail, NoNameservers is recorded but module continues."""
+async def test_no_nameservers_aborts_remaining_record_types(module: DNSEnumModule) -> None:
+    """When all resolvers fail, NoNameservers is recorded and the loop breaks early."""
     resolver = MagicMock()
     resolver.resolve = MagicMock(side_effect=dns.resolver.NoNameservers("all resolvers down"))
 
     with patch.object(module, "_build_resolver", return_value=resolver):
         result = await module.run(ModuleInput(target="example.com"))
 
-    # Errors recorded for each record type
-    assert any("No nameservers" in e for e in result.errors)
+    # One error recorded (the rest of the loop is short-circuited)
+    assert len(result.errors) == 1
+    assert "DNS query failed at" in result.errors[0]
     # No findings, but module didn't crash
     assert result.findings == []
 
 
 @pytest.mark.asyncio
 async def test_query_records_propagates_no_nameservers(module: DNSEnumModule) -> None:
-    """NoNameservers in inner _query_records propagates as error."""
+    """NoNameservers in inner _query_records propagates and triggers early break."""
     resolver = MagicMock()
     resolver.resolve = MagicMock(side_effect=dns.resolver.NoNameservers("all down"))
 
     with patch.object(module, "_build_resolver", return_value=resolver):
         result = await module.run(ModuleInput(target="example.com"))
 
-    # 8 record types * 1 error each = 8 errors mentioning nameservers
-    nameserver_errors = [e for e in result.errors if "nameservers" in e.lower()]
-    assert len(nameserver_errors) >= 1
+    # Exactly 1 error (loop broke after the first NoNameservers — audit fix)
+    assert len(result.errors) == 1
+    assert "DNS query failed at" in result.errors[0]
 
 
 @pytest.mark.asyncio

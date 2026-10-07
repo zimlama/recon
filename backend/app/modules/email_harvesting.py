@@ -16,8 +16,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -255,43 +257,47 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                     emails.add(email)
         return emails
 
-    async def _run_theharvester(self, domain: str) -> set[str]:
+    async def _run_theharvester(self, target: str) -> set[str]:
         """Run theHarvester if installed (subprocess)."""
         if not shutil.which("theHarvester"):
             return set()
+        # Use a unique temp file per invocation (prevents multi-tenant conflicts)
+        fd, output_path_str = tempfile.mkstemp(suffix=".xml", prefix="theharvester_")
+        os.close(fd)
+        output_path = Path(output_path_str)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "theHarvester",
-                "-d", domain,
-                "-b", "all",  # all sources
-                "-f", "/tmp/theharvester_output",
+                "-d", target,
+                "-b", "all",
+                "-f", output_path.stem,  # without extension
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _stdout, _stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=60
-            )
+            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
         except (TimeoutError, OSError) as e:
             logger.debug("theharvester_failed", error=str(e))
             return set()
 
-        # Parse the output file
-        output_path = Path("/tmp/theharvester_output.xml")  # noqa: S108
-        if not output_path.exists():
-            return set()
-
+        # Parse the output file (theHarvester appends .xml to the -f stem)
         emails: set[str] = set()
         try:
-            content = output_path.read_text(encoding="utf-8", errors="replace")
+            actual_path = Path(f"{output_path}.xml")
+            if not actual_path.exists():
+                actual_path = output_path
+            if not actual_path.exists():
+                return emails
+            content = actual_path.read_text(encoding="utf-8", errors="replace")
             for match in EMAIL_REGEX.finditer(content):
                 email = match.group(0).lower()
-                if email.endswith(f"@{domain.lower()}"):
+                if email.endswith(f"@{target.lower()}"):
                     emails.add(email)
         except Exception as e:  # noqa: BLE001
             logger.debug("theharvester_parse_failed", error=str(e))
         finally:
             try:
-                output_path.unlink()
+                output_path.unlink(missing_ok=True)
+                Path(f"{output_path}.xml").unlink(missing_ok=True)
             except OSError:
                 pass
         return emails
