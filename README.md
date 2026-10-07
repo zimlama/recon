@@ -2,6 +2,7 @@
 
 > **Self-hosted reconnaissance framework for web applications. Open source. AI-validated. Privacy-first.**
 
+[![Release](https://img.shields.io/github/v/release/zimlama/recon)](https://github.com/zimlama/recon/releases/latest)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![Next.js 14](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
@@ -15,7 +16,7 @@
 
 ## Features
 
-- **14 recon modules** across 3 tiers (passive, semi-passive, white-hat gated active)
+- **14 recon modules** across 3 tiers (passive, semi-passive, white-hat gated active) + 1 aggregator (`person_dossier` on developer branch)
 - **AI-validated findings** via MiniMax M3 (or any OpenAI-compatible provider)
 - **Modular architecture** — every module is a standalone Pydantic class, repairable in isolation
 - **Self-hosted** — single `install.sh` command, no SaaS dependency, no telemetry
@@ -24,6 +25,18 @@
 - **Professional reports** — Markdown + CSS-styled PDF with cover page and severity badges
 - **LATAM-aware** — disclaimer covers Colombia, Brasil, Mexico, Argentina, Chile, Peru
 - **Bilingual docs** — English + Spanish where relevant
+
+---
+
+## Quickstart (one command)
+
+```bash
+git clone https://github.com/zimlama/recon.git
+cd recon
+./install.sh  # Docker auto-installs on Linux/macOS
+```
+
+Open http://localhost:8080 in your browser.
 
 ---
 
