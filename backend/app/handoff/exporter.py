@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -50,17 +52,31 @@ async def export_handoff(job_id: str) -> HandoffPacket:
 
         packet = _build_packet(db, job)
 
-        # Write JSON file
+        # Write JSON file. Use a temp file + atomic rename so a crash
+        # mid-write never leaves a half-written JSON on disk that future
+        # readers would parse as corrupt.
         handoffs_dir = Path(settings.HANDOFFS_DIR)
         handoffs_dir.mkdir(parents=True, exist_ok=True)
         handoff_id = f"h-{job.completed_at.strftime('%Y%m%d')}-{job.id[:8]}"
         file_path = handoffs_dir / f"{handoff_id}.json"
-        file_path.write_text(
-            json.dumps(packet.model_dump(mode="json"), indent=2, ensure_ascii=False),
-            encoding="utf-8",
+        json_data = json.dumps(
+            packet.model_dump(mode="json"), indent=2, ensure_ascii=False
         )
+        fd, tmp_path = tempfile.mkstemp(suffix=".json.tmp", dir=handoffs_dir)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json_data)
+            os.replace(tmp_path, file_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
-        # Persist DB row
+        # Persist DB row. If the DB write fails, the JSON file is already
+        # on disk but the Handoff row doesn't exist — that's recoverable
+        # by re-running export_handoff (idempotent), so we let it raise.
         existing = db.query(Handoff).filter(Handoff.job_id == job_id).first()
         if existing is None:
             db.add(

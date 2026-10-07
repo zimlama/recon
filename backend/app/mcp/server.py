@@ -43,12 +43,18 @@ class ReconMCPServer:
             "get_report_path": self.get_report_path,
             "list_modules": self.list_modules,
         }
+        # Retention + graceful shutdown for background recon jobs. Without
+        # this, asyncio.create_task() is fire-and-forget and the task is
+        # GC'd if the MCP server process shuts down (e.g. on stdin EOF or
+        # SIGTERM), leaving the job stuck in RUNNING.
+        self._running_tasks: dict[str, asyncio.Task] = {}
+        self._shutdown_event = asyncio.Event()
 
     async def run(self) -> None:
         """Run the stdio MCP server loop."""
         logger.info("mcp_server_starting")
-        while True:
-            try:
+        try:
+            while not self._shutdown_event.is_set():
                 line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
                 if not line:
                     break
@@ -56,22 +62,11 @@ class ReconMCPServer:
                 response = await self.handle_request(request)
                 sys.stdout.write(json.dumps(response) + "\n")
                 sys.stdout.flush()
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.exception("mcp_protocol_error", error=str(e))
-                error_response = {
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32700, "message": f"Parse error: {e}"},
-                }
-                sys.stdout.write(json.dumps(error_response) + "\n")
-                sys.stdout.flush()
-            except Exception as e:  # noqa: BLE001
-                logger.exception("mcp_internal_error", error=str(e))
-                error_response = {
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32603, "message": f"Internal error: {e}"},
-                }
-                sys.stdout.write(json.dumps(error_response) + "\n")
-                sys.stdout.flush()
+        except asyncio.CancelledError:
+            await self.shutdown()
+            raise
+        finally:
+            await self.shutdown()
 
     async def handle_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """Handle a single MCP request."""
@@ -173,11 +168,20 @@ class ReconMCPServer:
                     "id": request_id,
                     "result": {"content": [{"type": "text", "text": json.dumps(result, default=str)}]},
                 }
-            except Exception as e:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
+                # Never leak the raw exception text to MCP clients: it can
+                # carry SQL fragments, file paths, secrets, stack frames,
+                # and other internal details. Log the full traceback
+                # server-side and return a generic, opaque message.
+                logger.exception("tool %s failed", tool_name)
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "error": {"code": -32603, "message": f"Tool error: {e}"},
+                    "error": {
+                        "code": -32603,
+                        "message": "Internal error (see server logs)",
+                        "tool": tool_name,
+                    },
                 }
 
         return {
@@ -233,24 +237,12 @@ class ReconMCPServer:
             db.refresh(job)
             job_id = job.id
 
-        # Trigger execution in background
-        from app.llm.client import LLMClient
-        from app.orchestrator.ai_validator import AIValidator
-        from app.orchestrator.job_runner import JobRunner
-
-        async def _run() -> None:
-            llm_client = LLMClient()
-            try:
-                ai_validator = AIValidator(llm_client=llm_client)
-                runner = JobRunner(
-                    module_registry=MODULE_REGISTRY,
-                    ai_validator=ai_validator,
-                )
-                await runner.run_job(job_id)
-            finally:
-                await llm_client.close()
-
-        asyncio.create_task(_run())
+        # Trigger execution in background. Track the task in
+        # self._running_tasks so we can cancel + drain on shutdown, and
+        # so the task isn't GC'd mid-execution.
+        task = asyncio.create_task(self._run_job_with_tracking(job_id))
+        self._running_tasks[job_id] = task
+        task.add_done_callback(lambda t: self._running_tasks.pop(job_id, None))
 
         return {
             "job_id": job_id,
@@ -259,6 +251,58 @@ class ReconMCPServer:
             "status": "pending",
             "note": "Job created via MCP. Use get_job_status to track progress.",
         }
+
+    async def _run_job(self, job_id: str) -> None:
+        """Execute a single recon job to completion."""
+        from app.llm.client import LLMClient
+        from app.orchestrator.ai_validator import AIValidator
+        from app.orchestrator.job_runner import JobRunner
+
+        llm_client = LLMClient()
+        try:
+            ai_validator = AIValidator(llm_client=llm_client)
+            runner = JobRunner(
+                module_registry=MODULE_REGISTRY,
+                ai_validator=ai_validator,
+            )
+            await runner.run_job(job_id)
+        finally:
+            await llm_client.close()
+
+    async def _run_job_with_tracking(self, job_id: str) -> None:
+        """Wrap _run_job so CancelledError (e.g. on server shutdown)
+        marks the job FAILED instead of leaving it stuck in RUNNING.
+        """
+        try:
+            await self._run_job(job_id)
+        except asyncio.CancelledError:
+            logger.warning("job_cancelled", job_id=job_id)
+            try:
+                with SessionLocal() as db:
+                    job = db.get(Job, job_id)
+                    if job and job.status.value not in ("completed", "failed"):
+                        job.status = "failed"  # type: ignore[assignment]
+                        job.error_message = (
+                            "Job cancelled (server shutdown or client disconnect)"
+                        )
+                        db.commit()
+            except Exception:  # noqa: BLE001
+                logger.exception("job_cancellation_cleanup_failed", job_id=job_id)
+            raise
+
+    async def shutdown(self) -> None:
+        """Cancel all running tasks. Call from server lifespan."""
+        self._shutdown_event.set()
+        if not self._running_tasks:
+            return
+        tasks = list(self._running_tasks.values())
+        for task in tasks:
+            task.cancel()
+        # Wait for tasks to finish cancellation. We swallow individual
+        # CancelledError here because _run_job_with_tracking already
+        # recorded the failure in the DB.
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._running_tasks.clear()
 
     async def get_job_status(self, job_id: str) -> dict[str, Any]:
         """Get job status + progress."""

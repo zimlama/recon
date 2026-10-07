@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from app.config import get_settings
+from app.llm.schemas import LDMValidationResult
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -98,7 +99,19 @@ class LLMClient:
                 )
                 response.raise_for_status()
                 data = response.json()
-                return self._extract_content(data)
+                parsed = self._extract_content(data)
+                # Validate against LDMValidationResult schema. If the LLM
+                # returned 200 OK with JSON but the shape doesn't match, we
+                # surface a _malformed marker so the caller (AIValidator)
+                # can decide how to handle it rather than silently producing
+                # an empty/invalid result.
+                try:
+                    LDMValidationResult.model_validate(parsed)
+                    logger.debug("llm_response_valid keys=%s", list(parsed.keys()))
+                    return parsed
+                except Exception as e:
+                    logger.warning("llm_response_invalid_schema error=%s", str(e))
+                    return {"_malformed": True, "_raw": parsed, "_error": str(e)}
             except httpx.HTTPStatusError as e:
                 last_error = e
                 if e.response.status_code in (401, 403):
