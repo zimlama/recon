@@ -1,6 +1,6 @@
 # MODULE_GUIDE.md
 
-> **Non-programmer readable.** What each of the 14 modules does, what it finds, what it does NOT do, and when to enable it.
+> **Non-programmer readable.** What each of the 14 modules does, what it finds, what it does NOT do, and when to enable it. (Plus 1 aggregator — `person_dossier` on developer branch.)
 
 ## Quick reference
 
