@@ -47,3 +47,9 @@ updates:
           - "*"
         update-types:
           - "patch"
+
+  # Docker base images — track upstream base image updates
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
