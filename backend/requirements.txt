@@ -11,7 +11,7 @@ python-multipart==0.0.9
 
 # --- Validation + settings ---
 pydantic==2.6.1
-pydantic-settings==2.2.1
+pydantic-settings==2.15.0
 
 # --- Database ---
 # NOTE: SQLAlchemy >= 2.0.30 required for Python 3.13 compatibility
