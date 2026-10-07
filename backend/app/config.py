@@ -58,6 +58,16 @@ class Settings(BaseSettings):
         description="Comma-separated allowed CORS origins.",
     )
 
+    # ---- API authentication (Bearer token, closes audit finding C1) ----
+    RECON_API_KEY: str | None = Field(
+        default=None,
+        description=(
+            "Bearer token for API auth. If unset, all routes are open "
+            "(dev mode). If set, clients must send "
+            "'Authorization: Bearer <RECON_API_KEY>' on every request."
+        ),
+    )
+
     # ---- Rate limiting ----
     RATE_LIMIT_RECON_RPS: int = Field(default=10, ge=1, le=1000)
     RATE_LIMIT_RECON_BURST: int = Field(default=20, ge=1, le=10000)

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import structlog
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -25,6 +25,39 @@ from app.routes import ai, findings, handoff, jobs, modules, reports
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
+
+
+# ---- API key auth (closes audit finding C1) ----
+# Lightweight Bearer-token gate for single-user local installs. If
+# RECON_API_KEY is unset, auth is bypassed (dev mode). When set, every
+# business route requires 'Authorization: Bearer <RECON_API_KEY>'.
+# Health and docs routes stay open by NOT attaching this dependency to them.
+
+async def verify_api_key(
+    authorization: str | None = Header(default=None),
+) -> None:
+    """Validate Authorization: Bearer <RECON_API_KEY>.
+
+    Skipped entirely when settings.RECON_API_KEY is None (dev mode).
+    Returns 401 when the header is missing, malformed, or carries the wrong
+    token. Reads `settings` from the module namespace on each call so tests
+    can monkey-patch `main.settings` to flip auth on/off per case.
+    """
+    if not settings.RECON_API_KEY:
+        return  # dev mode — auth disabled
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Authorization header",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = authorization[len("Bearer "):]
+    if token != settings.RECON_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 @asynccontextmanager
@@ -47,6 +80,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ai_validator=app.state.ai_validator,
     )
     logger.info("orchestrator_initialized", modules=len(get_module_registry()))
+
+    # Sweep jobs stuck in VALIDATING from a previous crash.
+    # Audit finding H2: a crash between `job.status = VALIDATING` and
+    # `job.status = COMPLETED` would otherwise leave the job orphaned.
+    # Swallow exceptions — a failed sweep must not block app startup.
+    try:
+        swept = await app.state.job_runner.sweep_stuck_jobs(max_age_minutes=30)
+        logger.info("startup_sweep_complete", swept_jobs=swept)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("startup_sweep_failed", error=str(e))
 
     logger.info("app_ready")
     yield
@@ -93,13 +136,16 @@ def create_app() -> FastAPI:
     if settings.AUDIT_LOGGING_ENABLED:
         app.add_middleware(AuditLogMiddleware)
 
-    # Routers
-    app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["jobs"])
-    app.include_router(modules.router, prefix="/api/v1/modules", tags=["modules"])
-    app.include_router(findings.router, prefix="/api/v1", tags=["findings"])
-    app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
-    app.include_router(handoff.router, prefix="/api/v1", tags=["handoff"])
-    app.include_router(ai.router, prefix="/api/v1", tags=["ai"])
+    # Routers — every business route requires API key when RECON_API_KEY is
+    # set. Health, docs, openapi, and redoc endpoints (defined below) are
+    # NOT included here, so they remain public.
+    _auth = [Depends(verify_api_key)]
+    app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["jobs"], dependencies=_auth)
+    app.include_router(modules.router, prefix="/api/v1/modules", tags=["modules"], dependencies=_auth)
+    app.include_router(findings.router, prefix="/api/v1", tags=["findings"], dependencies=_auth)
+    app.include_router(reports.router, prefix="/api/v1", tags=["reports"], dependencies=_auth)
+    app.include_router(handoff.router, prefix="/api/v1", tags=["handoff"], dependencies=_auth)
+    app.include_router(ai.router, prefix="/api/v1", tags=["ai"], dependencies=_auth)
 
     # Health endpoints
     @app.get("/health", tags=["health"])
