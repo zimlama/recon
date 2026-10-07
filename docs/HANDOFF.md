@@ -4,6 +4,14 @@
 > **Status**: Stable
 > **Last updated**: 2026-10-06
 
+**Version**: [v0.1.0](https://github.com/zimlama/recon/releases/tag/v0.1.0) — contract v1.0.0 (additive changes only since v0.1.0).
+
+## Consumers
+
+- `zimlama/recon-phase2` — future Phase 2 (active scanning) consuming the handoff JSON.
+
+(To add your project to this section, open a PR.)
+
 ## What is the handoff?
 
 When a `zimlama/recon` job completes, the system generates a **handoff packet** — a vendor-neutral JSON document that describes the target's external attack surface. A future `zimlama/recon-phase2` (or any other scanning tool) can consume this packet to start active enumeration without re-doing passive recon.
