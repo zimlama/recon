@@ -162,6 +162,88 @@ async def test_search_via_tor_limits_results(module: DarkWebOSINTModule) -> None
     assert len(findings) == 5
 
 
+@pytest.mark.asyncio
+async def test_search_via_tor_success(module: DarkWebOSINTModule) -> None:
+    """Tor search returns findings (SOCKS5 transport bypassed via patching)."""
+    # Build a mock response with 3 results
+    mock_response = httpx.Response(
+        200,
+        json={
+            "results": [
+                {"title": "Tor leak A", "url": "http://tor-a.onion"},
+                {"title": "Tor leak B", "url": "http://tor-b.onion"},
+                {"title": "Tor leak C", "url": "http://tor-c.onion"},
+            ]
+        },
+    )
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, params=None):
+            return mock_response
+
+    with patch("httpx.AsyncHTTPTransport"), patch("httpx.AsyncClient", FakeAsyncClient):
+        findings = await module._search_via_tor("acmecorp.com")
+
+    assert len(findings) == 3
+    assert all(f.source == "tor" for f in findings)
+    assert all(f.type.value == "darkweb_mention" for f in findings)
+
+
+@pytest.mark.asyncio
+async def test_search_via_tor_non_200(module: DarkWebOSINTModule) -> None:
+    """Tor search returns [] on non-200."""
+    mock_response = httpx.Response(503)
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, params=None):
+            return mock_response
+
+    with patch("httpx.AsyncHTTPTransport"), patch("httpx.AsyncClient", FakeAsyncClient):
+        findings = await module._search_via_tor("acmecorp.com")
+
+    assert findings == []
+
+
+@pytest.mark.asyncio
+async def test_search_via_tor_exception(module: DarkWebOSINTModule) -> None:
+    """Tor search returns [] on exception."""
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            raise httpx.ConnectError("tor down")
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, params=None):
+            return httpx.Response(200)
+
+    with patch("httpx.AsyncHTTPTransport"), patch("httpx.AsyncClient", FakeAsyncClient):
+        findings = await module._search_via_tor("acmecorp.com")
+
+    assert findings == []
+
+
 # ---- Run ----
 
 @pytest.mark.asyncio
@@ -247,3 +329,47 @@ def test_ai_prompt_is_substantive(module: DarkWebOSINTModule) -> None:
     assert "dark web" in prompt.lower() or "credential" in prompt.lower()
     assert "CONFIRMED" in prompt
     assert "SAFETY" in prompt.upper() or "READ-ONLY" in prompt.upper()
+
+
+# ---- SSRF defense: adopt BaseReconModule.safe_http_get_async ----
+
+@pytest.mark.asyncio
+async def test_search_ahmia_uses_safe_http_get_async(
+    module: DarkWebOSINTModule,
+    sample_ahmia_response: dict,
+) -> None:
+    """ahmia.fi search routes through BaseReconModule.safe_http_get_async.
+
+    Refactor contract: the module must route its outbound HTTP through
+    ``self.safe_http_get_async`` instead of constructing an inline
+    ``httpx.AsyncClient(...)`` block. Centralizes SSRF defense
+    (follow_redirects=False, swallows HTTPError).
+    """
+    captured: list[str] = []
+
+    async def fake_safe(url: str, **kwargs: object) -> httpx.Response:
+        captured.append(url)
+        return httpx.Response(200, json=sample_ahmia_response)
+
+    module.safe_http_get_async = fake_safe  # type: ignore[method-assign]
+
+    findings = await module._search_ahmia("acmecorp.com")
+
+    assert captured, "safe_http_get_async must have been called"
+    assert captured[0].startswith(AHMIA_API_URL)
+    assert len(findings) == 2
+    assert all(f.source == "ahmia.fi" for f in findings)
+
+
+@pytest.mark.asyncio
+async def test_search_ahmia_safe_http_returns_none(
+    module: DarkWebOSINTModule,
+) -> None:
+    """When safe_http_get_async returns None (e.g., SSRF blocked), returns []."""
+    async def fake_safe(url: str, **kwargs: object) -> None:
+        return None
+
+    module.safe_http_get_async = fake_safe  # type: ignore[method-assign]
+
+    findings = await module._search_ahmia("acmecorp.com")
+    assert findings == []

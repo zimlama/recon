@@ -103,20 +103,24 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
     # ---- Private helpers ----
 
     async def _search_ahmia(self, target: str) -> list[Finding]:
-        """Search ahmia.fi for the target domain (clearnet index of .onion sites)."""
+        """Search ahmia.fi for the target domain (clearnet index of .onion sites).
+
+        SSRF defense: routes through ``BaseReconModule.safe_http_get_async``
+        which enforces ``follow_redirects=False`` and swallows httpx errors.
+        """
+        from urllib.parse import urlencode
+
+        url = f"{AHMIA_API_URL}?{urlencode({'q': target})}"
         try:
-            async with httpx.AsyncClient(timeout=AHMIA_TIMEOUT) as client:
-                response = await client.get(
-                    AHMIA_API_URL,
-                    params={"q": target},
-                )
-                if response.status_code != 200:
-                    return []
-                try:
-                    data = response.json()
-                except Exception:  # noqa: BLE001
-                    return []
-        except httpx.HTTPError:
+            # SSRF defense: safe_http_get_async (follow_redirects=False, swallows HTTPError)
+            response = await self.safe_http_get_async(url, timeout=AHMIA_TIMEOUT)
+            if response is None or response.status_code != 200:
+                return []
+            try:
+                data = response.json()
+            except (ValueError, TypeError):  # noqa: PERF203
+                return []
+        except (ValueError, TypeError):
             return []
 
         findings: list[Finding] = []
