@@ -16,7 +16,7 @@ from typing import Any
 
 from app.database import SessionLocal
 from app.handoff.exporter import export_handoff
-from app.models import Handoff, Job, ModuleRun
+from app.models import Handoff, Job, JobStatus, ModuleRun
 from app.modules import MODULE_REGISTRY
 
 logger = logging.getLogger(__name__)
@@ -276,18 +276,18 @@ class ReconMCPServer:
         try:
             await self._run_job(job_id)
         except asyncio.CancelledError:
-            logger.warning("job_cancelled", job_id=job_id)
+            logger.warning("job_cancelled job_id=%s", job_id)
             try:
                 with SessionLocal() as db:
                     job = db.get(Job, job_id)
-                    if job and job.status.value not in ("completed", "failed"):
-                        job.status = "failed"  # type: ignore[assignment]
+                    if job and job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
+                        job.status = JobStatus.FAILED
                         job.error_message = (
                             "Job cancelled (server shutdown or client disconnect)"
                         )
                         db.commit()
             except Exception:  # noqa: BLE001
-                logger.exception("job_cancellation_cleanup_failed", job_id=job_id)
+                logger.exception("job_cancellation_cleanup_failed job_id=%s", job_id)
             raise
 
     async def shutdown(self) -> None:
