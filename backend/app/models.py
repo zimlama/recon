@@ -326,3 +326,124 @@ class AuditLog(Base):
 
     def __repr__(self) -> str:
         return f"<AuditLog id={self.id} action={self.action} target={self.target}>"
+
+
+# ---- Rules of Engagement (RoE) — PR 1 of v0.1.1 ----
+#
+# Real enforcement of scope, sign-offs, and engagement expiry. Before the
+# validator approves a recon job, an operator must:
+#   1. Create an RoE for the target (target + scope_type + scope_value).
+#   2. Flip its status to ACTIVE.
+#   3. Record at least one SignOff (and keep at least one un-revoked).
+#   4. Stay inside the [valid_from, valid_until] window.
+#
+# The validator (see `app.orchestrator.roe`) is the single source of truth
+# for "may we run a job on this target right now?".
+
+class RoEStatus(str, enum.Enum):
+    """Lifecycle of an RoE.
+
+    - DRAFT: operator is preparing the engagement; not yet enforceable.
+    - ACTIVE: validator may authorize jobs against this RoE.
+    - EXPIRED: `valid_until` has passed; immutable historical record.
+    - REVOKED: operator pulled the engagement; immutable historical record.
+    """
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+
+
+class ScopeType(str, enum.Enum):
+    """How the RoE's `scope_value` should be interpreted when matching a target.
+
+    - DOMAIN: bare apex or subdomain (exact string match, case-insensitive).
+    - SUBDOMAIN: pattern like ``*.example.com``; a candidate subdomain
+      matches if it equals or falls under the pattern.
+    - IP_RANGE: CIDR block (e.g. ``203.0.113.0/24``).
+    - URL_PATTERN: glob/regex on a full URL.
+    - EMPLOYEE: an individual person's identifier (email or persona_id).
+    - COMPANY: a company-level scope (legal entity name or registry id).
+    """
+
+    DOMAIN = "domain"
+    SUBDOMAIN = "subdomain"
+    IP_RANGE = "ip_range"
+    URL_PATTERN = "url_pattern"
+    EMPLOYEE = "employee"
+    COMPANY = "company"
+
+
+class RoE(Base):
+    """A single Rules-of-Engagement envelope: target + scope + validity window.
+
+    An RoE authorises recon activity against ONE target within ONE scope.
+    Multiple jobs can be launched against the same RoE while it is ACTIVE
+    and inside the validity window. SignOffs are stored in a separate table
+    and joined via `id`.
+    """
+
+    __tablename__ = "roes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    target: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    scope_type: Mapped[ScopeType] = mapped_column(Enum(ScopeType), nullable=False)
+    scope_value: Mapped[str] = mapped_column(String(255), nullable=False)
+    authorized_by: Mapped[str] = mapped_column(String(100), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[RoEStatus] = mapped_column(
+        Enum(RoEStatus), default=RoEStatus.DRAFT, nullable=False, index=True
+    )
+    valid_from: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_now)
+    valid_until: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    def is_acceptable(self, at: datetime | None = None) -> bool:
+        """Return True iff `at` falls inside the validity window.
+
+        Status checks (DRAFT / EXPIRED / REVOKED) are NOT applied here — that
+        is the validator's job. Keeping this method purely date-based makes
+        the model predictable and lets the validator combine `is_acceptable`
+        with its own status / signoff checks.
+        """
+        when = at if at is not None else _now()
+        return self.valid_from <= when <= self.valid_until
+
+    def __repr__(self) -> str:
+        return (
+            f"<RoE id={self.id} target={self.target} "
+            f"scope={self.scope_type.value}:{self.scope_value} "
+            f"status={self.status.value}>"
+        )
+
+
+class SignOff(Base):
+    """A human authorization record attached to an RoE.
+
+    At least one SignOff with `revoked_at IS NULL` must exist for an RoE to
+    be considered authorized. Revocation is recorded (not deleted) so we
+    preserve audit history of who signed off and when their approval ended.
+    """
+
+    __tablename__ = "sign_offs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    roe_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("roes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    signer_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    signer_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    signer_role: Mapped[str] = mapped_column(String(100), nullable=False)
+    signed_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    def __repr__(self) -> str:
+        revoked = "revoked" if self.revoked_at is not None else "active"
+        return (
+            f"<SignOff id={self.id} roe_id={self.roe_id} "
+            f"signer={self.signer_email} ({revoked})>"
+        )
