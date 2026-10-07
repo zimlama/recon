@@ -75,12 +75,14 @@ def get_db() -> Iterator[Session]:
 def init_db() -> None:
     """Create all tables. Idempotent — safe to call on every startup.
 
+    Uses checkfirst=True so re-running on an already-initialized DB
+    doesn't fail (useful for tests that share the global engine).
     For schema changes, use Alembic migrations instead.
     """
     # Import all models to register them with Base.metadata
     from app import models  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=engine, checkfirst=True)
 
 
 def drop_all_tables() -> None:

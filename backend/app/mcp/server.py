@@ -195,7 +195,7 @@ class ReconMCPServer:
     ) -> dict[str, Any]:
         """Create a new job and trigger background execution."""
         from datetime import datetime
-from app.models import _now
+        from app.models import _now
 
         if modules is None:
             modules = [m for m, mod in MODULE_REGISTRY.items() if mod.enabled_by_default]
