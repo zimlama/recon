@@ -399,6 +399,21 @@ class RoE(Base):
     valid_until: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
+    # Relationship: sign-offs attached to this RoE. Cascade so deleting an
+    # RoE also drops its signoffs (also enforced at the DB level via
+    # ON DELETE CASCADE on `sign_offs.roe_id`). Default lazy-loading
+    # (`lazy="select"`) is used instead of `selectin` because `selectin`
+    # caches the relationship query per identity-map entry — once an RoE
+    # is cached, any signoff added later to the same session won't be
+    # visible until `expire()` is called. Callers that need eager loading
+    # (the validator, the middleware) explicitly request it via
+    # `selectinload(RoE.sign_offs)`.
+    sign_offs: Mapped[list[SignOff]] = relationship(
+        "SignOff",
+        backref="roe",
+        cascade="all, delete-orphan",
+    )
+
     def is_acceptable(self, at: datetime | None = None) -> bool:
         """Return True iff `at` falls inside the validity window.
 
