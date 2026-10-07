@@ -8,6 +8,9 @@ from app.modules import MODULE_REGISTRY
 from app.modules.base import BaseReconModule
 from app.models import ModuleTier
 
+# Mark all tests in this module as asyncio
+pytestmark = pytest.mark.asyncio
+
 
 def test_all_14_modules_registered() -> None:
     """Exactly 14 modules in the registry."""
@@ -91,3 +94,79 @@ def test_get_module_unknown_raises() -> None:
     from app.modules import get_module
     with pytest.raises(KeyError):
         get_module("nonexistent")
+
+
+# ---- run() stub tests ----
+
+@pytest.mark.asyncio
+async def test_all_modules_run_returns_module_output() -> None:
+    """Every module's run() returns a ModuleOutput (even if it's a stub)."""
+    from app.modules.base import ModuleInput
+    from app.modules.base import ModuleOutput
+    for name, module in MODULE_REGISTRY.items():
+        result = await module.run(ModuleInput(target="example.com"))
+        assert isinstance(result, ModuleOutput), f"{name} run() did not return ModuleOutput"
+        assert result.module == name, f"{name} returned wrong module name in output"
+
+
+@pytest.mark.asyncio
+async def test_stub_modules_have_not_implemented_error() -> None:
+    """Stub modules (Day 1 placeholders) report 'Not implemented' in errors."""
+    from app.modules.base import ModuleInput
+    # Modules that are still stubs (not yet implemented beyond Day 1)
+    stubs_at_day2 = {
+        "breach_data",
+        "socmint",
+        "employee_osint",
+        "dark_web_osint",
+        "shodan_censys",
+        "github_recon",
+        "metadata_analysis",
+        "google_dorking",
+        "email_harvesting",
+        "wayback_machine",
+        "certificate_transparency",
+    }
+    for name in stubs_at_day2:
+        if name in MODULE_REGISTRY:
+            module = MODULE_REGISTRY[name]
+            result = await module.run(ModuleInput(target="example.com"))
+            # Stub returns either a placeholder error or empty findings + errors
+            assert len(result.findings) == 0, f"{name} stub produced findings"
+            assert len(result.errors) >= 1, f"{name} stub should report at least one error"
+            assert "Not implemented" in result.errors[0], f"{name} stub error should say 'Not implemented'"
+
+
+def test_all_modules_have_non_empty_ai_prompts() -> None:
+    """Every module has a non-empty AI prompt (used for validation)."""
+    for name, module in MODULE_REGISTRY.items():
+        prompt = module.get_ai_prompt()
+        assert isinstance(prompt, str), f"{name} prompt is not a string"
+        assert len(prompt) > 50, f"{name} prompt is too short ({len(prompt)} chars)"
+        # Prompt should mention verdict categories
+        assert "CONFIRMED" in prompt, f"{name} prompt missing CONFIRMED"
+        assert "FALSE_POSITIVE" in prompt, f"{name} prompt missing FALSE_POSITIVE"
+
+
+def test_tier1_modules_have_all_passive_metadata() -> None:
+    """Tier 1 modules: no API keys (except optional), always-on, mostly no consent."""
+    # email_harvesting DOES require consent (PII handling)
+    pure_tier1_no_consent = {"whois_rdap", "dns_enum", "subdomain_enum",
+                              "certificate_transparency", "wayback_machine"}
+    for name in pure_tier1_no_consent:
+        m = MODULE_REGISTRY[name]
+        assert m.requires_api_keys == [], f"{name} should not require API keys"
+        assert m.requires_consent is False, f"{name} should not require consent"
+        assert m.enabled_by_default is True, f"{name} should be enabled by default"
+
+    # email_harvesting is Tier 1 but requires consent (PII)
+    email_mod = MODULE_REGISTRY["email_harvesting"]
+    assert email_mod.requires_consent is True, "email_harvesting requires consent (PII)"
+
+
+def test_tier3_modules_all_require_consent() -> None:
+    """All Tier 3 modules require explicit consent."""
+    tier3_names = {"breach_data", "socmint", "employee_osint", "dark_web_osint"}
+    for name in tier3_names:
+        m = MODULE_REGISTRY[name]
+        assert m.requires_consent is True, f"{name} (Tier 3) must require consent"
