@@ -293,3 +293,58 @@ def test_module_metadata(module: WhoisRDAPModule) -> None:
     assert module.enabled_by_default is True
     assert module.requires_api_keys == []
     assert module.requires_consent is False
+
+
+# ---- SSRF defense: adopt BaseReconModule.safe_http_get_async ----
+
+@pytest.mark.asyncio
+async def test_query_rdap_uses_safe_http_get_async(
+    module: WhoisRDAPModule,
+    sample_rdap_response: dict,
+) -> None:
+    """RDAP query routes through BaseReconModule.safe_http_get_async.
+
+    Refactor contract: the module must route its outbound HTTP through
+    ``self.safe_http_get_async`` instead of constructing an inline
+    ``httpx.AsyncClient(..., follow_redirects=False)`` block.
+    """
+    captured: list[str] = []
+
+    async def fake_safe(url: str, **kwargs: object) -> httpx.Response:
+        captured.append(url)
+        # Return a 200 with valid RDAP JSON so the function reads it
+        return httpx.Response(200, json=sample_rdap_response)
+
+    module.safe_http_get_async = fake_safe  # type: ignore[method-assign]
+
+    result = await module._query_rdap("example.com")
+
+    assert captured, "safe_http_get_async must have been called"
+    assert captured[0].startswith("https://rdap.org/domain/")
+    assert "example.com" in captured[0]
+    assert result is not None
+    assert result["ldhName"] == "example.com"
+
+
+@pytest.mark.asyncio
+async def test_query_rdap_safe_http_get_returns_none(module: WhoisRDAPModule) -> None:
+    """When safe_http_get_async returns None (e.g., SSRF blocked), RDAP returns None."""
+    async def fake_safe(url: str, **kwargs: object) -> None:
+        return None
+
+    module.safe_http_get_async = fake_safe  # type: ignore[method-assign]
+
+    result = await module._query_rdap("example.com")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_query_rdap_non_200_returns_none(module: WhoisRDAPModule) -> None:
+    """When RDAP returns non-200, the function returns None."""
+    async def fake_safe(url: str, **kwargs: object) -> httpx.Response:
+        return httpx.Response(404, text="Not Found")
+
+    module.safe_http_get_async = fake_safe  # type: ignore[method-assign]
+
+    result = await module._query_rdap("example.com")
+    assert result is None
