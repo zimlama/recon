@@ -5,6 +5,10 @@
 > **Owner**: zimlama
 > **Status**: Active development
 
+## Status
+
+✅ **v0.1.0 released** (2026-10-12) — see [CHANGELOG.md](../CHANGELOG.md).
+
 ## Problem statement
 
 Pentesters and red team operators need a reconnaissance tool that is:
