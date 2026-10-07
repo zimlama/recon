@@ -83,6 +83,22 @@ class FindingType(str, enum.Enum):
     OTHER = "other"
 
 
+class HandoffStatus(str, enum.Enum):
+    """Tracks handoff packet generation status independently of the job status.
+
+    Previously `error_message` was overloaded to carry both module errors AND
+    handoff generation status. That conflated two concerns — a handoff failure
+    looked indistinguishable from a module failure in the UI. This enum gives
+    handoff generation its own first-class state so the operator can tell at a
+    glance: "the job ran fine but the handoff failed to export".
+    """
+
+    NOT_GENERATED = "not_generated"  # Default — no handoff attempt yet
+    PENDING = "pending"  # Generation in progress
+    GENERATED = "generated"  # Handoff file + DB row both written
+    FAILED = "failed"  # Generation attempted but raised
+
+
 # ---- Models ----
 
 class Job(Base):
@@ -115,6 +131,16 @@ class Job(Base):
     # Error tracking
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Handoff generation status (independent of overall job status).
+    # Index because operators filter by this to find jobs whose handoff
+    # failed even though the recon itself succeeded.
+    handoff_status: Mapped[str] = mapped_column(
+        Enum(HandoffStatus),
+        default=HandoffStatus.NOT_GENERATED,
+        nullable=False,
+        index=True,
+    )
+
     # Output paths
     report_md_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     report_pdf_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -137,7 +163,10 @@ class Job(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Job id={self.id} target={self.target} status={self.status.value}>"
+        return (
+            f"<Job id={self.id} target={self.target} "
+            f"status={self.status.value} handoff_status={self.handoff_status.value}>"
+        )
 
 
 class ModuleRun(Base):

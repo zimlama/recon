@@ -15,10 +15,15 @@ async def generate_handoff_for_job(job_id: str) -> None:
     Called from the JobRunner after all modules + AI validation complete.
     Idempotent — if a handoff already exists, it is regenerated.
 
-    Failures are recorded on the Job row (appended to error_message) so
-    the operator can see that handoff generation failed, but we do NOT
-    re-raise — the recon job itself succeeded, so the JobRunner will
-    still mark the job COMPLETED.
+    Updates `Job.handoff_status`:
+      - GENERATED on success (set inside `export_handoff` after both the
+        JSON file and the DB row are committed)
+      - FAILED on failure (with a short reason appended to error_message
+        so the operator can see why without opening the logs)
+
+    Failures do NOT re-raise — the recon job itself succeeded, so the
+    JobRunner will still mark the job COMPLETED. Handoff failure is a
+    separate concern tracked via handoff_status.
     """
     try:
         await export_handoff(job_id)
@@ -27,11 +32,12 @@ async def generate_handoff_for_job(job_id: str) -> None:
         logger.exception("handoff_generation_failed job_id=%s error=%s", job_id, e)
         try:
             from app.database import SessionLocal
-            from app.models import Job
+            from app.models import HandoffStatus, Job
 
             with SessionLocal() as db:
                 job = db.get(Job, job_id)
                 if job:
+                    job.handoff_status = HandoffStatus.FAILED
                     note = f"\nHandoff generation failed: {e!s}"
                     job.error_message = (job.error_message or "") + note
                     db.commit()

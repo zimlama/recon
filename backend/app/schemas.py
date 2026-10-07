@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import (
     FindingType,
+    HandoffStatus,
     JobStatus,
     ModuleStatus,
     ModuleTier,
@@ -88,6 +89,7 @@ class JobResponse(BaseModel):
     completed_at: datetime | None
     duration_seconds: float | None
     error_message: str | None
+    handoff_status: HandoffStatus = HandoffStatus.NOT_GENERATED
     report_md_path: str | None
     report_pdf_path: str | None
     module_runs: list["ModuleRunResponse"] = []

@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.models import _now
 from typing import Any
 
@@ -293,6 +293,51 @@ class JobRunner:
             "confidence": f.confidence,
             "finding_metadata": f.finding_metadata,
         }
+
+    async def sweep_stuck_jobs(self, max_age_minutes: int = 30) -> int:
+        """Mark jobs stuck in VALIDATING state for too long as FAILED.
+
+        A job can get stuck in VALIDATING if the app crashes between
+        `job.status = VALIDATING` (set after all modules complete) and
+        `job.status = COMPLETED` (set after handoff generation). Without
+        this sweeper, those jobs would never transition again and the UI
+        would show them as "in progress" forever.
+
+        Called on app startup so a restart recovers any jobs orphaned by
+        the previous process's crash.
+
+        Returns the number of jobs marked as FAILED.
+        """
+        cutoff = _now() - timedelta(minutes=max_age_minutes)
+        count = 0
+        with SessionLocal() as db:
+            stuck_jobs = (
+                db.query(Job)
+                .filter(Job.status == JobStatus.VALIDATING)
+                .filter(Job.started_at < cutoff)
+                .filter(Job.started_at.is_not(None))  # safety: skip nulls
+                .all()
+            )
+            for job in stuck_jobs:
+                stuck_minutes = 0
+                if job.started_at:
+                    stuck_seconds = (_now() - job.started_at).total_seconds()
+                    stuck_minutes = int(stuck_seconds // 60)
+                job.status = JobStatus.FAILED
+                job.error_message = (
+                    f"Marked FAILED by startup sweeper: was stuck in VALIDATING "
+                    f"for {stuck_minutes} min"
+                )
+                count += 1
+            if count:
+                db.commit()
+                # stdlib logger — %-style formatting, no kwargs (unlike structlog).
+                logger.warning(
+                    "swept_stuck_jobs count=%d max_age_minutes=%d",
+                    count,
+                    max_age_minutes,
+                )
+        return count
 
 
 __all__ = ["JobRunner"]
