@@ -112,24 +112,23 @@ async def test_all_modules_run_returns_module_output() -> None:
 
 @pytest.mark.asyncio
 async def test_stub_modules_have_not_implemented_error() -> None:
-    """Stub modules (Day 1 placeholders) report 'Not implemented' in errors."""
+    """Stub modules (Day 1 placeholders) report 'Not implemented' in errors.
+
+    Note: Tier 2 modules (shodan_censys, github_recon, metadata_analysis, google_dorking)
+    are now real implementations as of Day 5. Only Tier 3 (breach, socmint, employee, darkweb)
+    remain as stubs.
+    """
     from app.modules.base import ModuleInput
-    # Modules that are still stubs (Day 3: only Tier 2 + Tier 3 remain)
-    stubs_at_day3 = {
+    stubs_at_day5 = {
         "breach_data",
         "socmint",
         "employee_osint",
         "dark_web_osint",
-        "shodan_censys",
-        "github_recon",
-        "metadata_analysis",
-        "google_dorking",
     }
-    for name in stubs_at_day3:
+    for name in stubs_at_day5:
         if name in MODULE_REGISTRY:
             module = MODULE_REGISTRY[name]
             result = await module.run(ModuleInput(target="example.com"))
-            # Stub returns either a placeholder error or empty findings + errors
             assert len(result.findings) == 0, f"{name} stub produced findings"
             assert len(result.errors) >= 1, f"{name} stub should report at least one error"
             assert "Not implemented" in result.errors[0], f"{name} stub error should say 'Not implemented'"
