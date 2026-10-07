@@ -23,7 +23,7 @@ def module() -> SOCMINTModule:
 async def test_check_platform_200(module: SOCMINTModule) -> None:
     """HTTP 200 response returns the URL (profile exists)."""
     with respx.mock(assert_all_called=False) as mock_router:
-        mock_router.head(url__regex=r".*linkedin.com/.*").mock(
+        mock_router.get(url__regex=r".*linkedin.com/.*").mock(
             return_value=httpx.Response(200)
         )
         url = await module._check_platform("linkedin", "https://www.linkedin.com/company/{target}", "acme")
@@ -34,7 +34,7 @@ async def test_check_platform_200(module: SOCMINTModule) -> None:
 async def test_check_platform_404(module: SOCMINTModule) -> None:
     """HTTP 404 returns None (profile doesn't exist)."""
     with respx.mock(assert_all_called=False) as mock_router:
-        mock_router.head(url__regex=r".*linkedin.com/.*").mock(
+        mock_router.get(url__regex=r".*linkedin.com/.*").mock(
             return_value=httpx.Response(404)
         )
         url = await module._check_platform("linkedin", "https://www.linkedin.com/company/{target}", "nonexistent")
@@ -43,22 +43,30 @@ async def test_check_platform_404(module: SOCMINTModule) -> None:
 
 @pytest.mark.asyncio
 async def test_check_platform_405_fallback_to_get(module: SOCMINTModule) -> None:
-    """HEAD returns 405 → fallback to GET (some sites don't support HEAD)."""
-    head_response = httpx.Response(405)
-    get_response = httpx.Response(200)
+    """First attempt returns 405 → fallback to GET (some sites don't support HEAD-equivalent)."""
+    # Both attempts are GETs (safe_http_get_async uses GET internally).
+    # First attempt returns 405, second returns 200.
+    call_count = 0
+
+    def side_effect(request):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(405)
+        return httpx.Response(200)
 
     with respx.mock(assert_all_called=False) as mock_router:
-        mock_router.head(url__regex=r".*linkedin.com/.*").mock(return_value=head_response)
-        mock_router.get(url__regex=r".*linkedin.com/.*").mock(return_value=get_response)
+        mock_router.get(url__regex=r".*linkedin.com/.*").mock(side_effect=side_effect)
         url = await module._check_platform("linkedin", "https://www.linkedin.com/company/{target}", "acme")
     assert url == "https://www.linkedin.com/company/acme"
+    assert call_count == 2
 
 
 @pytest.mark.asyncio
 async def test_check_platform_connection_error(module: SOCMINTModule) -> None:
     """Connection error returns None."""
     with respx.mock(assert_all_called=False) as mock_router:
-        mock_router.head(url__regex=r".*linkedin.com/.*").mock(
+        mock_router.get(url__regex=r".*linkedin.com/.*").mock(
             side_effect=httpx.ConnectError("down")
         )
         url = await module._check_platform("linkedin", "https://www.linkedin.com/company/{target}", "acme")
@@ -132,3 +140,75 @@ def test_social_platforms_includes_known(module: SOCMINTModule) -> None:
     assert "linkedin" in platform_names
     assert "github_org" in platform_names
     assert "twitter" in platform_names
+
+
+# ---- SSRF defense: adopt BaseReconModule.safe_http_get_async ----
+
+@pytest.mark.asyncio
+async def test_check_platform_uses_safe_http_get_async(
+    module: SOCMINTModule,
+) -> None:
+    """Platform HEAD check routes through BaseReconModule.safe_http_get_async.
+
+    Refactor contract: the module must route its outbound HTTP through
+    ``self.safe_http_get_async`` instead of constructing an inline
+    ``httpx.AsyncClient(..., follow_redirects=False)`` block. Centralizes
+    SSRF defense (follow_redirects=False, swallows HTTPError).
+    """
+    captured: list[tuple[str, str]] = []
+
+    async def fake_safe(url: str, **kwargs: object) -> httpx.Response:
+        # Capture both url + method (HEAD/GET)
+        method = kwargs.get("method", "GET")
+        captured.append((url, str(method)))
+        return httpx.Response(200)
+
+    module.safe_http_get_async = fake_safe  # type: ignore[method-assign]
+
+    url = await module._check_platform(
+        "linkedin",
+        "https://www.linkedin.com/company/{target}",
+        "acme",
+    )
+
+    assert captured, "safe_http_get_async must have been called"
+    assert url == "https://www.linkedin.com/company/acme"
+
+
+@pytest.mark.asyncio
+async def test_check_platform_safe_http_returns_none(module: SOCMINTModule) -> None:
+    """When safe_http_get_async returns None (SSRF blocked), returns None."""
+    async def fake_safe(url: str, **kwargs: object) -> None:
+        return None
+
+    module.safe_http_get_async = fake_safe  # type: ignore[method-assign]
+
+    url = await module._check_platform(
+        "linkedin",
+        "https://www.linkedin.com/company/{target}",
+        "acme",
+    )
+    assert url is None
+
+
+@pytest.mark.asyncio
+async def test_check_platform_fallback_to_get_on_405(module: SOCMINTModule) -> None:
+    """When HEAD returns 405, falls back to GET."""
+    call_count = 0
+
+    async def fake_safe(url: str, **kwargs: object) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(405)  # HEAD → 405
+        return httpx.Response(200)  # GET → 200
+
+    module.safe_http_get_async = fake_safe  # type: ignore[method-assign]
+
+    url = await module._check_platform(
+        "linkedin",
+        "https://www.linkedin.com/company/{target}",
+        "acme",
+    )
+    assert url == "https://www.linkedin.com/company/acme"
+    assert call_count == 2
