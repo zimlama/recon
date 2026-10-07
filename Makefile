@@ -3,7 +3,8 @@
 
 .PHONY: help install install-deps up up-dev down logs build rebuild \
         test test-backend test-frontend test-e2e lint typecheck format \
-        shell-backend shell-frontend shell-db report clean purge
+        shell-backend shell-frontend shell-db report clean purge \
+        harden backup monitor
 
 # ---- Config ----
 PROJECT_NAME := zimlama-recon
@@ -91,3 +92,13 @@ clean:  ## Remove build artifacts and caches
 purge:  ## Delete ALL data for a target (usage: make purge TARGET=example.com)
 	@if [ -z "$(TARGET)" ]; then echo "Usage: make purge TARGET=example.com"; exit 1; fi
 	$(COMPOSE) exec backend python -m recon.purge --target $(TARGET)
+
+# ---- Ops ----
+harden:  ## Apply Ubuntu host security hardening (UFW, fail2ban, SSH, auto-updates)
+	sudo ./scripts/install-hardening.sh
+
+backup:  ## Snapshot ./data/ to timestamped tar.gz (uploads via rclone if BACKUP_BUCKET set)
+	./scripts/backup.sh
+
+monitor:  ## Health check for cron / uptime-kuma (backend + frontend + disk + docker)
+	./scripts/monitor.sh
