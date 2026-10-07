@@ -13,3 +13,5 @@ httpx==0.26.0
 structlog==24.1.0
 python-multipart==0.0.9
 typer==0.12.1
+dnspython==2.6.1
+python-whois==0.9.4

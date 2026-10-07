@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from sqlalchemy import desc
 from sqlalchemy.orm import Session, selectinload
 
@@ -153,17 +153,18 @@ async def cancel_job(
     return job
 
 
-@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_job(
     job_id: str,
     db: Session = Depends(get_db),
-) -> None:
+) -> Response:
     """Delete a job and all its data (cascades to ModuleRun, Finding, AIValidation, Handoff)."""
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     db.delete(job)
     db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 __all__ = ["router"]

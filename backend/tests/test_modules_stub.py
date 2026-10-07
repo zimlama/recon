@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.modules import MODULE_REGISTRY
 from app.modules.base import BaseReconModule
 from app.models import ModuleTier
