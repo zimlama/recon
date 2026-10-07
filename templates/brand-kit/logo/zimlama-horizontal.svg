@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  zimlama horizontal lockup — isotipo + wordmark.
+  Original design. Apache-2.0.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 64" width="200" height="64">
+  <title>zimlama recon</title>
+
+  <!-- Isotipo -->
+  <g transform="translate(0, 0)">
+    <line x1="32" y1="4" x2="32" y2="14" stroke="#7ab23c" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="32" cy="4" r="3" fill="#c11b05"/>
+    <rect x="8" y="14" width="48" height="42" rx="8" ry="8" fill="#7ab23c" stroke="#0a0a0a" stroke-width="1.5"/>
+    <circle cx="32" cy="30" r="9" fill="#faf8f6" stroke="#0a0a0a" stroke-width="2"/>
+    <line x1="38" y1="36" x2="44" y2="42" stroke="#0a0a0a" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="26" y1="50" x2="38" y2="50" stroke="#0a0a0a" stroke-width="1.5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="70" y="44" font-family="Plus Jakarta Sans, sans-serif" font-size="28"
+        font-weight="700" font-style="italic" fill="#faf8f6">zimlama</text>
+
+  <!-- Tagline -->
+  <text x="70" y="56" font-family="Montserrat, sans-serif" font-size="9"
+        font-weight="600" fill="#4a4a4a" letter-spacing="2">RECON</text>
+</svg>

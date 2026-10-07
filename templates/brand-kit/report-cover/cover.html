@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>zimlama recon — Cover</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,700;1,700&family=Montserrat:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --zimlama-negro: #0a0a0a;
+      --zimlama-rojo: #c11b05;
+      --zimlama-blanco: #faf8f6;
+      --zimlama-gris: #4a4a4a;
+      --zimlama-piel: #7ab23c;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Montserrat', sans-serif;
+      color: var(--zimlama-blanco);
+      background: linear-gradient(135deg, var(--zimlama-negro) 0%, #1a1a1a 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 60px;
+      text-align: center;
+    }
+    .logo {
+      width: 120px;
+      height: 120px;
+      margin-bottom: 32px;
+    }
+    h1 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-weight: 700;
+      font-style: italic;
+      font-size: 48pt;
+      color: var(--zimlama-blanco);
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      font-size: 16pt;
+      color: var(--zimlama-gris);
+      margin-bottom: 48px;
+    }
+    .target {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 22pt;
+      color: var(--zimlama-rojo);
+      padding: 16px 32px;
+      border: 2px solid var(--zimlama-rojo);
+      border-radius: 8px;
+      margin-bottom: 48px;
+    }
+    .meta {
+      font-size: 11pt;
+      color: var(--zimlama-gris);
+      line-height: 2;
+    }
+    .meta strong { color: var(--zimlama-blanco); }
+    .footer {
+      margin-top: 64px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9pt;
+      color: var(--zimlama-gris);
+      opacity: 0.6;
+    }
+  </style>
+</head>
+<body>
+  <svg class="logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+    <line x1="32" y1="4" x2="32" y2="14" stroke="#7ab23c" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="32" cy="4" r="3" fill="#c11b05"/>
+    <rect x="8" y="14" width="48" height="42" rx="8" ry="8" fill="#7ab23c" stroke="#0a0a0a" stroke-width="1.5"/>
+    <circle cx="32" cy="30" r="9" fill="#faf8f6" stroke="#0a0a0a" stroke-width="2"/>
+    <line x1="38" y1="36" x2="44" y2="42" stroke="#0a0a0a" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="26" y1="50" x2="38" y2="50" stroke="#0a0a0a" stroke-width="1.5" stroke-linecap="round"/>
+  </svg>
+
+  <h1>zimlama recon</h1>
+  <p class="subtitle">Phase 1 — Reconocimiento Pasivo</p>
+
+  <div class="target">__TARGET__</div>
+
+  <div class="meta">
+    <p><strong>Job ID:</strong> __JOB_ID__</p>
+    <p><strong>Fecha:</strong> __DATE__</p>
+    <p><strong>AI Provider:</strong> MiniMax M3</p>
+    <p><strong>Confidentiality:</strong> CONFIDENTIAL — Authorized use only</p>
+  </div>
+
+  <div class="footer">zimlama/recon v__VERSION__ · Apache-2.0</div>
+</body>
+</html>

@@ -1,0 +1,101 @@
+# =============================================================================
+# zimlama/recon — Docker Compose
+# Two profiles:
+#   - dev:   hot-reload for backend + frontend, dev mode
+#   - prod:  production builds, optimized for deployment
+#
+# Usage:
+#   docker compose --profile dev up -d --build    # dev mode
+#   docker compose --profile prod up -d --build   # production
+# =============================================================================
+
+x-backend-common: &backend-common
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  env_file: .env
+  environment:
+    - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/recon.db}
+    - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    - APP_ENV=${APP_ENV:-production}
+  volumes:
+    - ./data:/app/data
+  restart: unless-stopped
+  networks:
+    - recon-net
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 30s
+
+x-frontend-common: &frontend-common
+  env_file: .env
+  environment:
+    - NEXT_PUBLIC_API_URL=http://localhost:8000
+    - NEXT_PUBLIC_APP_NAME=zimlama recon
+  networks:
+    - recon-net
+  depends_on:
+    backend:
+      condition: service_healthy
+
+networks:
+  recon-net:
+    driver: bridge
+    name: recon-net
+
+volumes:
+  recon-data:
+
+services:
+  # ---- Backend ----
+  backend:
+    <<: *backend-common
+    profiles: [dev, prod]
+    ports:
+      - "8000:8000"
+    develop:
+      watch:
+        - path: ./backend/app
+          action: rebuild
+        - path: ./backend/tests
+          action: sync
+
+  # ---- Frontend (production build via nginx) ----
+  frontend:
+    <<: *frontend-common
+    profiles: [prod]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+
+  # ---- Frontend (development — Next.js dev server with hot reload) ----
+  frontend-dev:
+    <<: *frontend-common
+    profiles: [dev]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    command: ["pnpm", "dev"]
+
+  # ---- Report Builder (Node + md-to-pdf, ephemeral) ----
+  report-builder:
+    profiles: [prod, dev]
+    build:
+      context: ./report-builder
+      dockerfile: Dockerfile
+    networks:
+      - recon-net
+    # The backend invokes this via docker socket or shared volume.
+    # For v0.1, the backend uses `npx md-to-pdf` directly (Node must be installed in backend image).
+    # This service is reserved for future use (e.g., a sidecar that watches for MD files).

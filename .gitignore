@@ -1,0 +1,96 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.pyright_cache/
+.ruff_cache/
+.tox/
+.venv/
+venv/
+env/
+ENV/
+
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+dist/
+.cache/
+.parcel-cache/
+.turbo/
+.turbo-cache/
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+.npm
+.eslintcache
+
+# ---- Environments & Secrets ----
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+*.pem
+*.key
+secrets/
+
+# ---- IDE / Editor ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---- Logs / Runtime ----
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ---- Database / SQLite ----
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ---- Data / Handoffs (runtime, generated) ----
+data/
+handoffs/
+artifacts/
+*.raw.json
+*.raw.txt
+
+# ---- Test artifacts ----
+playwright-report/
+test-results/
+coverage/
+.nyc_output/
+
+# ---- Docker ----
+.docker/
+
+# ---- OS junk ----
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+.Spotlight-V100
+.Trashes
+._*

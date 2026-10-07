@@ -1,0 +1,106 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* zimlama brand */
+  --zimlama-negro: #0a0a0a;
+  --zimlama-rojo: #c11b05;
+  --zimlama-blanco: #faf8f6;
+  --zimlama-gris: #4a4a4a;
+  --zimlama-piel: #7ab23c;
+  --zimlama-purple: #6b3fa0;
+
+  /* severity */
+  --sev-critico: #890f0a;
+  --sev-alto: #e55934;
+  --sev-medio: #fbb03b;
+  --sev-bajo: #3c8dbc;
+  --sev-info: #6b7280;
+
+  /* fonts (Google Fonts, open-source) */
+  --font-titulos: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-cuerpo: 'Montserrat', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  background-color: var(--zimlama-negro);
+  color: var(--zimlama-blanco);
+  font-family: var(--font-cuerpo);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-titulos);
+  font-weight: 700;
+}
+
+code, pre {
+  font-family: var(--font-mono);
+}
+
+a {
+  color: var(--zimlama-rojo);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Custom utility classes */
+.zimlama-card {
+  background-color: color-mix(in srgb, var(--zimlama-blanco) 4%, var(--zimlama-negro));
+  border: 1px solid color-mix(in srgb, var(--zimlama-gris) 55%, transparent);
+  border-radius: 10px;
+  padding: 24px;
+}
+
+.zimlama-input {
+  background-color: color-mix(in srgb, var(--zimlama-blanco) 6%, var(--zimlama-negro));
+  border: 1px solid color-mix(in srgb, var(--zimlama-gris) 65%, transparent);
+  color: var(--zimlama-blanco);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-family: var(--font-cuerpo);
+  font-size: 14px;
+  width: 100%;
+}
+
+.zimlama-input:focus {
+  outline: 2px solid var(--zimlama-rojo);
+  outline-offset: 2px;
+}
+
+.zimlama-button {
+  background-color: var(--zimlama-rojo);
+  color: var(--zimlama-blanco);
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-family: var(--font-titulos);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: opacity 160ms;
+}
+
+.zimlama-button:hover {
+  opacity: 0.9;
+}
+
+.zimlama-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

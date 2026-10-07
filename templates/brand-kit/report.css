@@ -1,0 +1,256 @@
+/* ============================================================
+   zimlama brand-kit — report.css
+   Styles for markdown-to-PDF report rendering.
+   Uses CSS variables for theming.
+   ============================================================ */
+
+:root {
+  /* zimlama brand */
+  --zimlama-negro: #0a0a0a;
+  --zimlama-rojo: #c11b05;
+  --zimlama-blanco: #faf8f6;
+  --zimlama-gris: #4a4a4a;
+  --zimlama-piel: #7ab23c;
+  --zimlama-purple: #6b3fa0;
+
+  /* severity */
+  --sev-critico: #890f0a;
+  --sev-alto: #e55934;
+  --sev-medio: #fbb03b;
+  --sev-bajo: #3c8dbc;
+  --sev-info: #6b7280;
+}
+
+/* Page setup */
+@page {
+  size: A4;
+  margin: 25mm 20mm 30mm 20mm;
+}
+
+@page :first {
+  margin: 0; /* cover page has its own layout */
+}
+
+/* Body */
+body {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 11pt;
+  line-height: 1.6;
+  color: #1a1a1a;
+  background: #fff;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 700;
+  color: var(--zimlama-negro);
+  page-break-after: avoid;
+}
+
+h1 {
+  font-size: 28pt;
+  border-bottom: 3px solid var(--zimlama-rojo);
+  padding-bottom: 8px;
+  margin-top: 0;
+}
+
+h2 {
+  font-size: 18pt;
+  color: var(--zimlama-rojo);
+  margin-top: 30px;
+  margin-bottom: 12px;
+  page-break-before: auto;
+}
+
+h3 {
+  font-size: 14pt;
+  color: var(--zimlama-gris);
+  margin-top: 20px;
+  margin-bottom: 8px;
+}
+
+h4 {
+  font-size: 12pt;
+  color: var(--zimlama-gris);
+  margin-top: 16px;
+  margin-bottom: 6px;
+}
+
+/* Paragraphs */
+p {
+  margin: 0 0 12px 0;
+  text-align: justify;
+}
+
+/* Links */
+a {
+  color: var(--zimlama-rojo);
+  text-decoration: none;
+}
+
+/* Code */
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10pt;
+  background: #f5f5f5;
+  padding: 2px 4px;
+  border-radius: 3px;
+  color: var(--zimlama-negro);
+}
+
+pre {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9pt;
+  background: #f5f5f5;
+  padding: 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--zimlama-rojo);
+  overflow-x: auto;
+  page-break-inside: avoid;
+}
+
+pre code {
+  background: transparent;
+  padding: 0;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  page-break-inside: avoid;
+  font-size: 10pt;
+}
+
+th {
+  background: var(--zimlama-negro);
+  color: var(--zimlama-blanco);
+  padding: 10px;
+  text-align: left;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 700;
+}
+
+td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+tr:nth-child(even) td {
+  background: #f9f9f9;
+}
+
+/* Severity badges (custom inline) */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9pt;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge-critico { background: var(--sev-critico); color: white; }
+.badge-alto    { background: var(--sev-alto);    color: white; }
+.badge-medio   { background: var(--sev-medio);   color: #1a1a1a; }
+.badge-bajo    { background: var(--sev-bajo);    color: white; }
+.badge-info    { background: var(--sev-info);    color: white; }
+
+/* AI validation badges */
+.badge-confirmed     { background: var(--sev-bajo);    color: white; }
+.badge-likely        { background: var(--sev-medio);   color: #1a1a1a; }
+.badge-suspected     { background: var(--sev-info);    color: white; }
+.badge-false-positive{ background: #cccccc;            color: #1a1a1a; }
+
+/* Blockquotes (used for AI insights) */
+blockquote {
+  border-left: 4px solid var(--zimlama-piel);
+  background: #f9f9f9;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-style: italic;
+  color: var(--zimlama-gris);
+}
+
+blockquote p {
+  margin: 0;
+}
+
+/* Lists */
+ul, ol {
+  margin: 8px 0 12px 0;
+  padding-left: 24px;
+}
+
+li {
+  margin-bottom: 4px;
+}
+
+/* Horizontal rule */
+hr {
+  border: 0;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--zimlama-gris), transparent);
+  margin: 24px 0;
+}
+
+/* Cover page */
+.cover {
+  page-break-after: always;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  background: linear-gradient(135deg, var(--zimlama-negro) 0%, #1a1a1a 100%);
+  color: var(--zimlama-blanco);
+  padding: 40px;
+}
+
+.cover h1 {
+  color: var(--zimlama-blanco);
+  font-size: 36pt;
+  border: none;
+  margin-bottom: 16px;
+}
+
+.cover .subtitle {
+  font-size: 16pt;
+  color: var(--zimlama-gris);
+  margin-bottom: 32px;
+}
+
+.cover .target {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 18pt;
+  color: var(--zimlama-rojo);
+  margin-bottom: 48px;
+}
+
+.cover .meta {
+  font-size: 11pt;
+  color: var(--zimlama-gris);
+  line-height: 1.8;
+}
+
+/* Header / footer */
+@page {
+  @top-right {
+    content: 'zimlama recon — ' string(page);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9pt;
+    color: var(--zimlama-gris);
+  }
+}
+
+/* Print */
+@media print {
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

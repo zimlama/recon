@@ -1,0 +1,3 @@
+# Placeholder for Alembic migration versions.
+# Actual migrations are generated via:
+#   alembic revision --autogenerate -m "description"

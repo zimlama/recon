@@ -1,0 +1,23 @@
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   Copyright 2026 zimlama
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+   The zimlama brand kit (logo SVGs, design tokens, color palette) is
+   original work by zimlama, licensed under Apache-2.0.
+
+   Fonts (Plus Jakarta Sans, Montserrat, IBM Plex Mono) are open-source
+   from Google Fonts, licensed under SIL Open Font License 1.1. They are
+   not bundled with this kit — load them from Google Fonts at runtime
+   or include them under their respective licenses.

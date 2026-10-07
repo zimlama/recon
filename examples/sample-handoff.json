@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0.0",
+  "schema_url": "https://github.com/zimlama/recon/blob/main/docs/HANDOFF.md",
+  "source": {
+    "repo": "zimlama/recon",
+    "version": "0.1.0",
+    "job_id": "j-example-uuid-1234",
+    "phase": "01-recon-osint",
+    "completed_at": "2026-10-06T14:23:00Z"
+  },
+  "target": {
+    "primary_domain": "example.com",
+    "authorization_scope": "domain *.example.com",
+    "active_scan_authorized": false
+  },
+  "confirmed_targets": [
+    {
+      "subdomain": "api.example.com",
+      "ips": ["93.184.216.34"],
+      "asn": "AS15133",
+      "country": "US",
+      "tech_stack_hint": {
+        "server": "nginx/1.21.0"
+      },
+      "shodan_exposure": {
+        "open_ports": [80, 443],
+        "products": ["nginx"],
+        "cves_observed": []
+      },
+      "priority_for_next_phase": "HIGH",
+      "ai_reasoning": "Public-facing API endpoint with known nginx version. Standard CDN setup, no obvious misconfigurations in passive intel.",
+      "ai_verdict": "CONFIRMED",
+      "ai_confidence": 0.92
+    },
+    {
+      "subdomain": "www.example.com",
+      "ips": ["93.184.216.34"],
+      "asn": "AS15133",
+      "country": "US",
+      "tech_stack_hint": {
+        "server": "nginx/1.21.0"
+      },
+      "shodan_exposure": {
+        "open_ports": [80, 443],
+        "products": ["nginx"],
+        "cves_observed": []
+      },
+      "priority_for_next_phase": "MEDIUM",
+      "ai_reasoning": "Standard www subdomain, redirect to primary domain likely.",
+      "ai_verdict": "CONFIRMED",
+      "ai_confidence": 0.95
+    }
+  ],
+  "tech_stack_summary": {
+    "web_servers": {
+      "nginx": ["1.21.0"]
+    },
+    "frameworks": {},
+    "databases": {},
+    "cloud_providers": {
+      "CDN": ["edge delivery network"]
+    }
+  },
+  "credentials_exposure_summary": {
+    "emails_found": 5,
+    "breach_count": 1
+  },
+  "certificates": [
+    {
+      "cn": "example.com",
+      "issuer": "DigiCert",
+      "valid_from": "2026-01-15T00:00:00Z",
+      "valid_to": "2027-01-14T23:59:59Z",
+      "san": ["example.com", "www.example.com", "api.example.com"]
+    }
+  ],
+  "recommended_modules": [
+    {
+      "module": "port_scanning",
+      "priority": "HIGH",
+      "rationale": "2 confirmed hosts with 2 open ports each. Need full port sweep to find filtered/hidden services."
+    },
+    {
+      "module": "service_enumeration",
+      "priority": "HIGH",
+      "rationale": "HTTP services detected, need banner grab + version detection to confirm nginx 1.21.0."
+    },
+    {
+      "module": "web_fingerprinting",
+      "priority": "MEDIUM",
+      "rationale": "Identify WAF, CMS, JS frameworks. Determine if CDN is the only protection."
+    }
+  ],
+  "do_not_scan": [
+    "127.0.0.0/8",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "169.254.0.0/16",
+    "0.0.0.0/8",
+    "224.0.0.0/4",
+    "240.0.0.0/4",
+    "::1/128",
+    "fc00::/7"
+  ],
+  "consent_flags": {
+    "tier_3_modules_run": [],
+    "white_hat_only": true
+  }
+}
