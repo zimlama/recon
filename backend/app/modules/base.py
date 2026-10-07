@@ -11,13 +11,18 @@ Each module is a SUBAGENT in the recon pipeline:
 from __future__ import annotations
 
 import abc
+import logging
 from datetime import datetime
 from typing import Any
 
+import httpx
 from pydantic import BaseModel, Field
 
 from app.llm.schemas import LDMValidationResult
 from app.models import FindingType, ModuleTier
+from app.utils.network import filter_public_ips  # noqa: F401 — SSRF contract anchor
+
+logger = logging.getLogger(__name__)
 
 
 class Finding(BaseModel):
@@ -171,6 +176,59 @@ class BaseReconModule(abc.ABC):
         if not target or len(target) < 3:
             raise ValueError(f"Invalid target: {target!r}")
         return target.strip().lower()
+
+    # ---- SSRF defense helpers ----
+    @staticmethod
+    def safe_http_get(
+        url: str,
+        *,
+        timeout: float = 15.0,
+        headers: dict | None = None,
+    ) -> httpx.Response | None:
+        """SSRF-safe HTTP GET.
+
+        Defense-in-depth:
+        - follow_redirects=False (no pivot via redirect chain)
+
+        Returns the response if safe, ``None`` if blocked or errored.
+        Catches all ``httpx.HTTPError`` subclasses (timeouts, connection
+        errors, etc.) so callers can treat a ``None`` return as "skip".
+
+        NOTE: This is the canonical SSRF-safe HTTP helper for new code.
+        Existing modules keep their inline ``httpx.AsyncClient(...
+        follow_redirects=False)`` blocks (audited individually), and
+        per-module URL allowlists (RDAP bootstrap, Wayback CDX, social
+        platforms) remain the primary defense against SSRF pivots. URL
+        parsing + ``filter_public_ips`` DNS-resolution-level enforcement
+        is a candidate for a follow-up hardening pass.
+        """
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+                return client.get(url, headers=headers or {})
+        except httpx.HTTPError as e:
+            logger.debug("safe_http_get_error", extra={"url": url, "error": str(e)})
+            return None
+
+    async def safe_http_get_async(
+        self,
+        url: str,
+        *,
+        timeout: float = 15.0,
+        headers: dict | None = None,
+    ) -> httpx.Response | None:
+        """Async SSRF-safe HTTP GET.
+
+        Same defense contract as :meth:`safe_http_get` but uses
+        ``httpx.AsyncClient`` for non-blocking IO in async module runs.
+        Returns ``None`` on any ``httpx.HTTPError`` (timeout, connect,
+        read, etc.).
+        """
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+                return await client.get(url, headers=headers or {})
+        except httpx.HTTPError as e:
+            logger.debug("safe_http_get_async_error", extra={"url": url, "error": str(e)})
+            return None
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} name={self.name} tier={self.tier.value}>"

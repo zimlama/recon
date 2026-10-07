@@ -212,7 +212,11 @@ class Finding(Base):
 
     __table_args__ = (
         Index("ix_findings_type_value", "type", "value"),
-        Index("ix_findings_source", "source"),
+        # NB: `source` already gets an automatic index from `index=True` on
+        # the column declaration above (which creates `ix_findings_source`).
+        # Adding a duplicate explicit Index here caused
+        # `OperationalError: index ix_findings_source already exists` when
+        # `Base.metadata.create_all` ran in fresh sessions / test fixtures.
     )
 
     def __repr__(self) -> str:
