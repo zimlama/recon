@@ -1,57 +1,110 @@
 """SOCMINT module — Tier 3 (white-hat gated).
 
-Social-media intelligence using passive techniques + authorized research personas.
+Social media intelligence using passive techniques + authorized research personas.
+Discovers public profiles on LinkedIn, GitHub, Twitter/X, etc.
+
+GATED: respects platform ToS, no active engagement (no following, DM, liking).
+PII handling: profiles are aggregated, not deep-scraped.
 
 MITRE ATT&CK: T1593.001
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import shlex
+import shutil
+import time
+from typing import Any
+
+import httpx
+
 from app.models import ModuleTier
-from app.modules.base import BaseReconModule, ModuleInput, ModuleOutput
+from app.modules.base import BaseReconModule, Finding, FindingType, ModuleInput, ModuleOutput
+
+logger = logging.getLogger(__name__)
+
+SOCIAL_PLATFORMS = [
+    # (platform_name, url_template, requires_auth)
+    ("linkedin", "https://www.linkedin.com/company/{target}", False),
+    ("github_org", "https://github.com/{target}", False),
+    ("twitter", "https://twitter.com/{target}", False),
+    ("facebook", "https://www.facebook.com/{target}", False),
+    ("instagram", "https://www.instagram.com/{target}", False),
+    ("youtube", "https://www.youtube.com/@{target}", False),
+    ("tiktok", "https://www.tiktok.com/@{target}", False),
+]
+
+HTTP_TIMEOUT = 10
+USER_AGENT = "Mozilla/5.0 (compatible; zimlama-recon/0.1.0; +https://github.com/zimlama/recon)"
 
 
 class SOCMINTModule(BaseReconModule):
-    """Social Media Intelligence (passive)."""
+    """Social Media Intelligence — passive profile discovery."""
 
     name = "socmint"
-    description = "SOCMINT via Maltego, SpiderFoot (passive, no engagement)"
+    description = "Social media profile discovery (LinkedIn, GitHub, Twitter/X, etc.)"
     phase = "01-recon-osint"
     tier = ModuleTier.TIER_3
     mitre_techniques = ["T1593.001"]
-    requires_api_keys: list[str] = []
-    requires_consent = True  # Tier 3 — explicit consent required
+    requires_api_keys: list[str] = []  # Future: add API keys for richer data
+    requires_consent = True  # PII handling required
     estimated_duration_seconds = 120
     enabled_by_default = False  # Tier 3 — opt-in
 
     async def run(self, input: ModuleInput) -> ModuleOutput:
-        """Run passive SOCMINT.
+        """Discover social media profiles for the target."""
+        target = self.validate_target_format(input.target)
+        findings: list[Finding] = []
+        errors: list[str] = []
+        start = time.time()
 
-        TODO(Day 6): Implement:
-        - SpiderFoot HX (if available) or manual recon-ng
-        - Target: organization name, key employees
-        - Platforms: LinkedIn, Twitter/X, GitHub, Instagram, Facebook
-        - Per-platform operators and metadata extraction
-        - NO active engagement (no following, no DM, no liking)
-        """
+        # Check each platform
+        tasks = [
+            self._check_platform(platform_name, url_template, target)
+            for platform_name, url_template, _ in SOCIAL_PLATFORMS
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for (platform_name, url_template, _), result in zip(SOCIAL_PLATFORMS, results):
+            if isinstance(result, Exception):
+                errors.append(f"{platform_name} check failed: {result!s}")
+                continue
+            if result is None:
+                continue  # platform not found (404 etc.)
+            findings.append(
+                Finding(
+                    type=FindingType.SOCIAL_PROFILE,
+                    value=result,
+                    source=f"socmint_{platform_name}",
+                    confidence=0.7,  # existence check, not full profile
+                    finding_metadata={
+                        "platform": platform_name,
+                        "url_template": url_template,
+                    },
+                )
+            )
+
         return ModuleOutput(
             module=self.name,
-            findings=[],
-            duration_seconds=0.0,
-            errors=["Not implemented — scheduled for Day 6"],
+            findings=findings,
+            duration_seconds=time.time() - start,
+            errors=errors,
         )
 
     def get_ai_prompt(self) -> str:
-        return """You are validating SOCMINT findings for a target organization.
+        """System prompt for AI validation of SOCMINT findings."""
+        return """You are validating SOCMINT (Social Media Intelligence) findings for a target.
 
-For each profile/connection/post, classify as:
+For each social profile, classify as:
 - CONFIRMED: real, active, relevant to engagement
 - LIKELY: real but possibly outdated
 - FALSE_POSITIVE: sock puppet, unrelated person, fake
-- SUSPECTED: data quality uncertain
+- SUSPENSED: data quality uncertain
 
 Enrich each with:
-- platform: linkedin, twitter, github, etc.
+- platform: linkedin, github, twitter, etc.
 - relevance: HIGH (employee, exec, IT), MEDIUM (vendor, partner), LOW (random mention)
 - privacy_considerations: PII risk
 - reasoning: 1 sentence
@@ -59,10 +112,41 @@ Enrich each with:
 ETHICS:
 - No active engagement (don't follow, like, DM)
 - No doxxing individuals
-- Note OPSEC risks: posting patterns reveal location/timezone
 - Respect platform ToS
+- Note OPSEC risks: posting patterns reveal location/timezone
 
-Output JSON: {"verdicts": [...], "summary": "...", "recommended_action": "...", "recommended_next_module_chain": [...]}"""
+Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+
+    # ---- Private helpers ----
+
+    async def _check_platform(
+        self, platform_name: str, url_template: str, target: str
+    ) -> str | None:
+        """Check if a social profile exists for the target on this platform.
+
+        Returns the URL if found, None if not (404 etc.).
+        Uses HTTP HEAD first (less intrusive), then GET if HEAD is unsupported.
+        """
+        url = url_template.format(target=target)
+        try:
+            async with httpx.AsyncClient(
+                timeout=HTTP_TIMEOUT,
+                follow_redirects=True,
+                headers={"User-Agent": USER_AGENT},
+            ) as client:
+                # HEAD first (less intrusive)
+                response = await client.head(url)
+                if response.status_code == 200:
+                    return url
+                # Fall back to GET for sites that don't support HEAD
+                if response.status_code in (405, 403):
+                    response = await client.get(url)
+                    if response.status_code == 200:
+                        return url
+                return None
+        except httpx.HTTPError as e:
+            logger.debug("socmint_http_error", platform=platform_name, error=str(e))
+            return None
 
 
 __all__ = ["SOCMINTModule"]

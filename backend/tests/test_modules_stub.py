@@ -112,26 +112,20 @@ async def test_all_modules_run_returns_module_output() -> None:
 
 @pytest.mark.asyncio
 async def test_stub_modules_have_not_implemented_error() -> None:
-    """Stub modules (Day 1 placeholders) report 'Not implemented' in errors.
+    """After Day 6, ALL 14 modules are real implementations.
 
-    Note: Tier 2 modules (shodan_censys, github_recon, metadata_analysis, google_dorking)
-    are now real implementations as of Day 5. Only Tier 3 (breach, socmint, employee, darkweb)
-    remain as stubs.
+    This test now serves as a sanity check that no stub remains.
     """
+    # If a future Day adds a new module without implementing it, this catches it.
+    # As of Day 6, this list is empty — all modules are real.
+    expected_stubs_at_day6 = set()  # no stubs remaining
+    actual_stubs = []
     from app.modules.base import ModuleInput
-    stubs_at_day5 = {
-        "breach_data",
-        "socmint",
-        "employee_osint",
-        "dark_web_osint",
-    }
-    for name in stubs_at_day5:
-        if name in MODULE_REGISTRY:
-            module = MODULE_REGISTRY[name]
-            result = await module.run(ModuleInput(target="example.com"))
-            assert len(result.findings) == 0, f"{name} stub produced findings"
-            assert len(result.errors) >= 1, f"{name} stub should report at least one error"
-            assert "Not implemented" in result.errors[0], f"{name} stub error should say 'Not implemented'"
+    for name, module in MODULE_REGISTRY.items():
+        result = await module.run(ModuleInput(target="example.com"))
+        if result.errors and "Not implemented" in str(result.errors):
+            actual_stubs.append(name)
+    assert set(actual_stubs) == expected_stubs_at_day6
 
 
 def test_all_modules_have_non_empty_ai_prompts() -> None:
