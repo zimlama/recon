@@ -34,13 +34,24 @@ if settings.DATABASE_URL.startswith("sqlite"):
 
 engine: Engine = create_engine(settings.DATABASE_URL, **_engine_kwargs)  # type: ignore[arg-type]
 
-# Enable FK enforcement on SQLite
+# Enable FK enforcement + WAL + busy_timeout on SQLite
 if settings.DATABASE_URL.startswith("sqlite"):
 
     @event.listens_for(engine, "connect")
-    def _enable_sqlite_fk(dbapi_conn: object, _conn_record: object) -> None:
+    def _set_sqlite_pragma(dbapi_conn: object, _conn_record: object) -> None:
+        """Enable FK enforcement, WAL mode, and busy_timeout on each new connection.
+
+        - WAL: readers don't block writers and vice versa (safe concurrency).
+        - busy_timeout=5000: writers wait up to 5s for a lock instead of
+          immediately raising "database is locked".
+        - synchronous=NORMAL: durable enough for typical workloads, faster
+          than FULL (still safe with WAL).
+        """
         cursor = dbapi_conn.cursor()  # type: ignore[attr-defined]
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.close()
 
 SessionLocal = sessionmaker(

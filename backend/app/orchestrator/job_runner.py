@@ -71,14 +71,14 @@ class JobRunner:
             # create duplicate ModuleRuns and corrupt findings counts.
             if job.status in (JobStatus.COMPLETED, JobStatus.CANCELLED, JobStatus.FAILED):
                 logger.info(
-                    "job_already_terminal",
-                    job_id=job_id,
-                    status=job.status.value,
+                    "job_already_terminal job_id=%s status=%s",
+                    job_id,
+                    job.status.value,
                 )
                 return
             # Another worker is already running this job — don't double-execute.
             if job.status == JobStatus.RUNNING:
-                logger.warning("job_already_running", job_id=job_id)
+                logger.warning("job_already_running job_id=%s", job_id)
                 return
 
             job.status = JobStatus.RUNNING
@@ -185,9 +185,9 @@ class JobRunner:
                 module_run_id = module_run.id
         except Exception as e:  # noqa: BLE001
             logger.exception(
-                "module_run_creation_failed",
-                module=module_name,
-                error=str(e),
+                "module_run_creation_failed module=%s error=%s",
+                module_name,
+                e,
             )
             return ModuleOutput(
                 module=module_name,

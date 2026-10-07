@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -35,7 +36,12 @@ class RateLimiter:
         self.default_rps = default_rps or settings.RATE_LIMIT_RECON_RPS
         self.default_burst = default_burst or settings.RATE_LIMIT_RECON_BURST
         self._buckets: dict[tuple[str, str], _Bucket] = defaultdict(self._new_bucket)
-        self._locks: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
+        # Initialize locks eagerly to prevent the race where two coroutines
+        # missing on the same key each get a different asyncio.Lock and
+        # bypass mutual exclusion. Creation is guarded by a sync lock so
+        # concurrent coroutines (and threads) share the same per-key Lock.
+        self._locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._lock_init_lock = threading.Lock()
 
     def _new_bucket(self) -> _Bucket:
         """Create a new token bucket with default settings."""
@@ -46,6 +52,23 @@ class RateLimiter:
             capacity=float(self.default_burst),
             refill_rate=float(self.default_rps),
         )
+
+    def _get_lock(self, key: tuple[str, str]) -> asyncio.Lock:
+        """Return the asyncio.Lock for `key`, creating it under a sync lock.
+
+        Without the sync lock, two coroutines that miss on `key` would each
+        create a distinct asyncio.Lock, breaking mutual exclusion.
+        """
+        # Fast path: already initialized
+        lock = self._locks.get(key)
+        if lock is not None:
+            return lock
+        with self._lock_init_lock:
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._locks[key] = lock
+            return lock
 
     def _key(self, target: str, action: str) -> tuple[str, str]:
         """Build the bucket key."""
@@ -60,7 +83,7 @@ class RateLimiter:
             tokens: Number of permits to acquire (default 1)
         """
         key = self._key(target, action)
-        async with self._locks[key]:
+        async with self._get_lock(key):
             bucket = self._buckets[key]
             now = time.monotonic()
 

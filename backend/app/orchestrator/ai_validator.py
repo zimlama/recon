@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.llm.client import LLMClient
+import httpx
+from pydantic import ValidationError
+
+from app.llm.client import LLMClient, LLMError
 from app.llm.prompts import get_prompt
 from app.llm.schemas import LDMValidationResult
 from app.modules.base import BaseReconModule, Finding
@@ -55,20 +58,51 @@ class AIValidator:
         )
 
         try:
-            response = await self.llm_client.chat_completion(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.1,
-            )
-            return LDMValidationResult.model_validate(response)
+            try:
+                response = await self.llm_client.chat_completion(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.1,
+                )
+            except (httpx.HTTPError, LLMError) as e:
+                # LLM is down / network failure / LLM client gave up retrying —
+                # distinct from a schema mismatch.
+                logger.warning("ai_api_failure module=%s error=%s", module.name, e)
+                return LDMValidationResult(
+                    verdicts=[],
+                    summary=f"AI service unavailable: {e!s}. Operator review required.",
+                    recommended_action="REQUEST_USER_DECISION",
+                    recommended_next_module_chain=[],
+                )
+
+            # LLM responded, but the shape may not match our schema. That's a
+            # different problem from "the API is down" — log it as a warning,
+            # not an exception, and surface the bad-response signal to the user.
+            try:
+                return LDMValidationResult.model_validate(response)
+            except ValidationError as e:
+                logger.warning("ai_schema_mismatch module=%s error=%s", module.name, e)
+                char_count = len(response) if isinstance(response, (str, list)) else 0
+                return LDMValidationResult(
+                    verdicts=[],
+                    summary=(
+                        f"AI returned malformed response ({char_count} chars); "
+                        "operator review required."
+                    ),
+                    recommended_action="REQUEST_USER_DECISION",
+                    recommended_next_module_chain=[],
+                )
         except Exception as e:  # noqa: BLE001
-            logger.exception("AI validation failed for %s", module.name)
+            # Safety net: unexpected exception (e.g. module crashed, generic
+            # RuntimeError from a stub client). Treat as API failure rather
+            # than letting it bubble up and crash the job.
+            logger.exception("ai_unexpected_failure module=%s", module.name)
             return LDMValidationResult(
                 verdicts=[],
-                summary=f"AI validation failed: {e!s}",
+                summary=f"AI validation failed unexpectedly: {e!s}. Operator review required.",
                 recommended_action="REQUEST_USER_DECISION",
                 recommended_next_module_chain=[],
             )
