@@ -95,6 +95,153 @@ def test_handoff_packet_rejects_extra_fields() -> None:
         })
 
 
+# ---------------------------------------------------------------------------
+# PR 4 — PersonDossier summary in handoff packet
+# ---------------------------------------------------------------------------
+
+
+def test_handoff_packet_with_person_dossiers() -> None:
+    """HandoffPacket accepts a list of HandoffPersonDossierSummary entries.
+
+    PR 4 (REQ-016 AC-016.1 + design.md §8): additive, non-breaking.
+    """
+    from app.handoff.schema import HandoffPersonDossierSummary
+
+    packet = HandoffPacket(
+        source=HandoffSource(
+            version="0.1.0",
+            job_id="test-123",
+            completed_at=datetime.now(timezone.utc),
+        ),
+        target=HandoffTarget(
+            primary_domain="example.com",
+            authorization_scope="domain example.com",
+        ),
+        person_dossiers=[
+            HandoffPersonDossierSummary(
+                persona_id="Persona_001",
+                email_hash="a" * 64,
+                source_modules=["email_harvesting", "socmint"],
+                role_relevance="HIGH",
+                priority_for_targeting="HIGH",
+                confidence=0.95,
+                coherence="HIGH",
+                breach_exposure_count=3,
+                profile_count=1,
+            ),
+        ],
+    )
+    assert len(packet.person_dossiers) == 1
+    assert packet.person_dossiers[0].persona_id == "Persona_001"
+    assert packet.person_dossiers[0].email_hash == "a" * 64
+    assert packet.person_dossiers[0].breach_exposure_count == 3
+
+
+def test_handoff_packet_default_person_dossiers_empty() -> None:
+    """HandoffPacket.person_dossiers defaults to [] (additive, non-breaking)."""
+    packet = HandoffPacket(
+        source=HandoffSource(
+            version="0.1.0",
+            job_id="test-123",
+            completed_at=datetime.now(timezone.utc),
+        ),
+        target=HandoffTarget(
+            primary_domain="example.com",
+            authorization_scope="domain example.com",
+        ),
+    )
+    assert packet.person_dossiers == []
+
+
+def test_handoff_person_dossier_summary_rejects_plaintext_email() -> None:
+    """HandoffPersonDossierSummary has NO `email` field (privacy invariant)."""
+    from app.handoff.schema import HandoffPersonDossierSummary
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        HandoffPersonDossierSummary(
+            persona_id="Persona_001",
+            email="jane@example.com",  # plaintext — forbidden
+            email_hash="a" * 64,
+            source_modules=[],
+            role_relevance="LOW",
+            priority_for_targeting="LOW",
+            confidence=0.5,
+            breach_exposure_count=0,
+            profile_count=0,
+        )
+
+
+def test_handoff_person_dossier_summary_rejects_short_email_hash() -> None:
+    """email_hash MUST be exactly 64 lowercase hex (per design.md REQ-020)."""
+    from app.handoff.schema import HandoffPersonDossierSummary
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        HandoffPersonDossierSummary(
+            persona_id="Persona_001",
+            email_hash="abc",  # too short
+            source_modules=[],
+            role_relevance="LOW",
+            priority_for_targeting="LOW",
+            confidence=0.5,
+            breach_exposure_count=0,
+            profile_count=0,
+        )
+
+
+def test_handoff_person_dossier_summary_role_relevance_literal() -> None:
+    """role_relevance MUST be HIGH/MEDIUM/LOW."""
+    from app.handoff.schema import HandoffPersonDossierSummary
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        HandoffPersonDossierSummary(
+            persona_id="Persona_001",
+            email_hash="a" * 64,
+            source_modules=[],
+            role_relevance="MAYBE",  # not a valid literal
+            priority_for_targeting="LOW",
+            confidence=0.5,
+            breach_exposure_count=0,
+            profile_count=0,
+        )
+
+
+def test_handoff_packet_serialization_with_dossiers() -> None:
+    """Dossiers round-trip through JSON model_dump / model_validate."""
+    from app.handoff.schema import HandoffPersonDossierSummary
+
+    packet = HandoffPacket(
+        source=HandoffSource(
+            version="0.1.0",
+            job_id="test-123",
+            completed_at=datetime.now(timezone.utc),
+        ),
+        target=HandoffTarget(
+            primary_domain="example.com",
+            authorization_scope="domain example.com",
+        ),
+        person_dossiers=[
+            HandoffPersonDossierSummary(
+                persona_id="Persona_001",
+                email_hash="b" * 64,
+                source_modules=["socmint"],
+                role_relevance="MEDIUM",
+                priority_for_targeting="MEDIUM",
+                confidence=0.7,
+                breach_exposure_count=1,
+                profile_count=2,
+            ),
+        ],
+    )
+    json_data = packet.model_dump_json()
+    loaded = HandoffPacket.model_validate_json(json_data)
+    assert len(loaded.person_dossiers) == 1
+    assert loaded.person_dossiers[0].persona_id == "Persona_001"
+    assert loaded.person_dossiers[0].email_hash == "b" * 64
+
+
 def test_import_handoff_validates_schema(tmp_path: Path) -> None:
     """import_handoff validates a JSON file against the schema."""
     packet = HandoffPacket(

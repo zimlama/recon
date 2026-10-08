@@ -123,6 +123,39 @@ class HandoffConsentFlags(BaseModel):
     white_hat_only: bool = True
 
 
+class HandoffPersonDossierSummary(BaseModel):
+    """Compact summary of a PersonDossier for the Phase 2 consumer (PR 4).
+
+    The full PersonDossier (with breach_exposures, profiles, etc.) lives
+    in the DB; this summary carries only what downstream tooling needs to
+    triage identities — pseudonym + module provenance + role/priority tags.
+
+    Privacy invariant: NO plaintext email field. Only the SHA-256 hex
+    pseudonym (`email_hash`) and the operator-facing `persona_id` are
+    exposed. The encrypted `IdentityMap.encrypted_email` row is NOT
+    exported (per design.md §8 — the ciphertext would be useless to a
+    downstream consumer without the key).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    persona_id: str = Field(..., description="Operator-facing pseudonym (e.g. Persona_001)")
+    email_hash: str = Field(
+        ...,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+        description="SHA-256 hex pseudonym (REQ-020)",
+    )
+    source_modules: list[str] = Field(default_factory=list)
+    role_relevance: Literal["HIGH", "MEDIUM", "LOW"]
+    priority_for_targeting: Literal["HIGH", "MEDIUM", "LOW"]
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    coherence: Literal["HIGH", "MEDIUM", "LOW", "NONE"] | None = None
+    breach_exposure_count: int = Field(default=0, ge=0)
+    profile_count: int = Field(default=0, ge=0)
+
+
 # ---- Top-level packet ----
 
 class HandoffPacket(BaseModel):
@@ -152,6 +185,10 @@ class HandoffPacket(BaseModel):
     )
     certificates: list[HandoffCertificate] = Field(default_factory=list)
     recommended_modules: list[HandoffRecommendedModule] = Field(default_factory=list)
+    # PR 4 — additive. List of PERSON DOSSIER findings emitted by the
+    # person_dossier module (Tier 3 aggregator). Empty list for jobs
+    # that did not include the person_dossier module.
+    person_dossiers: list[HandoffPersonDossierSummary] = Field(default_factory=list)
 
     do_not_scan: list[str] = Field(
         default_factory=lambda: [
@@ -183,4 +220,5 @@ __all__ = [
     "HandoffRecommendedModule",
     "HandoffCertificate",
     "HandoffConsentFlags",
+    "HandoffPersonDossierSummary",
 ]

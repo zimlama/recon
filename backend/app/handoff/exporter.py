@@ -19,6 +19,7 @@ from app.handoff.schema import (
     HandoffConsentFlags,
     HandoffCredentialsExposure,
     HandoffPacket,
+    HandoffPersonDossierSummary,
     HandoffRecommendedModule,
     HandoffShodanExposure,
     HandoffSource,
@@ -139,6 +140,7 @@ def _build_packet(db: Session, job: Job) -> HandoffPacket:
     breach_count = 0
     recommended_modules: list[HandoffRecommendedModule] = []
     consent_tier3: list[str] = []
+    person_dossiers: list[HandoffPersonDossierSummary] = []
 
     for mr in module_runs:
         if mr.module_tier.value == "tier_3":
@@ -189,6 +191,33 @@ def _build_packet(db: Session, job: Job) -> HandoffPacket:
             if finding.type == FindingType.CREDENTIAL_EXPOSURE:
                 breach_count += 1
 
+            # PR 4 — PersonDossier extraction (additive, backwards-compatible).
+            # The handoff consumer sees the pseudonym + provenance but never
+            # the plaintext email. See design.md §8 / spec.md REQ-020.
+            if finding.type == FindingType.DOSSIER:
+                meta = finding.finding_metadata or {}
+                # Defensive: malformed DOSSIER findings are skipped, not raised.
+                try:
+                    person_dossiers.append(
+                        HandoffPersonDossierSummary(
+                            persona_id=finding.value,
+                            email_hash=meta["email_hash"],
+                            source_modules=list(meta.get("source_modules", [])),
+                            role_relevance=meta.get("role_relevance", "LOW"),
+                            priority_for_targeting=meta.get("priority_for_targeting", "LOW"),
+                            confidence=float(finding.confidence),
+                            coherence=meta.get("coherence"),
+                            breach_exposure_count=len(meta.get("breach_exposures", [])),
+                            profile_count=len(meta.get("profiles", [])),
+                        )
+                    )
+                except (KeyError, ValueError, TypeError) as e:
+                    logger.warning(
+                        "person_dossier_skip malformed finding id=%s error=%s",
+                        finding.id,
+                        e,
+                    )
+
             if finding.type == FindingType.TECH_STACK:
                 # Add to tech_stack
                 name = finding.source
@@ -218,6 +247,7 @@ def _build_packet(db: Session, job: Job) -> HandoffPacket:
             breach_count=breach_count,
         ),
         recommended_modules=recommended_modules,
+        person_dossiers=person_dossiers,
         consent_flags=HandoffConsentFlags(
             tier_3_modules_run=consent_tier3,
             white_hat_only=True,
