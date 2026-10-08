@@ -297,3 +297,108 @@ def test_settings_tools_only_free_explicit_false() -> None:
 
     s = Settings(tools_only_free=False)
     assert s.tools_only_free is False
+
+
+# =============================================================================
+# Registry helper accessors — close the branch coverage on app/modules/__init__.py
+# =============================================================================
+
+
+def test_get_module_registry_returns_built_registry() -> None:
+    """`get_module_registry()` returns the same dict object as `MODULE_REGISTRY`.
+
+    The registry is module-level; the helper is just a typed accessor so
+    tests + downstream code can pass it around without reaching into the
+    module namespace. We verify object identity to lock down that contract.
+    """
+    from app.modules import MODULE_REGISTRY, get_module_registry
+
+    result = get_module_registry()
+    assert result is MODULE_REGISTRY
+    assert isinstance(result, dict)
+    assert len(result) >= 14
+
+
+def test_get_module_returns_known_module_by_name() -> None:
+    """`get_module(name)` looks up an instance by string name."""
+    from app.modules import get_module
+
+    mod = get_module("whois_rdap")
+    # The instance is a BaseReconModule subclass with the expected .name
+    from app.modules.base import BaseReconModule
+
+    assert isinstance(mod, BaseReconModule)
+    assert mod.name == "whois_rdap"
+
+
+def test_get_module_unknown_name_raises_keyerror() -> None:
+    """`get_module(name)` raises `KeyError` (not `ValueError`/`LookupError`).
+
+    The error message includes the unknown name + the list of valid names
+    so a misbehaving caller can debug without re-reading the source.
+    """
+    from app.modules import MODULE_REGISTRY, get_module
+
+    with pytest.raises(KeyError) as exc_info:
+        get_module("does_not_exist_anywhere")
+    msg = str(exc_info.value)
+    assert "does_not_exist_anywhere" in msg
+    # At least one known module name appears in the error context
+    assert any(name in msg for name in MODULE_REGISTRY.keys())
+
+
+def test_get_module_picks_correct_instance_per_name() -> None:
+    """Each name resolves to a distinct class instance.
+
+    This protects against a registry bug where two names accidentally
+    alias to the same instance (object identity).
+    """
+    from app.modules import get_module
+
+    a = get_module("whois_rdap")
+    b = get_module("dns_enum")
+    c = get_module("whois_rdap")
+    assert a is c
+    assert a is not b
+
+
+def test_registry_contains_aggregator_module() -> None:
+    """`person_dossier` aggregator is present in the default registry.
+
+    It's an internal cross-module pass (not a data-source probe), so it
+    is intentionally excluded from the REQ-029 mapping table — but it
+    MUST still be wired into the registry for downstream jobs to call.
+    """
+    from app.modules import MODULE_REGISTRY
+
+    assert "person_dossier" in MODULE_REGISTRY
+
+
+def test_base_module_validate_target_format_rejects_short_target() -> None:
+    """Validate that `validate_target_format` raises on suspiciously short targets.
+
+    Defense against accidental empty/whitespace targets reaching a
+    downstream OSINT module — empty target is a silent foot-gun.
+    """
+    from app.modules.base import BaseReconModule
+
+    class _Probe(BaseReconModule):
+        name = "probe_short"
+        description = "probe for validate_target_format"
+
+        async def run(self, input):  # type: ignore[override,no-untyped-def]
+            from app.modules.base import ModuleOutput
+
+            return ModuleOutput(module=self.name)
+
+        def get_ai_prompt(self) -> str:
+            return "x"
+
+    instance = _Probe()
+    with pytest.raises(ValueError):
+        instance.validate_target_format("ab")  # len 2 < 3 minimum
+    with pytest.raises(ValueError):
+        instance.validate_target_format("")
+    # And a valid one returns a normalized target
+    assert instance.validate_target_format("  Example.COM  ") == "example.com"
+

@@ -511,3 +511,107 @@ async def test_middleware_rejects_empty_body(
         )
     assert resp.status_code == 400
     assert resp.json()["error"] == "missing_target"
+
+
+# ---------------------------------------------------------------------------
+# Contract hardening — extra branches not strictly needed but useful as
+# regression guards: target normalization, env-flag case sensitivity,
+# non-POST protected paths.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_middleware_normalizes_target_case_for_lookup(
+    session_factory,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A target with surrounding whitespace + mixed case still matches an
+    `example.com` RoE.
+
+    The validator applies `target.strip().lower()`; the middleware
+    must forward the raw string (so the validator sees it) rather than
+    pre-normalizing and breaking the round-trip.
+    """
+    db, factory = session_factory
+    _seed_active_roe(db, target="example.com")
+    monkeypatch.setenv("ROE_ENABLED", "true")
+
+    app = _make_test_app(factory)
+    payload = {"target": "  EXAMPLE.com  "}
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        resp = await ac.post("/api/v1/jobs", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["echo"] == payload
+
+
+@pytest.mark.asyncio
+async def test_middleware_case_insensitive_env_flag_uppercase(
+    session_factory,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ROE_ENABLED=TRUE` (uppercase) also enables the middleware.
+
+    The flag is parsed with `.lower() == "true"`, so any casing of
+    "true" enables it. Common in container/CI env files.
+    """
+    monkeypatch.setenv("ROE_ENABLED", "TRUE")
+    _db, factory = session_factory
+
+    app = FastAPI()
+    mw = RoEMiddleware(app, session_factory=factory)
+    assert mw._enabled is True
+
+
+@pytest.mark.asyncio
+async def test_middleware_env_flag_invalid_value_stays_off(
+    session_factory,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An invalid env value (`1`, `yes`, `enabled`) keeps the middleware OFF.
+
+    We accept literal "true" (case-insensitive) and nothing else.
+    Operators who set `ROE_ENABLED=1` get the safe default — they must
+    set the canonical value to flip the gate on.
+    """
+    monkeypatch.setenv("ROE_ENABLED", "1")
+    _db, factory = session_factory
+
+    app = FastAPI()
+    mw = RoEMiddleware(app, session_factory=factory)
+    assert mw._enabled is False
+
+
+@pytest.mark.asyncio
+async def test_middleware_does_not_gate_get_requests(
+    session_factory,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GET on a protected path is not gated even when middleware is on.
+
+    The middleware filters by `request.method == "POST"`; GETs (and
+    DELETEs etc.) are passed straight through. Confirm by adding a
+    GET endpoint in the test app and posting a request with method
+    GET — no RoE means a 200, not a 403.
+    """
+    monkeypatch.setenv("ROE_ENABLED", "true")
+    _db, factory = session_factory
+
+    app = FastAPI()
+    app.add_middleware(
+        RoEMiddleware,
+        session_factory=factory,
+        protected_paths=["/api/v1/jobs"],
+    )
+
+    @app.get("/api/v1/jobs")
+    async def list_jobs() -> dict[str, Any]:
+        return {"jobs": []}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        resp = await ac.get("/api/v1/jobs")
+    assert resp.status_code == 200
+    assert resp.json() == {"jobs": []}

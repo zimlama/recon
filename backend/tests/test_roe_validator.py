@@ -333,3 +333,183 @@ def test_get_active_roes_filters_by_scope_type(
 
     company_results = validator.get_active_roes(scope_type=ScopeType.COMPANY)
     assert {r.scope_type for r in company_results} == {ScopeType.COMPANY}
+
+
+# ---------------------------------------------------------------------------
+# Robustness / contract hardening
+#
+# The original test surface covered the four status branches (DRAFT, ACTIVE,
+# EXPIRED, REVOKED) and the no-signoff branch. These extra cases hard-test
+# the small remaining branches: explicit `at=` injection, target
+# normalization, and idempotency.
+# ---------------------------------------------------------------------------
+
+
+def test_is_authorized_with_explicit_at_in_past(
+    session: Session, validator: RoEValidator
+) -> None:
+    """`at=` injection into the past makes an otherwise-valid RoE look expired.
+
+    The `at` parameter is exposed exactly so callers (audit, replay) can
+    ask: "would this RoE have covered the target at *time T*?" — even if
+    T is now in the past. The validator must honour the override.
+    """
+    now = _now()
+    roe = RoE(
+        target="example.com",
+        scope_type=ScopeType.DOMAIN,
+        scope_value="example.com",
+        authorized_by="alice@example.com",
+        status=RoEStatus.ACTIVE,
+        valid_from=now - timedelta(hours=2),
+        valid_until=now + timedelta(hours=2),
+    )
+    session.add(roe)
+    session.commit()
+
+    signoff = SignOff(
+        roe_id=roe.id,
+        signer_name="Bob",
+        signer_email="bob@example.com",
+        signer_role="CEO",
+    )
+    session.add(signoff)
+    session.commit()
+
+    # 10 hours ago — well outside the validity window of 2h ago → 2h ahead.
+    authorized, reason, _ = validator.is_authorized(
+        target="example.com",
+        scope_type=ScopeType.DOMAIN,
+        at=now - timedelta(hours=10),
+    )
+    assert authorized is False
+    assert "valid" in reason.lower() or "window" in reason.lower() or "expired" in reason.lower()
+
+
+def test_is_authorized_with_explicit_at_in_future(
+    session: Session, validator: RoEValidator
+) -> None:
+    """`at=` injection into the future makes an RoE look "not yet valid".
+
+    Symmetric to the past case: callers can ask "would this RoE cover
+    the target *at T*?" for scheduled / dry-run audits.
+    """
+    now = _now()
+    roe = RoE(
+        target="example.com",
+        scope_type=ScopeType.DOMAIN,
+        scope_value="example.com",
+        authorized_by="alice@example.com",
+        status=RoEStatus.ACTIVE,
+        valid_from=now + timedelta(hours=10),  # not yet valid
+        valid_until=now + timedelta(hours=20),
+    )
+    session.add(roe)
+    session.commit()
+
+    signoff = SignOff(
+        roe_id=roe.id,
+        signer_name="Bob",
+        signer_email="bob@example.com",
+        signer_role="CEO",
+    )
+    session.add(signoff)
+    session.commit()
+
+    authorized, reason, _ = validator.is_authorized(
+        target="example.com",
+        scope_type=ScopeType.DOMAIN,
+        at=now,
+    )
+    assert authorized is False
+    assert "not yet valid" in reason.lower() or "future" in reason.lower()
+
+
+def test_is_authorized_target_normalizes_whitespace_and_case(
+    session: Session, validator: RoEValidator
+) -> None:
+    """`is_authorized` must match targets case-insensitively and trim whitespace.
+
+    Operators typo targets with leading/trailing spaces; the validator
+    must treat `"  EXAMPLE.com  "` as a match for `"example.com"`.
+    """
+    roe = _add_active_roe(session, target="example.com")
+    _add_signoff(session, roe)
+
+    authorized, reason, signoffs = validator.is_authorized(
+        target="  EXAMPLE.com  ",
+        scope_type=ScopeType.DOMAIN,
+    )
+    assert authorized is True
+    assert reason == ""
+    assert len(signoffs) == 1
+
+
+def test_is_authorized_is_idempotent(
+    session: Session, validator: RoEValidator
+) -> None:
+    """Re-running `is_authorized` is read-only and produces identical answers.
+
+    The validator must not create new SignOffs, mutate the RoE, or shift
+    session state — it's called from the middleware and the orchestrator,
+    possibly multiple times for the same request, and must be safe.
+    Note: the two returned SignOff lists are *equal-content* (same id,
+    same email, same revoked state) but are distinct ORM instances
+    because the validator opens a fresh query each call.
+    """
+    roe = _add_active_roe(session, target="example.com")
+    _add_signoff(session, roe)
+
+    first = validator.is_authorized(target="example.com", scope_type=ScopeType.DOMAIN)
+    second = validator.is_authorized(target="example.com", scope_type=ScopeType.DOMAIN)
+
+    authorized_1, reason_1, signoffs_1 = first
+    authorized_2, reason_2, signoffs_2 = second
+
+    assert authorized_1 is True
+    assert authorized_2 is True
+    assert reason_1 == ""
+    assert reason_2 == ""
+    assert len(signoffs_1) == 1
+    assert len(signoffs_2) == 1
+    # Same SignOff row (same id, same email)
+    assert signoffs_1[0].id == signoffs_2[0].id
+    assert signoffs_1[0].signer_email == signoffs_2[0].signer_email
+    # No new signoff rows were created
+    assert session.query(SignOff).count() == 1
+    # The RoE itself is unchanged
+    assert roe.status == RoEStatus.ACTIVE
+
+
+def test_is_authorized_no_roe_returns_empty_signoffs(
+    session: Session, validator: RoEValidator
+) -> None:
+    """With no RoE at all, signoffs is exactly `[]` (not None, not NoneType)."""
+    # Empty DB.
+    authorized, reason, signoffs = validator.is_authorized(
+        target="nothing.example",
+        scope_type=ScopeType.DOMAIN,
+    )
+    assert authorized is False
+    assert signoffs == []
+    assert isinstance(signoffs, list)
+
+
+def test_get_active_roes_excludes_only_drafts(
+    session: Session, validator: RoEValidator
+) -> None:
+    """Mixed RoEs: DRAFT and REVOKED are filtered; ACTIVE in-window passes."""
+    keep = _add_active_roe(session, target="keep.com")
+    _add_signoff(session, keep)
+
+    draft = _add_active_roe(session, target="draft.com", status=RoEStatus.DRAFT)
+    _add_signoff(session, draft)
+
+    revoked = _add_active_roe(session, target="revoked.com", status=RoEStatus.REVOKED)
+    _add_signoff(session, revoked)
+
+    roes = validator.get_active_roes()
+    targets = {r.target for r in roes}
+    assert "keep.com" in targets
+    assert "draft.com" not in targets
+    assert "revoked.com" not in targets
