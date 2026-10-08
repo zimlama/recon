@@ -139,23 +139,26 @@ async def test_all_modules_run_returns_module_output() -> None:
     }
 
     original_methods: dict[tuple[str, str], object] = {}
+    # Save the REAL asyncio.create_subprocess_exec exactly ONCE — it is a
+    # global singleton, so saving it on every iteration captures the
+    # previously-mocked value, not the real one. Saving once guarantees
+    # we can restore it cleanly in the finally block.
+    original_subprocess_exec = __import__("asyncio").create_subprocess_exec
+    mock_proc = MagicMock()
+    mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+    # The mock itself MUST be an AsyncMock so that the production code's
+    # `await asyncio.create_subprocess_exec(...)` keeps working — a plain
+    # MagicMock isn't a coroutine and would raise
+    # `TypeError: object MagicMock can't be used in 'await' expression`,
+    # which then leaks into every other test that calls subprocess_exec.
+    mock_exec = AsyncMock(return_value=mock_proc)
+    __import__("asyncio").create_subprocess_exec = mock_exec  # type: ignore[assignment]
     try:
         for name, module in MODULE_REGISTRY.items():
             for method_name in network_methods:
                 if hasattr(module, method_name):
                     original_methods[(name, method_name)] = getattr(module, method_name)
                     setattr(module, method_name, AsyncMock(return_value=[]))
-
-            if name in subprocess_modules:
-                # Save the original subprocess exec
-                original_methods[(name, "subprocess_exec")] = (
-                    __import__("asyncio").create_subprocess_exec
-                )
-                mock_exec = MagicMock()
-                mock_proc = MagicMock()
-                mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-                mock_exec.return_value = mock_proc
-                __import__("asyncio").create_subprocess_exec = mock_exec
 
         for name, module in MODULE_REGISTRY.items():
             if name == "person_dossier":
@@ -171,8 +174,9 @@ async def test_all_modules_run_returns_module_output() -> None:
             for method_name in network_methods:
                 if (name, method_name) in original_methods:
                     setattr(module, method_name, original_methods[(name, method_name)])
-            if name in subprocess_modules and (name, "subprocess_exec") in original_methods:
-                __import__("asyncio").create_subprocess_exec = original_methods[(name, "subprocess_exec")]
+        # Restore the REAL subprocess_exec exactly once. Saving and
+        # restoring it per-module leaks the mock into later tests.
+        __import__("asyncio").create_subprocess_exec = original_subprocess_exec  # type: ignore[assignment]
 
 
 @pytest.mark.asyncio
