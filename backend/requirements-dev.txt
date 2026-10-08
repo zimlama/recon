@@ -21,4 +21,4 @@ types-aiofiles==23.2.0.0
 
 # --- HTTP mocking ---
 # respx >= 0.22 required for httpx >= 0.28 compatibility
-respx==0.22.0
+respx==0.23.1
