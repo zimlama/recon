@@ -1,3 +1,5 @@
+# Copyright 2026 zimlama
+# SPDX-License-Identifier: Apache-2.0
 """Rules-of-Engagement validator.
 
 Real authorization gate for recon jobs. The validator answers one question:

@@ -1,3 +1,5 @@
+# Copyright 2026 zimlama
+# SPDX-License-Identifier: Apache-2.0
 """BaseReconModule ABC — the contract every recon module implements.
 
 Each module is a SUBAGENT in the recon pipeline:

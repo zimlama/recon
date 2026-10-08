@@ -1,3 +1,5 @@
+# Copyright 2026 zimlama
+# SPDX-License-Identifier: Apache-2.0
 """RoE enforcement middleware for the FastAPI app.
 
 Disabled by default. Enable by exporting `ROE_ENABLED=true` before the

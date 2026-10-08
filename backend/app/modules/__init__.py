@@ -1,3 +1,5 @@
+# Copyright 2026 zimlama
+# SPDX-License-Identifier: Apache-2.0
 """Recon module registry + loader.
 
 Single source of truth for which modules are available. Adding a new module:
