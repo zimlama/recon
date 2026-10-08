@@ -21,7 +21,7 @@ from app.audit.middleware import AuditLogMiddleware
 from app.config import get_settings
 from app.database import SessionLocal, init_db
 from app.llm.client import LLMClient
-from app.middleware.roe import RoEMiddleware
+from app.middleware import RequestIdMiddleware, RoEMiddleware
 from app.modules import get_module_registry
 from app.orchestrator.ai_validator import AIValidator
 from app.orchestrator.job_runner import JobRunner
@@ -154,9 +154,15 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "DELETE"],
-        allow_headers=["Content-Type", "Authorization"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
     )
+
+    # Request-ID middleware — first in the chain so downstream
+    # middlewares (RoEMiddleware, AuditLog) and the response phase
+    # all see the same correlation ID (audit R4-H4). Wired before
+    # RoEMiddleware so a 403 carries the request_id.
+    app.add_middleware(RequestIdMiddleware)
 
     # Rules-of-Engagement enforcement (REQ-021a, env-disabled by default).
     # Order rationale: added AFTER CORS (so pre-flight CORS requests skip
