@@ -93,6 +93,17 @@ class Settings(BaseSettings):
     HANDSHAKE_AUTO_GENERATE: bool = Field(default=True)
     AUDIT_LOGGING_ENABLED: bool = Field(default=True)
 
+    # ---- Privacy / encryption (PR 4 — person_dossier aggregator) ----
+    PERSON_DOSSIER_ENCRYPTION_KEY: str | None = Field(
+        default=None,
+        description=(
+            "Fernet key for encrypting raw emails in identity_map. "
+            "Generate with `Fernet.generate_key().decode()`. If unset, "
+            "encryption is skipped and dossiers still emit without "
+            "identity_map rows."
+        ),
+    )
+
     @field_validator("CORS_ORIGINS")
     @classmethod
     def _validate_cors(cls, v: str) -> str:
