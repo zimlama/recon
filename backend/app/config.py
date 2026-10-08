@@ -93,6 +93,36 @@ class Settings(BaseSettings):
     HANDSHAKE_AUTO_GENERATE: bool = Field(default=True)
     AUDIT_LOGGING_ENABLED: bool = Field(default=True)
 
+    # ---- Rules-of-Engagement enforcement (PR 1, default off) ----
+    # When true, `RoEMiddleware` gates POST /api/v1/jobs on the
+    # existence of an ACTIVE RoE for the named target. The middleware
+    # class is a no-op when this is false — backward compat for
+    # deployments that have not opted in.
+    #
+    # The middleware reads the env var directly (`os.getenv`) at
+    # construction time so the constructor stays decoupled from
+    # pydantic-settings. This Settings field exists for operator
+    # visibility (one canonical place to see every feature flag) and
+    # to enable a future migration where the middleware reads
+    # `settings.ROE_ENABLED` directly.
+    ROE_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Enable Rules-of-Engagement enforcement on POST /api/v1/jobs. "
+            "When false (default), the middleware is a no-op and every "
+            "request passes through. When true, requests without an "
+            "active RoE for the named target are rejected with 403. "
+            "Reads at app construction; flip by restarting the process."
+        ),
+    )
+    ROE_SESSION_FACTORY: str | None = Field(
+        default=None,
+        description=(
+            "Optional dotted path to override the session factory used "
+            "by RoEMiddleware. Defaults to app.database.SessionLocal."
+        ),
+    )
+
     # ---- Privacy / encryption (PR 4 — person_dossier aggregator) ----
     PERSON_DOSSIER_ENCRYPTION_KEY: str | None = Field(
         default=None,
