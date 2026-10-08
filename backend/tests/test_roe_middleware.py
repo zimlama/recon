@@ -1,3 +1,5 @@
+# Copyright 2026 zimlama
+# SPDX-License-Identifier: Apache-2.0
 """Tests for the FastAPI RoE enforcement middleware.
 
 The middleware is OFF by default — it reads `ROE_ENABLED=true` from the

@@ -28,6 +28,7 @@ import contextlib
 import logging
 import re
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -169,7 +170,7 @@ def _extract_email_hash(finding: Finding) -> str | None:
       when it is exactly 64 hex chars
     - ``CREDENTIAL_EXPOSURE`` → ``None`` (its 10-char SHA-1 prefix is rejected
       by the 64-char length check; correlation happens via domain-join in
-      ``_domain_join_breaches``)
+      ``_collect_orphan_breaches_and_attach``)
     - other types → ``None``
 
     Defensive: returns ``None`` for any malformed metadata rather than
@@ -358,7 +359,7 @@ async def _assess_coherence(
             ),
             timeout=AI_TIMEOUT_SECONDS,
         )
-    except (TimeoutError, Exception) as e:
+    except Exception as e:
         logger.warning("coherence_llm_failed error=%s", e)
         return None
 
@@ -417,21 +418,17 @@ class PersonDossierModule(BaseReconModule):
     async def run(self, input: ModuleInput) -> ModuleOutput:  # noqa: C901 — orchestrator role
         """Build PersonDossier findings for the job.
 
-        Pipeline:
-          1. Load the Job from DB (raises if not found).
-          2. Check sibling ModuleRun.status — return SKIPPED if any sibling
-             is still RUNNING (per Q1, option b).
-          3. Read completed sibling findings.
-          4. Group by email_hash (skip already-dossiered).
-          5. For each bucket: build PersonDossier, run LLM coherence,
-             emit DOSSIER Finding, write IdentityMap row.
+        Pipeline (each step a helper):
+          1. _load_sibling_state — poll sibling ModuleRun.status.
+          2. _load_source_findings — read sibling Finding rows.
+          3. _group_findings_for_processing — bucket by email_hash + attach breaches.
+          4. _build_dossiers — build one PersonDossier per bucket + coherence.
+          5. _emit_findings — write IdentityMap rows + emit DOSSIER findings.
         """
         self.validate_target_format(input.target)
-        findings: list[Finding] = []
-        errors: list[str] = []
         start = time.time()
 
-        # Lazy imports to avoid pulling SQLAlchemy at module-import time.
+        # Lazy import to avoid pulling SQLAlchemy at module-import time.
         from app.database import SessionLocal
 
         with SessionLocal() as db:
@@ -439,77 +436,160 @@ class PersonDossierModule(BaseReconModule):
             if job is None:
                 raise ValueError(f"job not found: {input.job_id}")
 
-            # ---- Step 2: dependency polling (Q1 option b) ----
-            sibling_states = self._sibling_module_states(db, job.id)
-            running = [
-                name
-                for name, status in sibling_states.items()
-                if status == ModuleStatus.RUNNING
-            ]
-            if running:
-                errors.append(
-                    f"sibling still running: {','.join(sorted(running))} — dossier skipped"
-                )
-                return ModuleOutput(
-                    module=self.name,
-                    findings=findings,
-                    duration_seconds=time.time() - start,
-                    errors=errors,
-                )
+            skipped = self._load_sibling_state(db, job.id)
+            if skipped is not None:
+                return skipped.as_module_output(self.name, start)
 
-            # ---- Step 3: read sibling findings ----
-            sibling_rows = self._query_sibling_finding_rows(db, job.id)
+            sibling_rows = self._load_source_findings(db, job.id)
             if not sibling_rows:
-                errors.append("no completed sibling modules")
                 return ModuleOutput(
                     module=self.name,
-                    findings=findings,
+                    findings=[],
                     duration_seconds=time.time() - start,
-                    errors=errors,
+                    errors=["no completed sibling modules"],
                 )
 
-            # Convert SQLAlchemy rows → Pydantic Finding objects.
-            sibling_findings: list[tuple[str, Finding]] = [
-                (module_name, self._row_to_finding(row))
-                for row, module_name in sibling_rows
-            ]
-
-            # ---- Step 4: idempotency + two-step breach join ----
-            already_dossiered = self._already_dossiered_email_hashes(db, job.id)
-            bucket = _group_by_email_hash(sibling_findings, already_dossiered)
-            attached_breaches, orphan_breaches = _collect_orphan_breaches_and_attach(
-                sibling_findings, bucket
+            grouping = self._group_findings_for_processing(
+                db, job.id, sibling_rows
             )
-            errors.extend(orphan_breaches)
+            errors = list(grouping["orphan_breaches"])
 
-            # ---- Step 5: build dossiers ----
-            llm_client = self._make_llm_client()
-            system_prompt = self.get_ai_prompt()
+            dossiers, plaintext_by_hash = self._build_dossiers(
+                grouping["bucket"],
+                grouping["attached_breaches"],
+            )
 
-            # Build one PersonDossier per email_hash bucket.
-            new_dossiers: list[PersonDossier] = []
-            plaintext_by_hash: dict[str, str | None] = {}
-            for email_hash, items in bucket.items():
-                dossier = self._build_dossier(email_hash, items)
-                new_dossiers.append(dossier)
-                plaintext_by_hash[email_hash] = _resolve_plaintext_email(
-                    [f for _m, f in items]
-                )
+            await self._apply_coherence(dossiers)
 
-            # Distribute attached breaches to the matching dossier.
-            for module_name, breach_finding, target_hash in attached_breaches:
-                for d in new_dossiers:
-                    if d.email_hash == target_hash:
-                        if isinstance(breach_finding.finding_metadata, dict):
-                            d.breach_exposures.append(breach_finding.finding_metadata)
-                        if module_name not in d.source_modules:
-                            d.source_modules.append(module_name)
-                        break
+            findings = self._emit_findings(
+                db,
+                job.id,
+                dossiers,
+                plaintext_by_hash,
+                errors,
+            )
+            db.commit()
 
-            # AI coherence — best-effort, never blocks dossier emission.
-            for dossier in new_dossiers:
+        return ModuleOutput(
+            module=self.name,
+            findings=findings,
+            duration_seconds=time.time() - start,
+            errors=errors,
+        )
+
+    # ----------------------------------------------------------------
+    # run() helpers (each ≤50 lines, single responsibility)
+    # ----------------------------------------------------------------
+
+    def _load_sibling_state(
+        self, db: Any, job_id: str
+    ) -> "ModuleOutput | _SkipSignal | None":  # noqa: F821 — forward
+        """Poll sibling ModuleRun rows.
+
+        If any sibling is still RUNNING, signal a skip via the
+        ``_SkipSignal`` stub (the orchestrator turns it into an empty
+        ModuleOutput). Returns None when all siblings are terminal.
+        """
+        sibling_states = self._sibling_module_states(db, job_id)
+        running = [
+            name
+            for name, status in sibling_states.items()
+            if status == ModuleStatus.RUNNING
+        ]
+        if running:
+            return _SkipSignal(
+                f"sibling still running: {','.join(sorted(running))} — dossier skipped"
+            )
+        return None
+
+    def _load_source_findings(
+        self, db: Any, job_id: str
+    ) -> list[tuple[Any, str]]:
+        """Read sibling Finding rows (DB rows, not Pydantic)."""
+        return self._query_sibling_finding_rows(db, job_id)
+
+    def _group_findings_for_processing(
+        self,
+        db: Any,
+        job_id: str,
+        sibling_rows: list[tuple[Any, str]],
+    ) -> dict[str, Any]:
+        """Idempotency + bucket + breach join.
+
+        Returns a dict with ``bucket``, ``attached_breaches``, and
+        ``orphan_breaches`` so the orchestrator can run them
+        sequentially without re-reading the DB.
+        """
+        sibling_findings: list[tuple[str, Finding]] = [
+            (module_name, self._row_to_finding(row))
+            for row, module_name in sibling_rows
+        ]
+        already_dossiered = self._already_dossiered_email_hashes(db, job_id)
+        bucket = _group_by_email_hash(sibling_findings, already_dossiered)
+        attached_breaches, orphan_breaches = _collect_orphan_breaches_and_attach(
+            sibling_findings, bucket
+        )
+        return {
+            "bucket": bucket,
+            "attached_breaches": attached_breaches,
+            "orphan_breaches": orphan_breaches,
+        }
+
+    def _build_dossiers(
+        self,
+        bucket: dict[str, list[tuple[str, Finding]]],
+        attached_breaches: list[tuple[str, Finding, str]],
+    ) -> tuple[list["PersonDossier"], dict[str, str | None]]:
+        """Build one PersonDossier per bucket + the plaintext-email map.
+
+        Returns ``(dossiers, plaintext_by_hash)`` — ``plaintext_by_hash``
+        is the per-dossier plaintext that flows into _store_identity_map.
+        Breaches attached via domain-join are folded into the matching
+        dossier's ``breach_exposures`` + ``source_modules``.
+        """
+        llm_client = self._make_llm_client()
+        # llm_client closure is held by `_assess_coherence` until
+        # `_apply_coherence` completes. We deliberately don't close
+        # here — _apply_coherence closes after the coherence calls
+        # return. See ``_apply_coherence`` for the matching close.
+        self._pending_llm_client = llm_client
+
+        dossiers: list[PersonDossier] = []
+        plaintext_by_hash: dict[str, str | None] = {}
+        for email_hash, items in bucket.items():
+            dossiers.append(self._build_dossier(email_hash, items))
+            plaintext_by_hash[email_hash] = _resolve_plaintext_email(
+                [f for _m, f in items]
+            )
+
+        for module_name, breach_finding, target_hash in attached_breaches:
+            for d in dossiers:
+                if d.email_hash == target_hash:
+                    if isinstance(breach_finding.finding_metadata, dict):
+                        d.breach_exposures.append(breach_finding.finding_metadata)
+                    if module_name not in d.source_modules:
+                        d.source_modules.append(module_name)
+                    break
+
+        return dossiers, plaintext_by_hash
+
+    async def _apply_coherence(
+        self, dossiers: list["PersonDossier"]
+    ) -> None:
+        """Run LLM coherence on each dossier (best-effort).
+
+        Closes the LLM client when done. Per-dossier failures don't
+        block dossier emission — the helper returns and lets the
+        orchestrator continue.
+        """
+        llm_client = getattr(self, "_pending_llm_client", None)
+        system_prompt = self.get_ai_prompt()
+        try:
+            for dossier in dossiers:
                 try:
-                    tag = await _assess_coherence(dossier, llm_client, system_prompt)
+                    tag = await _assess_coherence(
+                        dossier, llm_client, system_prompt
+                    )
                     if tag is not None:
                         dossier.coherence = tag
                 except Exception as e:  # pragma: no cover — defensive
@@ -518,43 +598,54 @@ class PersonDossierModule(BaseReconModule):
                         dossier.email_hash[:8],
                         e,
                     )
+        finally:
+            if llm_client is not None:
+                with contextlib.suppress(Exception):
+                    await llm_client.close()
+                self._pending_llm_client = None
 
-            # ---- Step 6: emit DOSSIER findings + write IdentityMap ----
-            encryption_key = self._encryption_key_bytes()
-            for persona_counter, dossier in enumerate(new_dossiers, start=1):
-                base_persona = f"Persona_{persona_counter:03d}"
-                plaintext = plaintext_by_hash.get(dossier.email_hash)
-                row_inserted = self._store_identity_map(
-                    db=db,
-                    job_id=job.id,
-                    email_hash=dossier.email_hash,
-                    persona_id=base_persona,
-                    plaintext=plaintext,
-                    encryption_key=encryption_key,
-                    errors=errors,
+    def _emit_findings(
+        self,
+        db: Any,
+        job_id: str,
+        dossiers: list["PersonDossier"],
+        plaintext_by_hash: dict[str, str | None],
+        errors: list[str],
+    ) -> list[Finding]:
+        """Write IdentityMap rows + emit DOSSIER Findings.
+
+        Iterates ``dossiers`` with a ``persona_counter`` to produce
+        ``Persona_001``, ``Persona_002``, ... and applies the
+        ``_no_pii`` suffix when ``_store_identity_map`` did NOT
+        insert an encrypted row.
+        """
+        findings: list[Finding] = []
+        encryption_key = self._encryption_key_bytes()
+        for persona_counter, dossier in enumerate(dossiers, start=1):
+            base_persona = f"Persona_{persona_counter:03d}"
+            plaintext = plaintext_by_hash.get(dossier.email_hash)
+            row_inserted = self._store_identity_map(
+                db=db,
+                job_id=job_id,
+                email_hash=dossier.email_hash,
+                persona_id=base_persona,
+                plaintext=plaintext,
+                encryption_key=encryption_key,
+                errors=errors,
+            )
+            persona_id = (
+                base_persona if row_inserted else f"{base_persona}_no_pii"
+            )
+            findings.append(
+                Finding(
+                    type=FindingType.DOSSIER,
+                    value=persona_id,
+                    source=self.name,
+                    confidence=dossier.confidence,
+                    finding_metadata=dossier.model_dump(),
                 )
-                persona_id = base_persona if row_inserted else f"{base_persona}_no_pii"
-                findings.append(
-                    Finding(
-                        type=FindingType.DOSSIER,
-                        value=persona_id,
-                        source=self.name,
-                        confidence=dossier.confidence,
-                        finding_metadata=dossier.model_dump(),
-                    )
-                )
-
-            db.commit()
-
-            with contextlib.suppress(Exception):
-                await llm_client.close()
-
-        return ModuleOutput(
-            module=self.name,
-            findings=findings,
-            duration_seconds=time.time() - start,
-            errors=errors,
-        )
+            )
+        return findings
 
     def get_ai_prompt(self) -> str:
         """System prompt for the LLM coherence assessment (REQ-021).
@@ -754,3 +845,23 @@ __all__ = [
     "PersonDossier",
     "PersonDossierModule",
 ]
+
+
+# Module-level helper class — used as a sentinel so the type-checker
+# distinguishes a sibling-still-running skip from a normal early-return.
+
+
+@dataclass(frozen=True)
+class _SkipSignal:
+    """Marker returned by `_load_sibling_state` to signal a clean skip."""
+
+    error: str
+
+    def as_module_output(self, module_name: str, start: float) -> ModuleOutput:
+        """Build the empty ModuleOutput for the skip path."""
+        return ModuleOutput(
+            module=module_name,
+            findings=[],
+            duration_seconds=time.time() - start,
+            errors=[self.error],
+        )

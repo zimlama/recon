@@ -1,3 +1,5 @@
+# Copyright 2026 zimlama
+# SPDX-License-Identifier: Apache-2.0
 """Tests for the PersonDossier Pydantic schema (PR 4 — person_dossier aggregator).
 
 Per spec.md REQ-018:

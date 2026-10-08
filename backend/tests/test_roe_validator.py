@@ -1,3 +1,5 @@
+# Copyright 2026 zimlama
+# SPDX-License-Identifier: Apache-2.0
 """Tests for RoEValidator — real authorization gate.
 
 The validator answers one question: "is there an ACTIVE RoE, inside its
