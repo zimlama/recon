@@ -18,6 +18,7 @@ from app.modules.employee_osint import EmployeeOSINTModule
 from app.modules.github_recon import GitHubReconModule
 from app.modules.google_dorking import GoogleDorkingModule
 from app.modules.metadata_analysis import MetadataAnalysisModule
+from app.modules.person_dossier import PersonDossierModule
 from app.modules.shodan_censys import ShodanCensysModule
 from app.modules.socmint import SOCMINTModule
 from app.modules.subdomain_enum import SubdomainEnumModule
@@ -52,6 +53,8 @@ def _build_registry() -> dict[str, BaseReconModule]:
         "socmint": SOCMINTModule(),
         "employee_osint": EmployeeOSINTModule(),
         "dark_web_osint": DarkWebOSINTModule(),
+        # PR 4 — Tier 3 aggregator (cross-module, depends on the others)
+        "person_dossier": PersonDossierModule(),
     }
 
 

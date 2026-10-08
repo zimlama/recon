@@ -13,9 +13,9 @@ from app.models import ModuleTier
 # pytestmark-asyncio would mark non-async tests as well (causing warnings).
 
 
-def test_all_14_modules_registered() -> None:
-    """Exactly 14 modules in the registry."""
-    assert len(MODULE_REGISTRY) == 14
+def test_all_15_modules_registered() -> None:
+    """Exactly 15 modules in the registry (PR 4 added person_dossier)."""
+    assert len(MODULE_REGISTRY) == 15
 
 
 def test_all_modules_have_required_metadata() -> None:
@@ -60,13 +60,13 @@ def test_tier2_modules() -> None:
 def test_tier3_modules_require_consent() -> None:
     """All Tier 3 modules require explicit consent."""
     tier3 = [m for m in MODULE_REGISTRY.values() if m.tier == ModuleTier.TIER_3]
-    assert len(tier3) == 4
+    assert len(tier3) == 5
     for m in tier3:
         assert m.requires_consent is True, f"{m.name} (Tier 3) must require consent"
 
 
 def test_tier3_modules() -> None:
-    """Exactly 4 Tier 3 modules."""
+    """Exactly 5 Tier 3 modules (PR 4 added person_dossier)."""
     tier3 = [m for m in MODULE_REGISTRY.values() if m.tier == ModuleTier.TIER_3]
     names = {m.name for m in tier3}
     assert names == {
@@ -74,6 +74,7 @@ def test_tier3_modules() -> None:
         "socmint",
         "employee_osint",
         "dark_web_osint",
+        "person_dossier",
     }
 
 
@@ -157,6 +158,10 @@ async def test_all_modules_run_returns_module_output() -> None:
                 __import__("asyncio").create_subprocess_exec = mock_exec
 
         for name, module in MODULE_REGISTRY.items():
+            if name == "person_dossier":
+                # person_dossier requires job_id (it's an aggregator).
+                # It's tested separately in test_person_dossier.py.
+                continue
             result = await module.run(ModuleInput(target="example.com"))
             assert isinstance(result, ModuleOutput), f"{name} run() did not return ModuleOutput"
             assert result.module == name, f"{name} returned wrong module name in output"
@@ -182,6 +187,9 @@ async def test_stub_modules_have_not_implemented_error() -> None:
     actual_stubs = []
     from app.modules.base import ModuleInput
     for name, module in MODULE_REGISTRY.items():
+        if name == "person_dossier":
+            # Requires job_id; tested in test_person_dossier.py
+            continue
         result = await module.run(ModuleInput(target="example.com"))
         if result.errors and "Not implemented" in str(result.errors):
             actual_stubs.append(name)
@@ -189,12 +197,21 @@ async def test_stub_modules_have_not_implemented_error() -> None:
 
 
 def test_all_modules_have_non_empty_ai_prompts() -> None:
-    """Every module has a non-empty AI prompt (used for validation)."""
+    """Every module has a non-empty AI prompt (used for validation).
+
+    Exception: person_dossier uses HIGH/MEDIUM/LOW/NONE coherence tags
+    instead of the standard CONFIRMED/FALSE_POSITIVE — see spec.md REQ-021.
+    """
     for name, module in MODULE_REGISTRY.items():
         prompt = module.get_ai_prompt()
         assert isinstance(prompt, str), f"{name} prompt is not a string"
         assert len(prompt) > 50, f"{name} prompt is too short ({len(prompt)} chars)"
-        # Prompt should mention verdict categories
+        if name == "person_dossier":
+            # PR 4: dossier uses different vocabulary (REQ-021)
+            assert "HIGH" in prompt, f"{name} prompt missing HIGH"
+            assert "NONE" in prompt, f"{name} prompt missing NONE"
+            continue
+        # Standard validation entries (CONFIRMED/FALSE_POSITIVE)
         assert "CONFIRMED" in prompt, f"{name} prompt missing CONFIRMED"
         assert "FALSE_POSITIVE" in prompt, f"{name} prompt missing FALSE_POSITIVE"
 
@@ -217,7 +234,13 @@ def test_tier1_modules_have_all_passive_metadata() -> None:
 
 def test_tier3_modules_all_require_consent() -> None:
     """All Tier 3 modules require explicit consent."""
-    tier3_names = {"breach_data", "socmint", "employee_osint", "dark_web_osint"}
+    tier3_names = {
+        "breach_data",
+        "socmint",
+        "employee_osint",
+        "dark_web_osint",
+        "person_dossier",
+    }
     for name in tier3_names:
         m = MODULE_REGISTRY[name]
         assert m.requires_consent is True, f"{name} (Tier 3) must require consent"
