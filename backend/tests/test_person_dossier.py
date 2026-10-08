@@ -1066,3 +1066,404 @@ async def test_run_module_metadata_consistent(fresh_db, mock_llm) -> None:
     assert "NONE" in module.get_ai_prompt()
     assert "SHA-256" in module.get_ai_prompt() or "email_hash" in module.get_ai_prompt()
     assert "NEVER" in module.get_ai_prompt()  # privacy invariant
+
+
+# ---- Coverage / branch tests ----
+
+
+def test_domain_of_email_no_at_sign() -> None:
+    """`_domain_of_email` returns empty string when input has no '@'.
+
+    Defensive branch (line 201) — should never be hit in practice but
+    keeps the helper robust against garbage input.
+    """
+    from app.modules.person_dossier import _domain_of_email
+
+    assert _domain_of_email("no-at-sign-string") == ""
+    assert _domain_of_email("") == ""
+
+
+@pytest.mark.asyncio
+async def test_assess_coherence_llm_raises_returns_none(monkeypatch) -> None:
+    """`_assess_coherence` returns None when the LLM client raises (timeout/httpx/etc.)."""
+    from app.modules.person_dossier import (
+        PersonDossier,
+        _assess_coherence,
+    )
+
+    dossier = PersonDossier(
+        email_hash="a" * 64,
+        profiles=["https://linkedin.com/in/jane"],
+        source_modules=["socmint"],
+    )
+    bad_client = AsyncMock()
+    bad_client.chat_completion = AsyncMock(side_effect=RuntimeError("simulated LLM failure"))
+    tag = await _assess_coherence(dossier, bad_client, "stub prompt")
+    assert tag is None
+
+
+@pytest.mark.asyncio
+async def test_assess_coherence_non_dict_response_returns_none() -> None:
+    """`_assess_coherence` returns None when the LLM returns a non-dict (string/list/etc.)."""
+    from app.modules.person_dossier import PersonDossier, _assess_coherence
+
+    dossier = PersonDossier(
+        email_hash="a" * 64,
+        profiles=[],
+        source_modules=["socmint"],
+    )
+    bad_client = AsyncMock()
+    bad_client.chat_completion = AsyncMock(return_value="not a dict")
+    tag = await _assess_coherence(dossier, bad_client, "stub prompt")
+    assert tag is None
+
+
+@pytest.mark.asyncio
+async def test_assess_coherence_empty_verdicts_returns_none() -> None:
+    """`_assess_coherence` returns None when verdicts list is empty."""
+    from app.modules.person_dossier import PersonDossier, _assess_coherence
+
+    dossier = PersonDossier(
+        email_hash="a" * 64,
+        profiles=[],
+        source_modules=["socmint"],
+    )
+    client = AsyncMock()
+    client.chat_completion = AsyncMock(
+        return_value={"verdicts": [], "summary": "stub", "recommended_action": "CONTINUE"}
+    )
+    tag = await _assess_coherence(dossier, client, "stub prompt")
+    assert tag is None
+
+
+@pytest.mark.asyncio
+async def test_assess_coherence_non_dict_verdict_returns_none() -> None:
+    """`_assess_coherence` returns None when the first verdict is not a dict."""
+    from app.modules.person_dossier import PersonDossier, _assess_coherence
+
+    dossier = PersonDossier(
+        email_hash="a" * 64,
+        profiles=[],
+        source_modules=["socmint"],
+    )
+    client = AsyncMock()
+    client.chat_completion = AsyncMock(
+        return_value={"verdicts": ["not-a-dict"]}
+    )
+    tag = await _assess_coherence(dossier, client, "stub prompt")
+    assert tag is None
+
+
+@pytest.mark.asyncio
+async def test_assess_coherence_invalid_verdict_string_returns_none() -> None:
+    """`_assess_coherence` returns None when verdict string is not in the allowed set."""
+    from app.modules.person_dossier import PersonDossier, _assess_coherence
+
+    dossier = PersonDossier(
+        email_hash="a" * 64,
+        profiles=[],
+        source_modules=["socmint"],
+    )
+    client = AsyncMock()
+    client.chat_completion = AsyncMock(
+        return_value={"verdicts": [{"verdict": "MAYBE"}]}
+    )
+    tag = await _assess_coherence(dossier, client, "stub prompt")
+    assert tag is None
+
+
+@pytest.mark.asyncio
+async def test_run_includes_social_profile_in_dossier(fresh_db, mock_llm) -> None:
+    """A SOCIAL_PROFILE finding bucketed via metadata.email_hash populates `profiles[]`."""
+    module = PersonDossierModule()
+    with SessionLocal() as db:
+        _seed_job_with_module_runs(
+            db,
+            modules=[
+                ("email_harvesting", ModuleStatus.COMPLETED, ModuleTier.TIER_1),
+                ("socmint", ModuleStatus.COMPLETED, ModuleTier.TIER_3),
+                ("breach_data", ModuleStatus.COMPLETED, ModuleTier.TIER_3),
+                ("employee_osint", ModuleStatus.COMPLETED, ModuleTier.TIER_3),
+            ],
+        )
+        _seed_finding(
+            db,
+            "test-job-1",
+            "email_harvesting",
+            FindingType.EMAIL,
+            value="jane@example.com",
+            confidence=0.9,
+        )
+        _seed_finding(
+            db,
+            "test-job-1",
+            "socmint",
+            FindingType.SOCIAL_PROFILE,
+            value="https://linkedin.com/in/jane-doe",
+            confidence=0.85,
+            finding_metadata={"email_hash": "a" * 64},
+        )
+    # Email hash of jane@example.com is deterministic; pre-compute and align.
+    from app.utils.encryption import hash_email
+
+    jane_hash = hash_email("jane@example.com")
+    # Re-seed socmint with the correct email_hash to match jane@example.com.
+    with SessionLocal() as db:
+        # Wipe and re-seed socmint finding with the correct hash.
+        socmint_run = (
+            db.query(ModuleRun)
+            .filter(ModuleRun.job_id == "test-job-1", ModuleRun.module_name == "socmint")
+            .first()
+        )
+        socmint_finding = (
+            db.query(FindingModel)
+            .filter(FindingModel.module_run_id == socmint_run.id)
+            .first()
+        )
+        socmint_finding.finding_metadata = {"email_hash": jane_hash}
+        db.commit()
+    output = await module.run(ModuleInput(target="example.com", job_id="test-job-1"))
+    assert len(output.findings) == 1
+    meta = output.findings[0].finding_metadata
+    assert "https://linkedin.com/in/jane-doe" in meta["profiles"]
+    assert "socmint" in meta["source_modules"]
+
+
+@pytest.mark.asyncio
+async def test_run_encryption_key_invalid_logs_warning(fresh_db, mock_llm) -> None:
+    """An invalid Fernet key surfaces a warning in ModuleOutput.errors (no identity_map row)."""
+    from cryptography.fernet import Fernet
+
+    bogus_key = Fernet.generate_key().decode()[:-4] + "AAAA"  # truncated → invalid
+    import os
+    os.environ["PERSON_DOSSIER_ENCRYPTION_KEY"] = bogus_key
+    from app.config import get_settings
+    get_settings.cache_clear()
+
+    try:
+        module = PersonDossierModule()
+        with SessionLocal() as db:
+            _seed_job_with_module_runs(
+                db,
+                modules=[
+                    ("email_harvesting", ModuleStatus.COMPLETED, ModuleTier.TIER_1),
+                ],
+            )
+            _seed_finding(
+                db,
+                "test-job-1",
+                "email_harvesting",
+                FindingType.EMAIL,
+                value="badkey@example.com",
+                confidence=0.8,
+            )
+        output = await module.run(ModuleInput(target="example.com", job_id="test-job-1"))
+        assert len(output.findings) == 1
+        # The dossier is emitted, but persona_id ends with _no_pii (no row stored).
+        assert output.findings[0].value.endswith("_no_pii")
+        assert any("encryption key" in e for e in output.errors)
+    finally:
+        os.environ["PERSON_DOSSIER_ENCRYPTION_KEY"] = ""
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_run_idempotent_repeated_run_no_duplicate(fresh_db, mock_llm) -> None:
+    """Re-running the module for the same job + email_hash does NOT emit a 2nd dossier.
+
+    This exercises the IdentityMap UNIQUE(job_id, email_hash) integrity-error
+    branch in `_store_identity_map` (lines 738-740).
+    """
+    from cryptography.fernet import Fernet
+    import os
+
+    fernet_key = Fernet.generate_key().decode()
+    os.environ["PERSON_DOSSIER_ENCRYPTION_KEY"] = fernet_key
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    try:
+        module = PersonDossierModule()
+        with SessionLocal() as db:
+            _seed_job_with_module_runs(
+                db,
+                modules=[
+                    ("email_harvesting", ModuleStatus.COMPLETED, ModuleTier.TIER_1),
+                ],
+            )
+            _seed_finding(
+                db,
+                "test-job-1",
+                "email_harvesting",
+                FindingType.EMAIL,
+                value="idem@example.com",
+                confidence=0.9,
+            )
+        # First run — emits 1 dossier + 1 identity_map row.
+        first = await module.run(ModuleInput(target="example.com", job_id="test-job-1"))
+        assert len(first.findings) == 1
+
+        # Second run — bucket is empty (already dossiered) → no dossier.
+        second = await module.run(ModuleInput(target="example.com", job_id="test-job-1"))
+        assert second.findings == []
+    finally:
+        os.environ["PERSON_DOSSIER_ENCRYPTION_KEY"] = ""
+        get_settings.cache_clear()
+
+
+def test_make_llm_client_returns_client() -> None:
+    """`_make_llm_client` instantiates an LLMClient (lazy import path, line 745-747)."""
+    from app.modules.person_dossier import PersonDossierModule
+
+    client = PersonDossierModule._make_llm_client()
+    # We don't assert on the exact type (avoid importing LLMClient here) —
+    # just that a non-None object was returned.
+    assert client is not None
+    # And close() is callable (LLMClient contract).
+    assert hasattr(client, "close")
+
+
+@pytest.mark.asyncio
+async def test_assess_coherence_valid_verdict_string_returns_value() -> None:
+    """`_assess_coherence` returns the verdict string when it is in the allowed set (lines 378)."""
+    from app.modules.person_dossier import PersonDossier, _assess_coherence
+
+    dossier = PersonDossier(
+        email_hash="a" * 64,
+        profiles=["https://linkedin.com/in/jane"],
+        source_modules=["socmint"],
+    )
+    client = AsyncMock()
+    client.chat_completion = AsyncMock(
+        return_value={"verdicts": [{"verdict": "HIGH"}]}
+    )
+    tag = await _assess_coherence(dossier, client, "stub prompt")
+    assert tag == "HIGH"
+
+
+@pytest.mark.asyncio
+async def test_assess_coherence_verdict_is_none_returns_none() -> None:
+    """`_assess_coherence` returns None when first verdict's `verdict` field is None (line 375)."""
+    from app.modules.person_dossier import PersonDossier, _assess_coherence
+
+    dossier = PersonDossier(
+        email_hash="a" * 64,
+        profiles=[],
+        source_modules=["socmint"],
+    )
+    client = AsyncMock()
+    client.chat_completion = AsyncMock(
+        return_value={"verdicts": [{"verdict": None}]}
+    )
+    tag = await _assess_coherence(dossier, client, "stub prompt")
+    assert tag is None
+
+
+@pytest.mark.asyncio
+async def test_run_coherence_assigned_when_llm_returns_valid_verdict(
+    fresh_db, monkeypatch
+) -> None:
+    """End-to-end: when LLM returns HIGH, dossier.coherence = 'HIGH' (lines 514-516)."""
+    from app.modules.person_dossier import PersonDossierModule
+    from unittest.mock import AsyncMock
+
+    coherence_mock = AsyncMock()
+    coherence_mock.chat_completion = AsyncMock(
+        return_value={"verdicts": [{"verdict": "MEDIUM"}]}
+    )
+    coherence_mock.close = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        "app.modules.person_dossier.PersonDossierModule._make_llm_client",
+        staticmethod(lambda: coherence_mock),
+    )
+
+    module = PersonDossierModule()
+    with SessionLocal() as db:
+        _seed_job_with_module_runs(
+            db,
+            modules=[
+                ("email_harvesting", ModuleStatus.COMPLETED, ModuleTier.TIER_1),
+            ],
+        )
+        _seed_finding(
+            db,
+            "test-job-1",
+            "email_harvesting",
+            FindingType.EMAIL,
+            value="coherent@example.com",
+            confidence=0.9,
+        )
+    output = await module.run(ModuleInput(target="example.com", job_id="test-job-1"))
+    assert len(output.findings) == 1
+    assert output.findings[0].finding_metadata["coherence"] == "MEDIUM"
+
+
+def test_store_identity_map_handles_integrity_error(fresh_db, monkeypatch) -> None:
+    """`_store_identity_map` catches UNIQUE violation silently (lines 740-742)."""
+    from app.modules.person_dossier import PersonDossierModule
+    from app.utils.encryption import hash_email
+    from cryptography.fernet import Fernet
+
+    fernet_key = Fernet.generate_key()
+    monkeypatch.setenv("PERSON_DOSSIER_ENCRYPTION_KEY", fernet_key.decode())
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    email = "dup@example.com"
+    email_hash = hash_email(email)
+    job_id = "test-job-1"
+
+    # Pre-seed a row so the next insert raises IntegrityError.
+    with SessionLocal() as db:
+        _seed_job_with_module_runs(db, job_id=job_id)
+        db.add(
+            IdentityMap(
+                job_id=job_id,
+                email_hash=email_hash,
+                encrypted_email=b"existing" .decode("ascii"),
+                persona_id="Persona_000",
+            )
+        )
+        db.commit()
+
+    errors: list[str] = []
+    with SessionLocal() as db:
+        result = PersonDossierModule._store_identity_map(
+            db=db,
+            job_id=job_id,
+            email_hash=email_hash,
+            persona_id="Persona_001",
+            plaintext=email,
+            encryption_key=fernet_key,
+            errors=errors,
+        )
+    assert result is True  # existing row wins — still "ok"
+    assert errors == []
+
+
+def test_build_dossier_credential_exposure_in_bucket() -> None:
+    """`_build_dossier` extracts breach_exposures from CREDENTIAL_EXPOSURE findings (line 670).
+
+    CREDENTIAL_EXPOSURE findings never bucket through `_group_by_email_hash`
+    in normal flow (10-char SHA-1 prefix fails the 64-char check), but the
+    `_build_dossier` defensive branch still handles them when called directly.
+    """
+    from app.modules.person_dossier import PersonDossierModule
+
+    email_hash = "a" * 64
+    credential_finding = Finding(
+        type=FindingType.CREDENTIAL_EXPOSURE,
+        value="3_breaches",
+        source="breach_data",
+        confidence=0.8,
+        finding_metadata={"email_hash_prefix": "abc1234567", "breach_count": 3},
+    )
+    dossier = PersonDossierModule._build_dossier(
+        email_hash,
+        [("breach_data", credential_finding)],
+    )
+    assert len(dossier.breach_exposures) == 1
+    assert dossier.breach_exposures[0]["breach_count"] == 3
+    assert "breach_data" in dossier.source_modules
