@@ -92,6 +92,14 @@ class Settings(BaseSettings):
     AI_VALIDATION_ENABLED: bool = Field(default=True)
     HANDSHAKE_AUTO_GENERATE: bool = Field(default=True)
     AUDIT_LOGGING_ENABLED: bool = Field(default=True)
+    tools_only_free: bool = Field(
+        default=False,
+        description=(
+            "When True, modules with requires_paid=True are excluded from "
+            "MODULE_REGISTRY at startup. Invalid string values fall back "
+            "to False (fail-open: allow all modules). Env var: TOOLS_ONLY_FREE."
+        ),
+    )
 
     # ---- Rules-of-Engagement enforcement (PR 1, default off) ----
     # When true, `RoEMiddleware` gates POST /api/v1/jobs on the
@@ -140,6 +148,29 @@ class Settings(BaseSettings):
         if not v.strip():
             raise ValueError("CORS_ORIGINS cannot be empty")
         return v.strip()
+
+    @field_validator("tools_only_free", mode="before")
+    @classmethod
+    def _validate_tools_only_free(cls, v: object) -> bool:
+        """Coerce ``TOOLS_ONLY_FREE`` env value to bool, fail-open on garbage.
+
+        Accepted truthy: ``true``, ``1``, ``yes``, ``on`` (case-insensitive).
+        Accepted falsy: ``false``, ``0``, ``no``, ``off``, ``""`` (case-insensitive).
+        Anything else falls back to ``False`` (fail-open: keep all modules in
+        the registry). This avoids Pydantic raising ValidationError at
+        startup, which would block legitimate jobs.
+        """
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        s = str(v).strip().lower()
+        if s in {"true", "1", "yes", "on"}:
+            return True
+        if s in {"false", "0", "no", "off", ""}:
+            return False
+        # Fail-open: garbage value → False (allow all modules)
+        return False
 
     @property
     def cors_origins_list(self) -> list[str]:
