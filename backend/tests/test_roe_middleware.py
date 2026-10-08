@@ -590,8 +590,8 @@ async def test_middleware_does_not_gate_get_requests(
 ) -> None:
     """GET on a protected path is not gated even when middleware is on.
 
-    The middleware filters by `request.method == "POST"`; GETs (and
-    DELETEs etc.) are passed straight through. Confirm by adding a
+    The middleware filters by state-changing methods (POST/PUT/PATCH/DELETE);
+    GETs are read-only and pass straight through. Confirm by adding a
     GET endpoint in the test app and posting a request with method
     GET — no RoE means a 200, not a 403.
     """
@@ -615,3 +615,88 @@ async def test_middleware_does_not_gate_get_requests(
         resp = await ac.get("/api/v1/jobs")
     assert resp.status_code == 200
     assert resp.json() == {"jobs": []}
+
+
+@pytest.mark.asyncio
+async def test_middleware_gates_delete_requests(
+    session_factory,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DELETE /api/v1/jobs/{id} must be gated by RoE (audit R1-H1).
+
+    Without an active RoE the middleware must reject DELETE with
+    ``roe_not_authorized`` (403) — same shape as a rejected POST.
+    Cascading DELETE removes Job, ModuleRun, Finding, AIValidation,
+    IdentityMap, SignOff, and RoE rows; bypassing RoE here lets any
+    operator wipe engagements they never had sign-off for.
+    """
+    monkeypatch.setenv("ROE_ENABLED", "true")
+    _db, factory = session_factory
+
+    app = FastAPI()
+    app.add_middleware(
+        RoEMiddleware,
+        session_factory=factory,
+        protected_paths=["/api/v1/jobs/"],
+    )
+
+    @app.delete("/api/v1/jobs/{job_id}")
+    async def delete_job(job_id: str) -> dict[str, str]:
+        return {"deleted": job_id}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        resp = await ac.request(
+            "DELETE",
+            "/api/v1/jobs/abc-123",
+            content=json.dumps({"target": "example.com"}),
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert resp.status_code == 403
+    assert resp.json()["error"] == "roe_not_authorized"
+
+
+@pytest.mark.asyncio
+async def test_middleware_gates_put_and_patch_too(
+    session_factory,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PUT / PATCH on protected paths must also be gated by RoE.
+
+    Both methods change server state. Without RoE coverage the
+    middleware must reject them with 403, just like POST.
+    """
+    monkeypatch.setenv("ROE_ENABLED", "true")
+    _db, factory = session_factory
+
+    app = FastAPI()
+    app.add_middleware(
+        RoEMiddleware,
+        session_factory=factory,
+        protected_paths=["/api/v1/jobs/"],
+    )
+
+    @app.put("/api/v1/jobs/{job_id}")
+    async def put_job(job_id: str) -> dict[str, str]:
+        return {"updated": job_id}
+
+    @app.patch("/api/v1/jobs/{job_id}")
+    async def patch_job(job_id: str) -> dict[str, str]:
+        return {"patched": job_id}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        put_resp = await ac.put(
+            "/api/v1/jobs/abc-123", json={"target": "example.com"}
+        )
+        patch_resp = await ac.patch(
+            "/api/v1/jobs/abc-123", json={"target": "example.com"}
+        )
+
+    assert put_resp.status_code == 403
+    assert put_resp.json()["error"] == "roe_not_authorized"
+    assert patch_resp.status_code == 403
+    assert patch_resp.json()["error"] == "roe_not_authorized"

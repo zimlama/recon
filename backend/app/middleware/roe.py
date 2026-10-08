@@ -3,10 +3,16 @@
 """RoE enforcement middleware for the FastAPI app.
 
 Disabled by default. Enable by exporting `ROE_ENABLED=true` before the
-process starts. When enabled, this middleware rejects POSTs to the
-protected paths (`/api/v1/jobs*` by default) unless the target named in
-the JSON body is covered by an active RoE with at least one un-revoked
-sign-off — same rule the orchestrator uses in-process.
+process starts. When enabled, this middleware rejects **state-changing**
+requests (POST, PUT, PATCH, DELETE) to the protected paths
+(`/api/v1/jobs*` by default) unless the target named in the JSON body is
+covered by an active RoE with at least one un-revoked sign-off — same
+rule the orchestrator uses in-process.
+
+DELETE is included because ``DELETE /api/v1/jobs/{id}`` cascades
+through Job, ModuleRun, Finding, AIValidation, IdentityMap, SignOff, and
+RoE rows (per audit finding R1-H1). Without RoE coverage the deletion
+path bypasses scope enforcement entirely.
 
 Design notes:
 
@@ -63,11 +69,24 @@ class RoEMiddleware(BaseHTTPMiddleware):
             protected_paths if protected_paths is not None else _DEFAULT_PROTECTED_PATHS
         )
 
+    # Methods that mutate state and therefore require RoE coverage.
+    # GET / HEAD / OPTIONS are read-only and bypass the gate.
+    _STATE_CHANGING_METHODS: frozenset[str] = frozenset(
+        {"POST", "PUT", "PATCH", "DELETE"}
+    )
+
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
-        # Fast path: disabled OR non-POST OR not on the protected list.
+        # Fast path: disabled OR read-only OR not on the protected list.
         # We do this BEFORE touching the body so unaffected requests stay
-        # cheap.
-        if not self._enabled or request.method != "POST":
+        # cheap. DELETE is included on top of POST because
+        # ``DELETE /api/v1/jobs/{id}`` cascades through Job, ModuleRun,
+        # Finding, AIValidation, IdentityMap, SignOff, RoE rows —
+        # bypassing RoE for the delete path let any operator wipe
+        # engagements they never had sign-off for (audit finding R1-H1).
+        if (
+            not self._enabled
+            or request.method not in self._STATE_CHANGING_METHODS
+        ):
             return await call_next(request)
         if not any(
             request.url.path.startswith(p) for p in self._protected_paths
