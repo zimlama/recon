@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -81,6 +81,7 @@ class FindingType(str, enum.Enum):
     CREDENTIAL_EXPOSURE = "credential_exposure"
     DARKWEB_MENTION = "darkweb_mention"
     OTHER = "other"
+    DOSSIER = "dossier"  # PR 4 — cross-module person dossier aggregator
 
 
 class HandoffStatus(str, enum.Enum):
@@ -326,6 +327,54 @@ class AuditLog(Base):
 
     def __repr__(self) -> str:
         return f"<AuditLog id={self.id} action={self.action} target={self.target}>"
+
+
+# ---- IdentityMap — PR 4 (person_dossier aggregator) ----
+#
+# Stores the encrypted (Fernet) raw email keyed by SHA-256 hex hash per job.
+# The plaintext email NEVER crosses the encryption boundary — it flows from
+# `_resolve_plaintext_email` directly into `encrypt_email()` and lands here
+# as a ciphertext blob. `persona_id` is the stable operator-facing
+# pseudonym (e.g. "Persona_001").
+#
+# The UNIQUE(job_id, email_hash) constraint enforces idempotency — a second
+# insert for the same job + email_hash raises IntegrityError, which
+# `person_dossier._store_identity_map` catches silently (existing row wins).
+
+
+class IdentityMap(Base):
+    """Encrypted raw email → pseudonym mapping per job (PR 4).
+
+    The `encrypted_email` column holds a Fernet ciphertext (AES-128-CBC +
+    HMAC-SHA256) produced by ``app.utils.encryption.encrypt_email`` using a
+    key sourced from the ``PERSON_DOSSIER_ENCRYPTION_KEY`` env var. The
+    plaintext email NEVER appears in this column, in logs, in handoff
+    exports, or in LLM prompts.
+    """
+
+    __tablename__ = "identity_map"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    job_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    email_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    encrypted_email: Mapped[str] = mapped_column(Text, nullable=False)
+    persona_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "email_hash", name="uq_identity_map_job_hash"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<IdentityMap id={self.id} job_id={self.job_id} "
+            f"email_hash={self.email_hash[:8]}... persona_id={self.persona_id}>"
+        )
 
 
 # ---- Rules of Engagement (RoE) — PR 1 of v0.1.1 ----
