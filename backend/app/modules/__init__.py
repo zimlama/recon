@@ -8,6 +8,8 @@ Single source of truth for which modules are available. Adding a new module:
 
 from __future__ import annotations
 
+import logging
+
 from app.modules.base import BaseReconModule
 from app.modules.breach_data import BreachDataModule
 from app.modules.certificate_transparency import CertificateTransparencyModule
@@ -25,6 +27,8 @@ from app.modules.subdomain_enum import SubdomainEnumModule
 from app.modules.wayback_machine import WaybackMachineModule
 from app.modules.whois_rdap import WhoisRDAPModule
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "BaseReconModule",
     "MODULE_REGISTRY",
@@ -34,8 +38,17 @@ __all__ = [
 
 
 def _build_registry() -> dict[str, BaseReconModule]:
-    """Build the module registry. Lazy — called once at startup."""
-    return {
+    """Build the module registry. Lazy — called once at startup.
+
+    If ``settings.tools_only_free`` is True, every module whose
+    ``requires_paid`` is True is excluded and a WARNING is logged for
+    each. See ``spec REQ-030`` in
+    ``openspec/changes/2026-10-12-pr2-touch-classification``.
+    """
+    # Lazy import to avoid circular: app.modules ↔ app.config
+    from app.config import get_settings
+
+    registry: dict[str, BaseReconModule] = {
         # Tier 1 — always-on, fully passive
         "whois_rdap": WhoisRDAPModule(),
         "dns_enum": DNSEnumModule(),
@@ -56,6 +69,19 @@ def _build_registry() -> dict[str, BaseReconModule]:
         # PR 4 — Tier 3 aggregator (cross-module, depends on the others)
         "person_dossier": PersonDossierModule(),
     }
+
+    settings = get_settings()
+    if settings.tools_only_free:
+        excluded = [name for name, mod in registry.items() if mod.requires_paid]
+        for name in excluded:
+            logger.warning(
+                "paid_module_excluded module=%s reason=%s",
+                name,
+                "tools_only_free=true",
+            )
+        registry = {name: mod for name, mod in registry.items() if not mod.requires_paid}
+
+    return registry
 
 
 MODULE_REGISTRY: dict[str, BaseReconModule] = _build_registry()
