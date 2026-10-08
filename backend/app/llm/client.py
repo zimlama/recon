@@ -27,12 +27,15 @@ class LLMClient:
         api_key: str | None = None,
         base_url: str | None = None,
         model: str | None = None,
+        max_retries: int = 3,
     ) -> None:
         self.api_key = api_key or settings.MINIMAX_API_KEY
         self.base_url = (base_url or settings.MINIMAX_BASE_URL).rstrip("/")
         self.model = model or settings.MINIMAX_MODEL
         self.timeout = settings.MINIMAX_TIMEOUT_SECONDS
-        self.max_retries = settings.MINIMAX_MAX_RETRIES
+        # Allow caller override (default 3) for tests/REPL. Settings value is
+        # still used as the fallback via the default value.
+        self.max_retries = max_retries
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:

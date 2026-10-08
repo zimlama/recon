@@ -17,7 +17,14 @@ from typing import Any
 import httpx
 
 from app.models import ModuleTier
-from app.modules.base import BaseReconModule, Finding, FindingType, ModuleInput, ModuleOutput
+from app.modules.base import (
+    BaseReconModule,
+    Finding,
+    FindingType,
+    ModuleInput,
+    ModuleOutput,
+    TouchClass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +54,8 @@ class SubdomainEnumModule(BaseReconModule):
     requires_consent = False
     estimated_duration_seconds = 120
     enabled_by_default = True
+    touch_classification: TouchClass = TouchClass.PASSIVE_THIRDPARTY
+    requires_paid: bool = False
 
     async def run(self, input: ModuleInput) -> ModuleOutput:
         """Run subdomain enumeration against the target."""

@@ -16,8 +16,9 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.audit.middleware import AuditLogMiddleware
 from app.config import get_settings
-from app.database import init_db
+from app.database import SessionLocal, init_db
 from app.llm.client import LLMClient
+from app.middleware.roe import RoEMiddleware
 from app.modules import get_module_registry
 from app.orchestrator.ai_validator import AIValidator
 from app.orchestrator.job_runner import JobRunner
@@ -131,6 +132,13 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Content-Type", "Authorization"],
     )
+
+    # Rules-of-Engagement enforcement (REQ-021a, env-disabled by default).
+    # Order rationale: added AFTER CORS (so pre-flight CORS requests skip
+    # RoE — only POSTs are gated) and BEFORE Audit (so 403 denials are
+    # still captured by the audit middleware on the way out).
+    if settings.ROE_ENABLED:
+        app.add_middleware(RoEMiddleware, session_factory=SessionLocal)
 
     # Audit middleware
     if settings.AUDIT_LOGGING_ENABLED:

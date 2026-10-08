@@ -3,6 +3,7 @@
 Covers:
   - Fix #1 (audit finding H1): Job.handoff_status enum field
   - Fix #2 (audit finding H2): JobRunner.sweep_stuck_jobs()
+  - PR 4: FindingType.DOSSIER + IdentityMap (person_dossier aggregator)
 """
 
 from __future__ import annotations
@@ -11,10 +12,13 @@ from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.models import (
+    FindingType,
     HandoffStatus,
+    IdentityMap,
     Job,
     JobStatus,
     ModuleRun,
@@ -315,3 +319,213 @@ async def test_sweep_respects_custom_max_age(jobs_only_db) -> None:
     assert count == 1
     db.expire_all()
     assert db.get(Job, "boundary-job").status == JobStatus.FAILED
+
+
+# ---------------------------------------------------------------------------
+# PR 4 — FindingType.DOSSIER (person_dossier aggregator output)
+# ---------------------------------------------------------------------------
+
+
+def test_finding_type_dossier_value() -> None:
+    """FindingType.DOSSIER exists with value 'dossier'.
+
+    Per spec.md REQ-018 AC-018.1 / AC-018.6. The enum value MUST be
+    additive (the existing 14 values are unchanged).
+    """
+    assert hasattr(FindingType, "DOSSIER"), "FindingType.DOSSIER missing"
+    assert FindingType.DOSSIER.value == "dossier"
+
+
+def test_finding_type_dossier_is_str_enum() -> None:
+    """FindingType.DOSSIER serializes as the string 'dossier'."""
+    assert FindingType.DOSSIER == "dossier"
+
+
+def test_finding_type_count_after_addition() -> None:
+    """FindingType now has 16 values (15 previous + DOSSIER).
+
+    Guards against accidental re-addition or deletion of existing values.
+    """
+    assert len(list(FindingType)) == 16
+
+
+# ---------------------------------------------------------------------------
+# PR 4 — IdentityMap SQLAlchemy model (encrypted email storage)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def identity_map_db(tmp_path):
+    """Per-test sync DB session with Job + ModuleRun + IdentityMap tables.
+
+    ModuleRun is included because Job has a `lazy="selectin"` relationship
+    to module_runs; refreshing a Job would otherwise fail with
+    "no such table: module_runs".
+    """
+    db_path = tmp_path / "identity_map_test.db"
+    if db_path.exists():
+        db_path.unlink()
+
+    eng = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    Job.__table__.create(bind=eng, checkfirst=True)
+    ModuleRun.__table__.create(bind=eng, checkfirst=True)
+    IdentityMap.__table__.create(bind=eng, checkfirst=True)
+    Session_ = sessionmaker(
+        bind=eng, autoflush=False, autocommit=False, expire_on_commit=False
+    )
+
+    db = Session_()
+    try:
+        yield db, Session_
+    finally:
+        db.close()
+        IdentityMap.__table__.drop(bind=eng, checkfirst=True)
+        ModuleRun.__table__.drop(bind=eng, checkfirst=True)
+        Job.__table__.drop(bind=eng, checkfirst=True)
+        eng.dispose()
+        try:
+            db_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def test_identity_map_creates_with_required_fields(identity_map_db) -> None:
+    """IdentityMap persists with id, job_id, email_hash, encrypted_email, persona_id."""
+    db, _ = identity_map_db
+    job = Job(target="example.com", selected_modules=[])
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    cipher = b"gAAAAA-test-ciphertext"
+    row = IdentityMap(
+        job_id=job.id,
+        email_hash="a" * 64,
+        encrypted_email=cipher.decode("ascii"),
+        persona_id="Persona_001",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    assert row.id is not None
+    assert len(row.id) == 36  # UUID v4
+    assert row.job_id == job.id
+    assert row.email_hash == "a" * 64
+    assert row.encrypted_email == cipher.decode("ascii")
+    assert row.persona_id == "Persona_001"
+    assert row.created_at is not None
+
+
+def test_identity_map_unique_constraint_on_job_and_email_hash(identity_map_db) -> None:
+    """A second IdentityMap row for the same (job_id, email_hash) MUST fail.
+
+    Per spec.md REQ-020 AC-020.6: idempotency is enforced by the UNIQUE
+    constraint; the second insert raises IntegrityError.
+    """
+    db, _ = identity_map_db
+    job = Job(target="example.com", selected_modules=[])
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    db.add(
+        IdentityMap(
+            job_id=job.id,
+            email_hash="b" * 64,
+            encrypted_email="ciphertext-1",
+            persona_id="Persona_001",
+        )
+    )
+    db.commit()
+
+    db.add(
+        IdentityMap(
+            job_id=job.id,
+            email_hash="b" * 64,
+            encrypted_email="ciphertext-2",  # different ciphertext — still rejected
+            persona_id="Persona_002",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+def test_identity_map_unique_constraint_is_per_job(identity_map_db) -> None:
+    """Same email_hash under a different job_id is allowed (different scope)."""
+    db, _ = identity_map_db
+    job_a = Job(target="a.example.com", selected_modules=[])
+    job_b = Job(target="b.example.com", selected_modules=[])
+    db.add_all([job_a, job_b])
+    db.commit()
+    db.refresh(job_a)
+    db.refresh(job_b)
+
+    db.add(
+        IdentityMap(
+            job_id=job_a.id,
+            email_hash="c" * 64,
+            encrypted_email="cipher-a",
+            persona_id="Persona_001",
+        )
+    )
+    db.add(
+        IdentityMap(
+            job_id=job_b.id,
+            email_hash="c" * 64,  # same hash, different job
+            encrypted_email="cipher-b",
+            persona_id="Persona_001",
+        )
+    )
+    db.commit()  # MUST NOT raise
+
+
+def test_identity_map_stores_ciphertext_not_plaintext(identity_map_db) -> None:
+    """IdentityMap.encrypted_email MUST be a ciphertext, not the plaintext.
+
+    Per spec.md REQ-020 AC-020.7: this is the privacy boundary.
+    """
+    db, _ = identity_map_db
+    job = Job(target="example.com", selected_modules=[])
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    # The Fernet ciphertext prefix is 'gAAAAA'.
+    row = IdentityMap(
+        job_id=job.id,
+        email_hash="d" * 64,
+        encrypted_email="gAAAAAencrypted_fernet_token",
+        persona_id="Persona_001",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    plaintext = "jane@example.com"
+    assert plaintext not in row.encrypted_email
+    assert not row.encrypted_email.startswith("gAAAAA") or plaintext not in row.encrypted_email
+
+
+def test_identity_map_email_hash_is_64_chars(identity_map_db) -> None:
+    """IdentityMap.email_hash column is String(64) — SHA-256 hex."""
+    db, _ = identity_map_db
+    job = Job(target="example.com", selected_modules=[])
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    row = IdentityMap(
+        job_id=job.id,
+        email_hash="e" * 64,  # exactly 64 hex chars
+        encrypted_email="gAAAAAencrypted_fernet_token",
+        persona_id="Persona_001",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    assert len(row.email_hash) == 64

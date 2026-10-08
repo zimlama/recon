@@ -128,11 +128,11 @@ def test_ldm_validation_result_helpers() -> None:
     """LDMValidationResult helper properties work."""
     result = LDMValidationResult(
         verdicts=[
-            {"value": "a", "verdict": VerdictType.CONFIRMED, "priority": Priority.HIGH, "confidence": 0.9, "reasoning": "a is good"},
-            {"value": "b", "verdict": VerdictType.LIKELY, "priority": Priority.MEDIUM, "confidence": 0.7, "reasoning": "b is ok"},
-            {"value": "c", "verdict": VerdictType.FALSE_POSITIVE, "priority": Priority.LOW, "confidence": 0.3, "reasoning": "c is bad"},
+            {"value": "a", "verdict": VerdictType.CONFIRMED, "priority": Priority.HIGH, "confidence": 0.9, "reasoning": "a is good (10+ chars)"},
+            {"value": "b", "verdict": VerdictType.LIKELY, "priority": Priority.MEDIUM, "confidence": 0.7, "reasoning": "b is ok (10+ chars)"},
+            {"value": "c", "verdict": VerdictType.FALSE_POSITIVE, "priority": Priority.LOW, "confidence": 0.3, "reasoning": "c is bad (10+ chars)"},
         ],
-        summary="Mixed results",
+        summary="Mixed results across the three verdicts here",
         recommended_action="CONTINUE",
         recommended_next_module_chain=[],
     )
