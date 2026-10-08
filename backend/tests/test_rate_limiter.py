@@ -66,19 +66,93 @@ async def test_keys_are_case_insensitive_and_separated() -> None:
 
 def test_reset_clears_all_buckets() -> None:
     limiter = RateLimiter(default_rps=10, default_burst=5)
-    # Force bucket creation synchronously by reaching into the defaultdict.
-    limiter._buckets[("example.com", "dns_enum")]  # noqa: SLF001
+
+    # Force at least one bucket to exist by going through acquire().
+    async def _seed() -> None:
+        await limiter.acquire("example.com", "dns_enum")
+
+    asyncio.run(_seed())
+    assert len(limiter) == 1
+
     limiter.reset()
     assert limiter._buckets == {}  # noqa: SLF001
 
 
 def test_reset_with_target_clears_one_bucket() -> None:
     limiter = RateLimiter(default_rps=10, default_burst=5)
-    limiter._buckets[("example.com", "dns_enum")]  # noqa: SLF001
-    limiter._buckets[("example.com", "subdomain_enum")]  # noqa: SLF001
+
+    async def _seed() -> None:
+        await limiter.acquire("example.com", "dns_enum")
+        await limiter.acquire("example.com", "subdomain_enum")
+
+    asyncio.run(_seed())
     limiter.reset(target="example.com", action="dns_enum")
     assert ("example.com", "dns_enum") not in limiter._buckets  # noqa: SLF001
     assert ("example.com", "subdomain_enum") in limiter._buckets  # noqa: SLF001
+
+
+# ---- Audit R4-H5: LRU eviction ----
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_evicts_old_buckets() -> None:
+    """``_buckets`` honors ``max_keys`` with LRU eviction.
+
+    Audit R4-H5: the rate limiter's internal dict used to grow without
+    bound per distinct ``(target, module)`` pair — a long-running
+    process hitting thousands of targets leaked memory. With the LRU
+    cap, the oldest (target, action) pair is evicted first.
+    """
+    cap = 4
+    limiter = RateLimiter(
+        default_rps=10, default_burst=5, max_keys=cap
+    )
+
+    # Force 4 distinct keys into the bucket dict.
+    for idx in range(cap):
+        # Use acquire() so we go through the same code path production
+        # uses; ``defaultdict``-replacement behavior is part of the
+        # contract.
+        await limiter.acquire(f"target_{idx}.com", "dns_enum")
+
+    assert len(limiter) == cap, (
+        f"expected exactly {cap} buckets before overflow, got {len(limiter)}"
+    )
+
+    # Acquire on a 5th, never-seen key — must trigger an eviction.
+    await limiter.acquire("overflow.example.com", "dns_enum")
+    assert len(limiter) == cap, (
+        f"expected {cap} buckets after overflow eviction, got {len(limiter)}"
+    )
+
+    # All earlier entries should have been touched at least once via
+    # their own acquire(). To prove LRU eviction specifically, touch
+    # ONLY the first key, then add 3 more — the first key must survive
+    # while one of the untoucheds gets evicted.
+    limiter.reset()
+    for idx in range(cap):
+        await limiter.acquire(f"target_{idx}.com", "dns_enum")
+    # Touch target_0 to mark it as recently used.
+    await limiter.acquire("target_0.com", "dns_enum")
+    # Add a new key — oldest non-touched (target_1) should evict.
+    await limiter.acquire("new_target.example.com", "dns_enum")
+    assert len(limiter) == cap
+    assert ("target_0.com", "dns_enum") in limiter._buckets  # noqa: SLF001
+
+
+def test_rate_limiter_initial_state_includes_capped_dict() -> None:
+    """Construction with max_keys=N starts with an empty LRU dict."""
+    limiter = RateLimiter(default_rps=10, default_burst=5, max_keys=42)
+    assert len(limiter) == 0
+    assert limiter._max_keys == 42  # noqa: SLF001
+
+    async def _seed_then_clear() -> None:
+        await limiter.acquire("a.com", "x")
+
+    asyncio.run(_seed_then_clear())
+    limiter.reset()
+    assert len(limiter) == 0
+    assert ("a.com", "x") not in limiter._locks  # noqa: SLF001
 
 
 # ---- Race-condition fix: per-key Lock must be shared ----

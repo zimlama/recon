@@ -71,6 +71,18 @@ class Settings(BaseSettings):
     # ---- Rate limiting ----
     RATE_LIMIT_RECON_RPS: int = Field(default=10, ge=1, le=1000)
     RATE_LIMIT_RECON_BURST: int = Field(default=20, ge=1, le=10000)
+    # Audit R4-H5: cap on distinct (target, action) buckets so a
+    # long-running process doesn't grow the in-memory bucket map without
+    # bound. LRU eviction kicks in once this threshold is reached.
+    RATE_LIMITER_MAX_KEYS: int = Field(
+        default=10_000,
+        ge=100,
+        le=1_000_000,
+        description=(
+            "Max distinct (target, action) pairs tracked in the "
+            "RateLimiter's bucket dict. LRU eviction when reached."
+        ),
+    )
 
     # ---- Concurrency control ----
     # Hard cap on how many recon modules (or jobs) can be active
