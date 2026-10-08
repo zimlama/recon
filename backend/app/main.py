@@ -12,6 +12,8 @@ import structlog
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app import __version__
 from app.audit.middleware import AuditLogMiddleware
@@ -155,21 +157,79 @@ def create_app() -> FastAPI:
     app.include_router(handoff.router, prefix="/api/v1", tags=["handoff"], dependencies=_auth)
     app.include_router(ai.router, prefix="/api/v1", tags=["ai"], dependencies=_auth)
 
-    # Health endpoints
+    # Health endpoints — kept distinct per K8s liveness-vs-readiness semantics.
+    #
+    # - `/health` is the **liveness** probe: returns 200 as long as the
+    #   Python process is up and the request handler dispatch works.
+    #   No dependency checks. Used by Docker / Compose / K8s livenessProbe.
+    #
+    # - `/health/ready` is the **readiness** probe: returns 200 only if
+    #   every hard dependency (DB, LLMClient construct) responds. Used by
+    #   K8s readinessProbe; returns 503 if a dep is unreachable so traffic
+    #   is steered away. Audit finding R4-H1 — the previous version just
+    #   returned a literal 200 dict without probing anything.
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, str]:
         """Liveness probe. Returns 200 if the process is up."""
         return {"status": "ok", "version": __version__}
 
     @app.get("/health/ready", tags=["health"])
-    async def ready() -> dict[str, str]:
-        """Readiness probe. Returns 200 if all dependencies are ready."""
-        return {
-            "status": "ready",
-            "version": __version__,
-            "ai_configured": str(settings.has_ai_key),
-            "env": settings.APP_ENV,
-        }
+    async def ready() -> JSONResponse:
+        """Readiness probe. Returns 200 only if DB and LLMClient are OK.
+
+        Probes:
+          1. SQLAlchemy — ``SELECT 1`` against SessionLocal. Any
+             SQLAlchemyError (OperationalError, DisconnectionError, …)
+             returns 503.
+          2. LLMClient — instantiates the client (no network IO). Surfaces
+             misconfiguration (e.g. malformed MiniMax API key) at
+             readiness time so K8s can steer traffic away.
+
+        A single dependency failure is enough to mark the pod not-ready.
+        """
+        # 1) Database round-trip
+        try:
+            with SessionLocal() as db:
+                db.execute(text("SELECT 1"))
+        except SQLAlchemyError as exc:
+            logger.error("ready_check_db_failed error=%s", exc)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "not_ready",
+                    "reason": "database_unreachable",
+                    "detail": "SELECT 1 failed against SessionLocal.",
+                    "version": __version__,
+                },
+                headers={"Retry-After": "5"},
+            )
+
+        # 2) LLMClient — construct only, no network IO. Failure here
+        # usually means MINIMAX_API_KEY is missing/malformed.
+        try:
+            LLMClient()
+        except Exception as exc:  # noqa: BLE001 — readiness wants to flag all
+            logger.error("ready_check_llm_failed error=%s", exc)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "not_ready",
+                    "reason": "llm_client_unconstructible",
+                    "detail": "LLMClient() raised at readiness check.",
+                    "version": __version__,
+                },
+                headers={"Retry-After": "5"},
+            )
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "ready",
+                "version": __version__,
+                "ai_configured": str(settings.has_ai_key),
+                "env": settings.APP_ENV,
+            },
+        )
 
     @app.get("/", tags=["root"])
     async def root() -> dict[str, str]:
