@@ -1,3 +1,5 @@
+# Copyright 2026 zimlama
+# SPDX-License-Identifier: Apache-2.0
 """Handoff packet schema — vendor-neutral public contract for Phase 2 consumers.
 
 This is the canonical JSON document that a future `zimlama/recon-phase2`

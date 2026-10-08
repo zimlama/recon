@@ -1,3 +1,5 @@
+# Copyright 2026 zimlama
+# SPDX-License-Identifier: Apache-2.0
 """Person dossier aggregator — Tier 3 (white-hat gated).
 
 Cross-module aggregator that reads completed findings from sibling modules
@@ -510,7 +512,7 @@ class PersonDossierModule(BaseReconModule):
                     tag = await _assess_coherence(dossier, llm_client, system_prompt)
                     if tag is not None:
                         dossier.coherence = tag
-                except Exception as e:
+                except Exception as e:  # pragma: no cover — defensive
                     logger.warning(
                         "coherence_assessment_failed hash=%s err=%s",
                         dossier.email_hash[:8],

@@ -1,3 +1,5 @@
+# Copyright 2026 zimlama
+# SPDX-License-Identifier: Apache-2.0
 """Email pseudonymization + Fernet encryption helpers (PR 4).
 
 This module is the **privacy boundary** for raw email handling. Plaintext

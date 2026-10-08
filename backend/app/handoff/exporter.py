@@ -1,3 +1,5 @@
+# Copyright 2026 zimlama
+# SPDX-License-Identifier: Apache-2.0
 """Handoff exporter — Job → HandoffPacket → JSON file."""
 
 from __future__ import annotations

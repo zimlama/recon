@@ -35,3 +35,9 @@ typer==0.12.1
 dnspython==2.6.1
 # python-whois is a fallback for whois_rdap (we mostly use RDAP, this is a safety net)
 python-whois==0.9.4
+
+# --- Encryption (PR 4 — person_dossier aggregator) ---
+# Fernet (AES-128-CBC + HMAC-SHA256) is used to encrypt raw emails at rest
+# in the IdentityMap table. Pulled in transitively by Authlib today, but
+# declared explicitly because it is now a direct backend dependency.
+cryptography==50.0.2
