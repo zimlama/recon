@@ -33,6 +33,15 @@ async def create_job(
 
     Validates the target format, module selection, and user consent.
     """
+    # Enforce explicit user consent — required by the LATAM-aware disclaimer
+    # and the project's data-residency / OSINT-ethics policy. Without it we
+    # must refuse the job rather than silently store False in the DB.
+    if not payload.user_consent:
+        raise HTTPException(
+            status_code=400,
+            detail="user_consent must be true — explicit consent is required before running OSINT modules.",
+        )
+
     # Validate modules
     for m in payload.selected_modules:
         if m not in MODULE_REGISTRY:
