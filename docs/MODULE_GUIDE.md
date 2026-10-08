@@ -20,6 +20,7 @@
 | socmint | 3 | ❌ (gated) | ~2min | — | **explicit** |
 | employee_osint | 3 | ❌ (gated) | ~1.5min | — | **explicit** |
 | dark_web_osint | 3 | ❌ (gated) | ~3min | — | **explicit** + Tor |
+| person_dossier | 3 | ❌ (gated) | ~30s | — | **explicit** + Fernet key |
 
 ## Tier 1 — Always-on, fully passive
 
@@ -136,6 +137,64 @@
 **Source**: ahmia.fi, Telegram/Discord channels.
 **MITRE**: T1589.001, T1593.001
 
+### person_dossier (v0.2.0 aggregator)
+**What**: Cross-module aggregator that joins findings from `employee_osint`, `socmint`, `breach_data` (and optionally `email_harvesting`) into one `Finding(type=DOSSIER)` per unique identity. Pure DB read — no external IO. Runs after the three source modules complete.
+**Finds**: One dossier per unique person identity (grouped by SHA-256 `email_hash`), with corroborating source modules, aggregated confidence, and an LLM coherence tag.
+**Does NOT do**: No new reconnaissance. No external network calls. No plaintext email leaks — raw addresses are scoped to a single internal helper and routed directly into Fernet encryption.
+**Privacy model**: 
+- All raw email addresses are SHA-256 hashed at the module boundary (`hash_email()`).
+- Raw addresses are optionally stored encrypted at rest in the `identity_map` table using Fernet (`PERSON_DOSSIER_ENCRYPTION_KEY`).
+- The LLM only ever sees the SHA-256 hash, never plaintext.
+- The handoff packet exposes only `email_hash`, source modules, confidence, and counts.
+**PII handling**: Strictest privacy posture of all 15 modules. Schema uses `extra="forbid"` so no plaintext email field can be accidentally added.
+**Source**: sibling `ModuleRun` rows (employee_osint + socmint + breach_data ± email_harvesting).
+**MITRE**: T1589.002
+
+#### Sample dossier (from a real handoff)
+
+```json
+{
+  "persona_id": "p-001",
+  "email_hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "source_modules": ["employee_osint", "socmint", "breach_data"],
+  "role_relevance": "HIGH",
+  "priority_for_next_phase": "MEDIUM",
+  "confidence": 0.85,
+  "coherence": "HIGH",
+  "profiles_count": 3,
+  "breach_exposures_count": 2
+}
+```
+
+#### Confidence boost behavior
+
+Confidence aggregates as **max + 0.1 per multi-source corroboration, capped at 1.0**. Three corroborating modules max the dossier at `1.0`; one module leaves it at `0.85` (the source's own confidence); four or more clamp at `1.0`.
+
+#### Coherence model
+
+The LLM makes **one call per dossier** (max 256 tokens, 30s timeout, temperature 0.1) and returns one of:
+
+| Coherence | Meaning |
+|-----------|---------|
+| `HIGH` | 3+ sources agree; sources are diverse |
+| `MEDIUM` | 2 sources agree |
+| `LOW` | Single source or all sources are the same module |
+| `NONE` | Contradictory signals across sources |
+
+#### Failure mode policy
+
+Orphan breaches (a breach row whose email doesn't correlate with employee_osint or socmint) are kept on the handoff's `errors[]` field rather than being folded into a low-confidence dossier — kept transparent for operator review.
+
+#### Encryption key
+
+Generate with:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Set in `.env` as `PERSON_DOSSIER_ENCRYPTION_KEY=<base64-urlsafe-32-byte-key>`. If unset, the module raises `EncryptionKeyMissingError` and is reported as SKIPPED — the job continues.
+
 ## How to enable modules
 
 In the New Job form, modules are grouped by tier:
@@ -164,6 +223,7 @@ You can also enable/disable modules per-job in the form.
 | socmint | 100-500 | Free (manual) / paid (SpiderFoot HX) |
 | employee_osint | 50-200 | Free (manual) |
 | dark_web_osint | 100-500 | Free (Tor) |
+| person_dossier | 0 (DB-only) | Free (no LLM unless coherence call fires) |
 | AI validation | 1 per module | **Paid** (MiniMax M3 API) |
 
 ## When to run which modules

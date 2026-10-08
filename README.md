@@ -6,7 +6,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![Next.js 14](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](docker-compose.yml)
 
 `zimlama/recon` is a modular web application that runs **Phase 1 reconnaissance** on a target domain, validates each finding with AI, and produces a professional PDF report. Designed for pentesters and red team operators who want a clean, self-hosted, vendor-neutral recon tool.
 
@@ -16,14 +16,17 @@
 
 ## Features
 
-- **14 recon modules** across 3 tiers (passive, semi-passive, white-hat gated active) + 1 aggregator (`person_dossier` on developer branch)
-- **AI-validated findings** via MiniMax M3 (or any OpenAI-compatible provider)
+- **15 recon modules** across 3 tiers (6 passive + 4 semi-passive + 5 white-hat gated) — includes the `person_dossier` cross-module aggregator (v0.2.0)
+- **AI-validated findings** via MiniMax-M3 (or any OpenAI-compatible provider)
 - **Modular architecture** — every module is a standalone Pydantic class, repairable in isolation
 - **Self-hosted** — single `install.sh` command, no SaaS dependency, no telemetry
-- **Handoff contract** — public JSON schema for future Phase 2 (scanning) consumers
+- **Handoff contract** — public JSON schema (v1.0.0, additive through v0.2.0) for future Phase 2 (scanning) consumers
+- **Rules-of-Engagement gating** — `RoEMiddleware` opt-in (env `ROE_ENABLED=true`) for engagements that need RoE enforcement on POST `/jobs`
+- **Free-tier-only deployments** — `tools_only_free=true` filters the module registry to modules that don't require paid API keys
+- **Privacy-by-design** — `person_dossier` SHA-256 hashes emails at the module boundary; raw addresses stored at rest only as Fernet ciphertext
 - **MCP server** — stdio interface for opencode/Claude integration
 - **Professional reports** — Markdown + CSS-styled PDF with cover page and severity badges
-- **LATAM-aware** — disclaimer covers Colombia, Brasil, Mexico, Argentina, Chile, Peru
+- **LATAM-aware** — disclaimer covers Colombia, Brasil, México, Argentina, Chile, Perú
 - **Bilingual docs** — English + Spanish where relevant
 
 ---
@@ -96,7 +99,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full mermaid diagram an
 
 ---
 
-## Modules (14 total)
+## Modules (15 total)
 
 ### Tier 1 — Always-on, fully passive
 
@@ -126,6 +129,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full mermaid diagram an
 | `socmint` | Social-media intelligence | recon-ng, SpiderFoot (passive) |
 | `employee_osint` | Personnel enumeration | linkedin2username, sherlock |
 | `dark_web_osint` | Tor hidden services | ahmia, Whonix (lab-isolated) |
+| `person_dossier` (v0.2.0) | Cross-module per-identity aggregation (no external IO — reads sibling findings) | SHA-256 + Fernet |
 
 See [docs/MODULE_GUIDE.md](docs/MODULE_GUIDE.md) for what each module does, what it returns, and what it does NOT do.
 
@@ -222,7 +226,7 @@ Available tools:
 - `get_report_path(job_id)` — get report file path
 - `list_modules()` — enumerate available modules
 
-See [docs/MCP.md](docs/MCP.md) (TODO) for the full tool schema.
+See [`backend/app/mcp/server.py`](backend/app/mcp/server.py) for the full tool schema.
 
 ---
 

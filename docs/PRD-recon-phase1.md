@@ -1,13 +1,16 @@
 # PRD: zimlama/recon — Phase 1 Ethical Hacking Reconnaissance Framework
 
-> **Version**: 0.1.0 (Draft)
-> **Date**: 2026-10-06
+> **Version**: 0.2.0 (released)
+> **Date**: 2026-10-13
 > **Owner**: zimlama
-> **Status**: Active development
+> **Status**: v0.2.0 shipped
 
 ## Status
 
-✅ **v0.1.0 released** (2026-10-12) — see [CHANGELOG.md](../CHANGELOG.md).
+✅ **v0.1.0 released** (2026-10-12) — initial 14 modules + AI validation + handoff v1.0.0. See [CHANGELOG.md](../CHANGELOG.md).
+✅ **v0.2.0 released** (2026-10-13) — RoE middleware (PR 1), touch_classification + tools_only_free filter (PR 2), person_dossier aggregator + privacy primitives (PR 4), all audit findings closed. See [CHANGELOG.md](../CHANGELOG.md).
+
+Active development is now focused on **v0.3.0** (multi-user + observability). See [Out of scope](#out-of-scope-deferred-to-v02) below for the deferred items.
 
 ## Problem statement
 
@@ -33,17 +36,34 @@ Current options fail at least 2-3 of these:
 - **Bug bounty hunters** — surface discovery for targets
 - **Security researchers** — open-source methodology
 
-## Goals (v0.1)
+## Goals (v0.1, achieved)
+
+| Goal | Metric | Status |
+|------|--------|--------|
+| Self-hosted install in < 5 min | `time ./install.sh` | ✅ Achieved |
+| 14 recon modules functional | Each module produces findings | ✅ Achieved (v0.1.0) |
+| AI validation per module | Each module has LDMValidationResult | ✅ Achieved (v0.1.0) |
+| Handoff JSON for Phase 2 | Schema v1.0.0, semver stable | ✅ Achieved (v0.1.0); additive only through v0.2.0 |
+| 90% test coverage | `pytest --cov-fail-under=90` | ✅ Achieved; 91.4% module coverage in v0.2.0 |
+| 0 references to third-party brands | `grep -r "DragonJar"` returns 0 | ✅ Verified every release |
+
+## Goals (v0.2.0, achieved)
+
+| Goal | Metric | Status |
+|------|--------|--------|
+| Rules-of-Engagement gate | RoEMiddleware + RoEValidator + RoE model | ✅ Achieved (PR 1) |
+| Free-tier-only deployments | `tools_only_free` filter + 14-row mapping table | ✅ Achieved (PR 2) |
+| Per-person aggregation | person_dossier Tier 3, privacy-by-design | ✅ Achieved (PR 4) |
+| All audit findings closed | 24/24 (3 CRITICAL + 9 HIGH + 7 MEDIUM + 5 LOW) | ✅ Achieved |
+
+## Goals (v0.3.0, target)
 
 | Goal | Metric |
 |------|--------|
-| Self-hosted install in < 5 min | `time ./install.sh` |
-| 14 recon modules functional | Each module produces findings |
-| AI validation per module | Each module has LDMValidationResult |
-| Handoff JSON for Phase 2 | Schema v1.0.0, semver stable |
-| 90% test coverage | `pytest --cov-fail-under=90` |
-| 0 references to third-party brands | `grep -r "DragonJar"` returns 0 |
-| Apache-2.0 license | LICENSE file at root |
+| Multi-user (JWT) | `RECON_AUTH_MODE=jwt`, per-user job scoping |
+| Postgres backend | `DATABASE_URL=postgresql://...` swap |
+| Observability | Structured logs + Prometheus + healthcheck thresholds |
+| Production hardening | TLS via Caddy / Cloudflare Tunnel, rate-limit per-user |
 
 ## Non-goals (v0.1)
 
@@ -127,18 +147,20 @@ See [docs/HANDOFF.md](HANDOFF.md) for the complete spec.
 - **Conventional commits**: no AI attribution
 - **English primary**: docs in English, Spanish for LATAM context only
 
-## Out of scope (deferred to v0.2+)
+## Out of scope (deferred to v0.3+)
 
 | Feature | When |
 |---------|------|
-| Active scanning (Phase 2) | v0.2 in separate repo |
-| Multi-user auth | v0.3 |
+| Active scanning (Phase 2) | separate repo, post-v0.4.0 |
+| Multi-user auth (JWT) | v0.3 |
 | Federation | v0.4 |
 | WebSocket real-time | v0.3 |
 | Custom LLM providers | v0.3 |
-| Nuclei integration | v0.2 |
+| Nuclei integration | Phase 2 (separate repo) |
 | Burp Suite extension | v0.4 |
 | Mobile app | v0.5+ |
+
+Already shipped in v0.2.0 (was originally on this list): RoE enforcement, `person_dossier` aggregator, audit-finding closures.
 
 ## Open questions
 

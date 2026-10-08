@@ -2,9 +2,10 @@
 
 > **Schema version**: 1.0.0
 > **Status**: Stable
-> **Last updated**: 2026-10-06
+> **Last updated**: 2026-10-13 (v0.2.0 — additive `person_dossiers[]` only; no breaking changes)
 
-**Version**: [v0.1.0](https://github.com/zimlama/recon/releases/tag/v0.1.0) — contract v1.0.0 (additive changes only since v0.1.0).
+**Version**: [v0.2.0](https://github.com/zimlama/recon/releases/tag/v0.2.0) — contract v1.0.0 (additive: new optional `person_dossiers[]` at top level; consumers that don't recognize the field ignore it).
+**Previous version**: [v0.1.0](https://github.com/zimlama/recon/releases/tag/v0.1.0) — contract v1.0.0 (initial release).
 
 ## Consumers
 
@@ -72,6 +73,19 @@ When a `zimlama/recon` job completes, the system generates a **handoff packet** 
     {"module": "port_scanning", "priority": "HIGH", "rationale": "Shodan shows 3 ports per host"},
     {"module": "web_fingerprinting", "priority": "MEDIUM", "rationale": "HTTP services running, identify WAF/CMS"}
   ],
+  "person_dossiers": [
+    {
+      "persona_id": "p-001",
+      "email_hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      "source_modules": ["employee_osint", "socmint", "breach_data"],
+      "role_relevance": "HIGH",
+      "priority_for_next_phase": "MEDIUM",
+      "confidence": 0.85,
+      "coherence": "HIGH",
+      "profiles_count": 3,
+      "breach_exposures_count": 2
+    }
+  ],
   "do_not_scan": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "0.0.0.0/8", "224.0.0.0/4", "240.0.0.0/4", "::1/128", "fc00::/7"],
   "consent_flags": {
     "tier_3_modules_run": [],
@@ -95,6 +109,7 @@ When a `zimlama/recon` job completes, the system generates a **handoff packet** 
 | `credentials_exposure_summary` | object | ❌ | Email + breach exposure (PII-handled) |
 | `certificates` | array | ❌ | Certificates observed in CT logs |
 | `recommended_modules` | array | ❌ | Phase 2 module recommendations |
+| `person_dossiers` | array | ❌ | Per-identity aggregation output from `person_dossier` (v0.2.0+, additive) |
 | `do_not_scan` | array | ✅ | IP ranges to never scan (default: RFC 1918 + reserved) |
 | `consent_flags` | object | ✅ | What consent was given (white-hat only) |
 
@@ -167,12 +182,46 @@ When a `zimlama/recon` job completes, the system generates a **handoff packet** 
 | `priority` | string | `HIGH` / `MEDIUM` / `LOW` |
 | `rationale` | string | 1-sentence why this module is recommended |
 
+### `person_dossiers[]` (v0.2.0+, additive)
+
+Per-identity aggregation emitted by the `person_dossier` Tier 3 aggregator. Phase 2 consumers use this to derive a credential-stuffing watch-list — *without ever seeing plaintext email*.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `persona_id` | string | Per-job fake ID assigned by `person_dossier` (e.g., `"p-001"`). Resets each `job_id`; not a stable cross-job identifier. |
+| `email_hash` | string | SHA-256 of the lowercased email, hex-encoded. Plaintext email **never** appears in the handoff. |
+| `source_modules` | array of strings | The Tier 3 modules that corroborated this identity (e.g., `["employee_osint", "socmint", "breach_data"]`). Phase 2 prioritizes by source diversity. |
+| `role_relevance` | string | `HIGH` / `MEDIUM` / `LOW`. Inferred role importance (exec, IT/eng, support, etc.). |
+| `priority_for_next_phase` | string | `HIGH` / `MEDIUM` / `LOW`. Aggregate priority for Phase 2 to attack. |
+| `confidence` | float (0.0–1.0) | Aggregated (max + 0.1 boost per multi-source corroboration, capped at 1.0). |
+| `coherence` | string | LLM-assessed coherence: `HIGH` / `MEDIUM` / `LOW` / `NONE`. Bounded call (256 tokens, 30s). |
+| `profiles_count` | int | Number of distinct social/professional profiles joined into this dossier. |
+| `breach_exposures_count` | int | Number of distinct breach rows contributing to this dossier. |
+
+#### Privacy invariants (verified)
+
+- **Schema**: `HandoffPersonDossierSummary.model_config = ConfigDict(extra="forbid")` — no plaintext `email` field can be added without breaking the schema.
+- **In-transit**: The LLM (used for the coherence call) only receives `email_hash`. The Dossier prompt template never embeds plaintext.
+- **At rest**: The `identity_map` table holds raw email **only as a Fernet ciphertext** (`IdentityMap.encrypted_email`), keyed by Fernet (`PERSON_DOSSIER_ENCRYPTION_KEY`). Plaintext is scoped to a single internal helper that routes directly into `encrypt_email()`.
+- **Orphan breaches**: a breach row that doesn't correlate with `employee_osint` or `socmint` is recorded in `errors[]` rather than being folded into a low-confidence dossier, for transparent operator review.
+
+Phase 2 consumers can derive a Phase 2 watch-list by sorting `person_dossiers[]` by `(confidence, coherence, role_relevance)` and treating the top N as the candidate set — but the actual operation (e.g. credential-stuffing watch vs. active probe) belongs to Phase 2's RoE model, not Phase 1.
+
 ### `consent_flags`
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `tier_3_modules_run` | array | List of Tier 3 modules that were run (e.g., `["breach_data"]`) |
 | `white_hat_only` | bool | Always `true` (this is a recon tool, not an attack tool) |
+
+## v0.2.0 changelog (additive only)
+
+| Field added | Where | Notes |
+|-------------|-------|-------|
+| `person_dossiers[]` | `HandoffPacket` (top-level) | Optional; absent → empty list. Existing 1.0.0 consumers ignore it (Pydantic `extra="ignore"` on importer side, or simply skip unknown fields in JSON parsers). |
+| `HandoffPersonDossierSummary` | new schema class | `extra="forbid"` — no plaintext email can be added. |
+
+No fields removed, renamed, or retyped. No type changes. **Strictly additive** — minor-version semantics hold. See [`CHANGELOG.md`](../CHANGELOG.md) v0.2.0 entry for the producer side.
 
 ## How to consume
 

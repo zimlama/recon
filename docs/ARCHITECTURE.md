@@ -1,5 +1,7 @@
 # Architecture
 
+> **v0.2.0**: The diagram and directory layout below now include the 15 modules (PR 4 `person_dossier` shipped), the `RoEMiddleware` (PR 1), and the `tools_only_free` filter (PR 2). See CHANGELOG.md for the full release notes.
+
 ## High-level diagram
 
 ```
@@ -18,38 +20,62 @@
 ┌─────────────────────────────────────────────────────────────┐
 │         Backend (FastAPI :8000)                              │
 │   ┌────────────────────────────────────────────────┐        │
+│   │  Middleware stack (outer → inner)               │        │
+│   │  ├─ AuditMiddleware (sees everything, including │        │
+│   │  │   403s from RoEMiddleware)                   │        │
+│   │  ├─ RoEMiddleware (gates POSTs, only if         │        │
+│   │  │   ROE_ENABLED=true, else pass-through)       │        │
+│   │  └─ CORSMiddleware (handles preflight, last)    │        │
+│   └────────────────────────────────────────────────┘        │
+│   ┌────────────────────────────────────────────────┐        │
 │   │  Routes (FastAPI routers)                       │        │
-│   │  ├─ /api/v1/jobs (CRUD)                        │        │
-│   │  ├─ /api/v1/modules (catalog)                  │        │
+│   │  ├─ /api/v1/jobs (CRUD, RoE-gated POST)        │        │
+│   │  ├─ /api/v1/modules (catalog, 14+1 entries)    │        │
 │   │  ├─ /api/v1/findings                           │        │
 │   │  ├─ /api/v1/reports                            │        │
 │   │  ├─ /api/v1/handoff (public contract)          │        │
-│   │  └─ /api/v1/ai (validation)                    │        │
+│   │  ├─ /api/v1/ai (validation)                    │        │
+│   │  └─ /api/v1/roes (v0.2.0+, RoE CRUD)           │        │
 │   └────────────────────────────────────────────────┘        │
 │   ┌────────────────────────────────────────────────┐        │
 │   │  Orchestrator (asyncio)                        │        │
 │   │  ├─ JobRunner: asyncio.gather per module       │        │
+│   │  │   sweep_stuck_jobs() on startup              │        │
 │   │  ├─ AIValidator: MiniMax M3 per module         │        │
-│   │  └─ RateLimiter: token bucket per (target, mod)│        │
+│   │  ├─ RateLimiter: token bucket per (target,mod) │        │
+│   │  └─ RoEValidator: is_authorized(target, scope) │        │
 │   └────────────────────────────────────────────────┘        │
 │   ┌────────────────────────────────────────────────┐        │
-│   │  Modules (14) — BaseReconModule ABC        │        │
+│   │  Modules (15) — BaseReconModule ABC            │        │
 │   │  Tier 1 (6): whois, dns, subdomain, ct,        │        │
 │   │              wayback, email                    │        │
-│   │  Tier 2 (4): shodan, github, metadata, dorking│        │
-│   │  Tier 3 (4): breach, socmint, employee, darkweb│        │
+│   │  Tier 2 (4): shodan, github, metadata, dorking │        │
+│   │  Tier 3 (5): breach, socmint, employee,        │        │
+│   │              darkweb, person_dossier           │        │
+│   │  (person_dossier is an aggregator — no net IO, │        │
+│   │   reads sibling ModuleRun rows)                 │        │
 │   └────────────────────────────────────────────────┘        │
 │   ┌────────────────────────────────────────────────┐        │
 │   │  Handoff subsystem (vendor-neutral contract)  │        │
 │   │  ├─ HandoffPacket v1.0.0 (Pydantic)            │        │
-│   │  ├─ Exporter: job → JSON file                  │        │
+│   │  ├─ Schema: extra="forbid" — no surprise fields│        │
+│   │  ├─ person_dossiers[] (v0.2.0 additive)        │        │
+│   │  ├─ Exporter: job → JSON file (atomic write)   │        │
 │   │  └─ Importer: JSON → DB row                    │        │
+│   └────────────────────────────────────────────────┘        │
+│   ┌────────────────────────────────────────────────┐        │
+│   │  Privacy primitives (v0.2.0)                    │        │
+│   │  ├─ hash_email() → SHA-256 (deterministic)     │        │
+│   │  ├─ encrypt_email() → Fernet ciphertext        │        │
+│   │  ├─ EncryptionKeyMissingError                  │        │
+│   │  └─ IdentityMap table (encrypted raw email)    │        │
 │   └────────────────────────────────────────────────┘        │
 │   ┌────────────────────────────────────────────────┐        │
 │   │  Report subsystem                              │        │
 │   │  ├─ MarkdownReportGenerator: job → MD           │        │
 │   │  ├─ load_css: brand-kit                        │        │
 │   │  └─ PDFGenerator: MD → PDF via npx md-to-pdf   │        │
+│   │     (process-group cleanup, 120s timeout)      │        │
 │   └────────────────────────────────────────────────┘        │
 │   ┌────────────────────────────────────────────────┐        │
 │   │  MCP server (stdio)                             │        │
@@ -57,7 +83,10 @@
 │   └────────────────────────────────────────────────┘        │
 │   ┌────────────────────────────────────────────────┐        │
 │   │  LLM Client (httpx async, OpenAI-compat)       │        │
-│   │  └─ Retry with exponential backoff              │        │
+│   │  ├─ Stub mode when key is placeholder          │        │
+│   │  ├─ Retry w/ 2**attempt + Retry-After + jitter │        │
+│   │  ├─ Malformed-response marker (no silent drop)  │        │
+│   │  └─ Auth errors raise immediately, no retry    │        │
 │   └────────────────────────────────────────────────┘        │
 └────────────┬──────────────────────────┬─────────────────────┘
              │                          │
@@ -65,8 +94,42 @@
     ┌──────────────────┐      ┌────────────────────────┐
     │  SQLite DB        │      │  MiniMax M3 API         │
     │  ./data/recon.db  │      │  (OpenAI-compat)       │
+    │  (WAL mode)       │      │                        │
     └──────────────────┘      └────────────────────────┘
 ```
+
+## What's new in v0.2.0
+
+Three PRs landed on top of v0.1.0. The diagram and the directory tree below already include all of them.
+
+### PR 1 — Rules-of-Engagement (RoE) middleware
+
+- **`backend/app/middleware/roe.py`** — `RoEMiddleware` (Starlette/FastAPI middleware).
+- **`backend/app/orchestrator/roe.py`** — `RoEValidator.is_authorized(target, scope)` and `get_active_roes()`.
+- **`backend/app/models.py`** — `RoE` and `SignOff` tables (Alembic migration `20261007224728_add_roe_tables.py`).
+- **`backend/app/main.py`** — wired between CORS (innermost) and Audit (outermost), only when `ROE_ENABLED=true`.
+- **`.env.example`** — `ROE_ENABLED=false` (opt-in for backward compat).
+- **`.env` settings** — `ROE_ENABLED`, `ROE_SESSION_FACTORY` (forward-compat slot).
+
+Order rationale (per the design): **Audit (outermost) → RoE → CORS (innermost)**. Audit sees 403s as they bubble out; CORS handles OPTIONS preflight before RoE sees it.
+
+### PR 2 — Touch classification + free-only filter
+
+- **`backend/app/modules/base.py`** — `TouchClass(StrEnum)` with four members (`PASSIVE_TARGET`, `PASSIVE_THIRDPARTY`, `ACTIVE_TARGET`, `ACTIVE_THIRDPARTY`) plus class attributes `touch_classification` and `requires_paid: bool`.
+- **All 14 modules** — classified per a 14-row mapping table; defaults `requires_paid=False` (safe).
+- **`backend/app/config.py`** — `tools_only_free: bool` (default `False`) + `before` validator (fail-open on bad env value).
+- **`backend/app/modules/__init__.py`** — `_build_registry()` filters out paid modules when `tools_only_free=true`, logs a WARNING per excluded module.
+
+### PR 4 — person_dossier aggregator (Tier 3, gated)
+
+- **`backend/app/modules/person_dossier.py`** — `PersonDossierModule`. Cross-module aggregator — no external IO. Reads completed findings from `employee_osint`, `socmint`, `breach_data`, optionally `email_harvesting`, groups by `email_hash`, emits one `Finding(type=DOSSIER)` per unique identity. Includes a per-dossier LLM coherence call (256 tokens, 30s timeout).
+- **`backend/app/utils/encryption.py`** — `hash_email()` (SHA-256 hex), `encrypt_email()` + `decrypt_email()` (Fernet), and `EncryptionKeyMissingError`.
+- **`backend/app/models.py`** — `IdentityMap` SQLAlchemy table for encrypted raw-email storage at rest + `FindingType.DOSSIER` enum value (now 16 types).
+- **`backend/app/handoff/schema.py`** — `HandoffPacket.person_dossiers: list[HandoffPersonDossierSummary]` (additive, non-breaking; existing 1.0.0 consumers ignore it).
+- **`backend/app/config.py`** — `PERSON_DOSSIER_ENCRYPTION_KEY: str | None` (Fernet key).
+- **`backend/app/modules/__init__.py`** — 15th entry in `MODULE_REGISTRY`.
+
+Privacy invariants verified at three layers (schema `extra="forbid"`, code-path isolation, storage ciphertext-only). Plaintext emails never reach logs, the handoff, or the LLM.
 
 ## Directory structure
 
@@ -82,7 +145,7 @@ zimlama-recon/
 │   │   ├── cli.py              # Typer CLI
 │   │   ├── audit/              # Audit middleware
 │   │   ├── orchestrator/       # Job runner, AI validator, rate limiter
-│   │   ├── modules/            # 14 recon modules + 1 aggregator (person_dossier, on developer branch)
+│   │   ├── modules/            # 15 recon modules (14 + person_dossier aggregator)
 │   │   ├── llm/                # MiniMax M3 client + prompts
 │   │   ├── handoff/            # Public handoff contract
 │   │   ├── routes/             # FastAPI routers
