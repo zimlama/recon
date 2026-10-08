@@ -13,6 +13,7 @@ from __future__ import annotations
 import abc
 import logging
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 import httpx
@@ -23,6 +24,28 @@ from app.models import FindingType, ModuleTier
 from app.utils.network import filter_public_ips  # noqa: F401 — SSRF contract anchor
 
 logger = logging.getLogger(__name__)
+
+
+class TouchClass(StrEnum):
+    """Classifies how a recon module contacts the world.
+
+    See ``openspec/changes/2026-10-12-pr2-touch-classification/spec.md``
+    (REQ-028) for the source of truth.
+
+    - PASSIVE_TARGET: reads public registries owned by target
+      (e.g., RDAP/WHOIS of the target's own domain).
+    - PASSIVE_THIRDPARTY: reads public data indexed by third parties;
+      target is never contacted (e.g., crt.sh, Wayback CDX, HIBP).
+    - ACTIVE_TARGET: actively probes target infra (the target observes
+      the query — e.g., DNS AXFR against the target's NS).
+    - ACTIVE_THIRDPARTY: actively probes third-party infra on the
+      target's behalf. Forward-compat slot, no current occupant.
+    """
+
+    PASSIVE_TARGET = "passive_target"
+    PASSIVE_THIRDPARTY = "passive_thirdparty"
+    ACTIVE_TARGET = "active_target"
+    ACTIVE_THIRDPARTY = "active_thirdparty"
 
 
 class Finding(BaseModel):
@@ -78,6 +101,8 @@ class BaseReconModule(abc.ABC):
     requires_consent: bool = False
     estimated_duration_seconds: int | None = None
     enabled_by_default: bool = False
+    touch_classification: TouchClass = TouchClass.PASSIVE_TARGET
+    requires_paid: bool = False
 
     def __init__(self) -> None:
         if not self.name:

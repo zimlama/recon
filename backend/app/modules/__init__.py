@@ -8,6 +8,8 @@ Single source of truth for which modules are available. Adding a new module:
 
 from __future__ import annotations
 
+import logging
+
 from app.modules.base import BaseReconModule
 from app.modules.breach_data import BreachDataModule
 from app.modules.certificate_transparency import CertificateTransparencyModule
@@ -18,11 +20,14 @@ from app.modules.employee_osint import EmployeeOSINTModule
 from app.modules.github_recon import GitHubReconModule
 from app.modules.google_dorking import GoogleDorkingModule
 from app.modules.metadata_analysis import MetadataAnalysisModule
+from app.modules.person_dossier import PersonDossierModule
 from app.modules.shodan_censys import ShodanCensysModule
 from app.modules.socmint import SOCMINTModule
 from app.modules.subdomain_enum import SubdomainEnumModule
 from app.modules.wayback_machine import WaybackMachineModule
 from app.modules.whois_rdap import WhoisRDAPModule
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "BaseReconModule",
@@ -33,8 +38,17 @@ __all__ = [
 
 
 def _build_registry() -> dict[str, BaseReconModule]:
-    """Build the module registry. Lazy — called once at startup."""
-    return {
+    """Build the module registry. Lazy — called once at startup.
+
+    If ``settings.tools_only_free`` is True, every module whose
+    ``requires_paid`` is True is excluded and a WARNING is logged for
+    each. See ``spec REQ-030`` in
+    ``openspec/changes/2026-10-12-pr2-touch-classification``.
+    """
+    # Lazy import to avoid circular: app.modules ↔ app.config
+    from app.config import get_settings
+
+    registry: dict[str, BaseReconModule] = {
         # Tier 1 — always-on, fully passive
         "whois_rdap": WhoisRDAPModule(),
         "dns_enum": DNSEnumModule(),
@@ -52,7 +66,22 @@ def _build_registry() -> dict[str, BaseReconModule]:
         "socmint": SOCMINTModule(),
         "employee_osint": EmployeeOSINTModule(),
         "dark_web_osint": DarkWebOSINTModule(),
+        # PR 4 — Tier 3 aggregator (cross-module, depends on the others)
+        "person_dossier": PersonDossierModule(),
     }
+
+    settings = get_settings()
+    if settings.tools_only_free:
+        excluded = [name for name, mod in registry.items() if mod.requires_paid]
+        for name in excluded:
+            logger.warning(
+                "paid_module_excluded module=%s reason=%s",
+                name,
+                "tools_only_free=true",
+            )
+        registry = {name: mod for name, mod in registry.items() if not mod.requires_paid}
+
+    return registry
 
 
 MODULE_REGISTRY: dict[str, BaseReconModule] = _build_registry()

@@ -12,9 +12,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy import create_engine
 
 from app.models import RoE, RoEStatus, ScopeType, SignOff, _now
-
 
 # ---------------------------------------------------------------------------
 # Fixtures — reuse the global engine + session so FK PRAGMA (set up in
@@ -24,28 +24,57 @@ from app.models import RoE, RoEStatus, ScopeType, SignOff, _now
 
 
 @pytest.fixture
-def roe_db():
-    """Per-test sync session with ONLY the RoE + SignOff tables created.
+def roe_db(tmp_path):
+    """Per-test sync DB with ONLY the RoE + SignOff tables created.
 
-    Reuses the global engine from `app.database`, which has
-    `PRAGMA foreign_keys=ON` wired up via an event listener. Without that
-    PRAGMA SQLite would silently ignore our `ON DELETE CASCADE` clause and
-    the cascade-delete test would fail.
+    Uses a private file-backed SQLite engine (not the global engine from
+    `app.database`) so:
+    - `PRAGMA foreign_keys=ON` is wired up via a local event listener
+      (the global engine wires this up too, but using a private engine
+      avoids cross-test contamination and a SQLAlchemy 2.1.x + coverage
+      interaction that corrupts the cache-key compilation under the
+      global engine).
+    - Each test gets a fresh, isolated DB file that is removed on
+      teardown, mirroring the pattern in `test_models.py`.
     """
-    from app.database import SessionLocal, engine
+    from sqlalchemy import event
+    from sqlalchemy.orm import sessionmaker
 
-    RoE.__table__.drop(bind=engine, checkfirst=True)
-    SignOff.__table__.drop(bind=engine, checkfirst=True)
-    RoE.__table__.create(bind=engine, checkfirst=True)
-    SignOff.__table__.create(bind=engine, checkfirst=True)
+    db_path = tmp_path / "roe_test.db"
+    if db_path.exists():
+        db_path.unlink()
 
-    db = SessionLocal()
+    eng = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+
+    # SQLite defaults FK enforcement to OFF. ON DELETE CASCADE on
+    # `sign_offs.roe_id` would be silently ignored without this PRAGMA.
+    @event.listens_for(eng, "connect")
+    def _set_sqlite_pragma(dbapi_conn, _conn_record):  # type: ignore[no-untyped-def]
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    RoE.__table__.create(bind=eng, checkfirst=True)
+    SignOff.__table__.create(bind=eng, checkfirst=True)
+    Session_ = sessionmaker(
+        bind=eng, autoflush=False, autocommit=False, expire_on_commit=False
+    )
+
+    db = Session_()
     try:
         yield db
     finally:
         db.close()
-        SignOff.__table__.drop(bind=engine, checkfirst=True)
-        RoE.__table__.drop(bind=engine, checkfirst=True)
+        SignOff.__table__.drop(bind=eng, checkfirst=True)
+        RoE.__table__.drop(bind=eng, checkfirst=True)
+        eng.dispose()
+        try:
+            db_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _make_roe(**overrides) -> RoE:

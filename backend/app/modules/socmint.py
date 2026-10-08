@@ -18,10 +18,15 @@ import shutil
 import time
 from typing import Any
 
-import httpx
-
 from app.models import ModuleTier
-from app.modules.base import BaseReconModule, Finding, FindingType, ModuleInput, ModuleOutput
+from app.modules.base import (
+    BaseReconModule,
+    Finding,
+    FindingType,
+    ModuleInput,
+    ModuleOutput,
+    TouchClass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +57,8 @@ class SOCMINTModule(BaseReconModule):
     requires_consent = True  # PII handling required
     estimated_duration_seconds = 120
     enabled_by_default = False  # Tier 3 — opt-in
+    touch_classification: TouchClass = TouchClass.PASSIVE_THIRDPARTY
+    requires_paid: bool = False
 
     async def run(self, input: ModuleInput) -> ModuleOutput:
         """Discover social media profiles for the target."""
@@ -125,29 +132,29 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         """Check if a social profile exists for the target on this platform.
 
         Returns the URL if found, None if not (404 etc.).
-        Uses HTTP HEAD first (less intrusive), then GET if HEAD is unsupported.
+        Uses a HEAD-equivalent GET first (less intrusive), then a GET retry if
+        the first attempt is blocked (405/403).
 
-        SSRF defense: follow_redirects=False to prevent pivoting to internal
-        services via redirect chain. Operator must use authorized targets.
+        SSRF defense: routes through ``BaseReconModule.safe_http_get_async``
+        which enforces ``follow_redirects=False`` and swallows httpx errors.
+        Operator must use authorized targets.
         """
         url = url_template.format(target=target)
+        headers = {"User-Agent": USER_AGENT}
         try:
-            async with httpx.AsyncClient(
-                timeout=HTTP_TIMEOUT,
-                follow_redirects=False,
-                headers={"User-Agent": USER_AGENT},
-            ) as client:
-                # HEAD first (less intrusive)
-                response = await client.head(url)
-                if response.status_code == 200:
+            # SSRF defense: safe_http_get_async (follow_redirects=False, swallows HTTPError)
+            response = await self.safe_http_get_async(url, timeout=HTTP_TIMEOUT, headers=headers)
+            if response is not None and response.status_code == 200:
+                return url
+            # Fall back to GET for sites that don't support HEAD-equivalent checks
+            if response is not None and response.status_code in (405, 403):
+                response = await self.safe_http_get_async(
+                    url, timeout=HTTP_TIMEOUT, headers=headers
+                )
+                if response is not None and response.status_code == 200:
                     return url
-                # Fall back to GET for sites that don't support HEAD
-                if response.status_code in (405, 403):
-                    response = await client.get(url)
-                    if response.status_code == 200:
-                        return url
-                return None
-        except httpx.HTTPError as e:
+            return None
+        except (ValueError, TypeError) as e:
             logger.debug("socmint_http_error", platform=platform_name, error=str(e))
             return None
 

@@ -19,7 +19,14 @@ import httpx
 
 from app.config import get_settings
 from app.models import ModuleTier
-from app.modules.base import BaseReconModule, Finding, FindingType, ModuleInput, ModuleOutput
+from app.modules.base import (
+    BaseReconModule,
+    Finding,
+    FindingType,
+    ModuleInput,
+    ModuleOutput,
+    TouchClass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +52,8 @@ class ShodanCensysModule(BaseReconModule):
     requires_consent = False
     estimated_duration_seconds = 45
     enabled_by_default = False  # Tier 2 — opt-in
+    touch_classification: TouchClass = TouchClass.PASSIVE_THIRDPARTY
+    requires_paid: bool = False
 
     async def run(self, input: ModuleInput) -> ModuleOutput:
         """Query Shodan InternetDB + Censys for the target.

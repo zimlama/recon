@@ -40,15 +40,16 @@ async def test_openapi_schema_available(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_modules_list(client: AsyncClient) -> None:
-    """/api/v1/modules returns the 14 modules."""
+    """/api/v1/modules returns the 15 modules (PR 4 added person_dossier)."""
     response = await client.get("/api/v1/modules")
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 14
+    assert data["total"] == 15
     module_names = {m["name"] for m in data["modules"]}
     assert "subdomain_enum" in module_names
     assert "whois_rdap" in module_names
     assert "dark_web_osint" in module_names
+    assert "person_dossier" in module_names
 
 
 @pytest.mark.asyncio

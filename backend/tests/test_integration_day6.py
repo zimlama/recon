@@ -70,8 +70,8 @@ def temp_db():
 # ---- Helper: all 14 modules can be instantiated and have metadata ----
 
 def test_all_14_modules_registered() -> None:
-    """All 14 modules are registered in the MODULE_REGISTRY."""
-    assert len(MODULE_REGISTRY) == 14
+    """All 15 modules are registered in the MODULE_REGISTRY (PR 4 added person_dossier)."""
+    assert len(MODULE_REGISTRY) == 15
 
     expected = {
         # Tier 1
@@ -81,6 +81,8 @@ def test_all_14_modules_registered() -> None:
         "shodan_censys", "github_recon", "metadata_analysis", "google_dorking",
         # Tier 3
         "breach_data", "socmint", "employee_osint", "dark_web_osint",
+        # PR 4 (Tier 3 aggregator)
+        "person_dossier",
     }
     assert set(MODULE_REGISTRY.keys()) == expected
 
@@ -97,11 +99,11 @@ def test_all_modules_have_required_metadata() -> None:
 
 
 def test_tier_distribution() -> None:
-    """Tier distribution: 6 Tier 1, 4 Tier 2, 4 Tier 3."""
+    """Tier distribution: 6 Tier 1, 4 Tier 2, 5 Tier 3 (PR 4 added person_dossier)."""
     tier_counts = {"tier_1": 0, "tier_2": 0, "tier_3": 0}
     for module in MODULE_REGISTRY.values():
         tier_counts[module.tier.value] += 1
-    assert tier_counts == {"tier_1": 6, "tier_2": 4, "tier_3": 4}
+    assert tier_counts == {"tier_1": 6, "tier_2": 4, "tier_3": 5}
 
 
 # ---- Integration: handoff generation with real module outputs ----
@@ -278,7 +280,11 @@ subprocess_modules = {
 
 @pytest.mark.asyncio
 async def test_all_14_modules_can_run_in_parallel_with_mocks() -> None:
-    """All 14 modules run correctly via asyncio.gather (the actual production path).
+    """All 15 modules run correctly via asyncio.gather (the actual production path).
+
+    PR 4 added `person_dossier` (15th module). It requires a `job_id`, so we
+    patch its run method to return a stub ModuleOutput — its DB-bound behavior
+    is exercised separately in test_person_dossier.py.
 
     This exercises the same parallel execution + exception-handling path that
     JobRunner.run_job uses (job_runner.py:84). Mocks are applied at the
@@ -287,7 +293,19 @@ async def test_all_14_modules_can_run_in_parallel_with_mocks() -> None:
     """
     original_methods: dict[tuple[str, str], object] = {}
     original_subprocess_exec = asyncio.create_subprocess_exec
+    original_person_dossier_run = MODULE_REGISTRY["person_dossier"].run
     try:
+        # Stub person_dossier.run — it requires a real job_id + DB state.
+        # Its full behavior is covered by test_person_dossier.py.
+        MODULE_REGISTRY["person_dossier"].run = AsyncMock(  # type: ignore[method-assign]
+            return_value=ModuleOutput(
+                module="person_dossier",
+                findings=[],
+                duration_seconds=0.0,
+                errors=[],
+            )
+        )
+
         for name, module in MODULE_REGISTRY.items():
             for method_name in network_methods:
                 if hasattr(module, method_name):
@@ -309,7 +327,7 @@ async def test_all_14_modules_can_run_in_parallel_with_mocks() -> None:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Verify all results are ModuleOutput (no exceptions escaped)
-        assert len(results) == len(MODULE_REGISTRY) == 14
+        assert len(results) == len(MODULE_REGISTRY) == 15
         for name, result in zip(MODULE_REGISTRY.keys(), results):
             assert not isinstance(result, Exception), f"{name} raised: {result}"
             assert isinstance(result, ModuleOutput), f"{name} did not return ModuleOutput"
@@ -318,6 +336,7 @@ async def test_all_14_modules_can_run_in_parallel_with_mocks() -> None:
         for (name, method_name), original in original_methods.items():
             setattr(MODULE_REGISTRY[name], method_name, original)
         asyncio.create_subprocess_exec = original_subprocess_exec  # type: ignore[assignment]
+        MODULE_REGISTRY["person_dossier"].run = original_person_dossier_run  # type: ignore[method-assign]
 
 
 @pytest.mark.asyncio

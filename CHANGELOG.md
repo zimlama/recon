@@ -7,76 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-12
+## [0.2.0] - 2026-10-13
 
-### Sprint recap (7-day MVP)
+### Sprint recap (v0.2.0)
 
-Built in 7 days by `zimlama` following the SDD workflow:
+PR 1-3 of the 4-PR plan implemented (PR 3 = harness layer deferred). Two fix passes closed all regressions.
 
-- **Day 1** — Initial scaffold: backend (FastAPI + Pydantic + SQLAlchemy), frontend (Next.js + Tailwind + Zustand), MCP server, brand kit
-- **Day 2** — Tier 1 modules: `whois_rdap`, `dns_enum`, `subdomain_enum` (48 tests, TDD discipline)
-- **Day 3** — Tier 1 modules: `certificate_transparency`, `wayback_machine`, `email_harvesting` (52 tests)
-- **Day 4** — Frontend: 7 pages + 12 components + 106 tests (96.04% coverage)
-- **Day 5** — Tier 2 modules: `shodan_censys`, `github_recon`, `metadata_analysis`, `google_dorking` (49 tests)
-- **Day 6** — Tier 3 modules: `breach_data`, `socmint`, `employee_osint`, `dark_web_osint` (41 tests) + integration tests (7)
-- **Day 7** — E2E Playwright tests (8 smoke tests) + final polish
+- **PR 1 — Rules of Engagement (RoE) model + middleware**
+- **PR 2 — touch_classification + tools_only_free filter**
+- **PR 4 — person_dossier aggregator** (Tier 3, gated, privacy-by-design)
+- **Audit fix pass** — closed 24/24 findings (3 CRITICAL, 9 HIGH, 7 MEDIUM, 5 LOW)
+- **Test fix pass** — 11 regressions (test_modules_stub pollution) + 3 pre-existing failures (LLM kwarg, validation strings, consent validation)
 
 ### Added
-- 14 recon modules (6 Tier 1, 4 Tier 2, 4 Tier 3 gated)
-- FastAPI backend (Python 3.11+) with Pydantic v2 + SQLAlchemy 2 + Alembic
-- Next.js 14 frontend (App Router, TypeScript 5, Tailwind 3, Zustand)
-- AI validation via MiniMax M3 (OpenAI-compatible, with retry + exponential backoff)
-- Handoff packet schema v1.0.0 (vendor-neutral public contract for future Phase 2)
-- MCP stdio server with 6 tools (start_recon_job, get_job_status, etc.)
-- Report generation: Markdown + CSS-styled PDF via md-to-pdf + Node + Puppeteer
-- LATAM-aware disclaimer (Colombia, Brasil, México, Argentina, Chile, Perú, US, EU)
-- Self-hosted Docker Compose (dev + prod profiles)
-- GitHub Actions CI (pytest + ruff + mypy + pyright + vitest + docker build + codeql)
-- Brand kit: zimlama logo (Invader Zim GIR-inspired), design tokens, report CSS
-- Playwright E2E smoke tests (8 tests covering Dashboard, Jobs, Modules, Disclaimer, New Job flow)
-- Frontend Vitest unit tests (106 tests, 96% coverage on non-page code)
-- Folio mirror: `mindos/folio/40_proyectos/zimlama-recon/`
 
-### Module catalog (14 modules)
+- **PR 1: RoE model + middleware + validator + migration** (6 new files, 5 commits)
+  - `RoE` + `SignOff` SQLAlchemy models with `RoEStatus` + `ScopeType` enums
+  - `RoEValidator.is_authorized()` with `get_active_roes()` for batch queries
+  - `RoEMiddleware` in `backend/app/middleware/roe.py` (env-disabled by default via `ROE_ENABLED`)
+  - `backend/app/main.py:140-141` wires RoEMiddleware into `create_app()` when `ROE_ENABLED=true`
+  - `Settings.ROE_ENABLED` (default False) + `ROE_SESSION_FACTORY` (optional, defaults to `SessionLocal`)
+  - Alembic migration `20261007224728_add_roe_tables.py` (reversible via `alembic downgrade -1 && alembic upgrade head`)
+  - 39 RoE tests (5 model + 10 validator + 14 middleware + 10 wiring/integration)
 
-| Tier | Module | MITRE techniques |
-|-------|-------|------------------|
-| 1 | `whois_rdap` | T1596.002, T1590.001 |
-| 1 | `dns_enum` | T1590.002, T1596.001 |
-| 1 | `subdomain_enum` | T1596.002, T1596.003, T1589.001 |
-| 1 | `certificate_transparency` | T1596.003 |
-| 1 | `wayback_machine` | T1593 |
-| 1 | `email_harvesting` (PII) | T1589.002 |
-| 2 | `shodan_censys` | T1596.005 |
-| 2 | `github_recon` | T1593.003, T1552.001 |
-| 2 | `metadata_analysis` | T1593 |
-| 2 | `google_dorking` | T1593.002 |
-| 3 | `breach_data` (gated) | T1589.001 |
-| 3 | `socmint` (gated) | T1593.001 |
-| 3 | `employee_osint` (gated) | T1589.003, T1593.001 |
-| 3 | `dark_web_osint` (gated) | T1589.001, T1593.001 |
+- **PR 2: touch_classification + tools_only_free filter** (5 commits)
+  - `TouchClass` enum: PASSIVE_TARGET, PASSIVE_THIRDPARTY, ACTIVE_TARGET, ACTIVE_THIRDPARTY
+  - `BaseReconModule.touch_classification: TouchClass` + `requires_paid: bool` (defaults free, safe)
+  - All 14 modules classified per spec REQ-029 mapping table (source-verified)
+  - `Settings.tools_only_free: bool` (default False)
+  - `MODULE_REGISTRY` filter excluding `requires_paid=True` modules with WARNING log when enabled
+  - 29 parametrized tests (mapping table + filter behavior + invalid value handling)
+
+- **PR 4: person_dossier aggregator** (6 commits)
+  - `FindingType.DOSSIER` enum value
+  - `IdentityMap` SQLAlchemy model (encrypted email storage with Fernet)
+  - `PersonDossier` Pydantic schema with `extra="forbid"`
+  - `PersonDossierModule` (Tier 3, gated, runs after `employee_osint` + `socmint` + `breach_data`)
+  - Cross-module correlation: groups findings by `email_hash` (SHA-256), aggregates confidence (+0.1 boost per multi-source corroboration, capped 1.0)
+  - AI coherence assessment via MiniMax-M3 (bounded: ≤256 tokens, 30s timeout, max 1 call per dossier)
+  - `backend/app/utils/encryption.py`: `hash_email()` (SHA-256) + `encrypt_email()`/`decrypt_email()` (Fernet AES-128-CBC + HMAC-SHA256)
+  - Handoff schema updated: `person_dossiers: list[HandoffPersonDossierSummary]` (additive, non-breaking)
+  - 101 new tests (28 model + 63 module + 10 handoff-integration)
+
+### Changed
+
+- `backend/app/main.py:140-141` — wires `RoEMiddleware` between CORS and audit middleware when `ROE_ENABLED=true`
+- `backend/app/config.py:95,116` — added `tools_only_free: bool` + `ROE_ENABLED: bool` + `ROE_SESSION_FACTORY: str | None` Settings
+- `backend/app/middleware/roe.py` + `backend/app/orchestrator/roe.py` + `backend/app/modules/person_dossier.py` — new production code
+- 14 modules updated: `whois_rdap` PASSIVE_TARGET, `dns_enum` ACTIVE_TARGET, `subdomain_enum`/`certificate_transparency`/`wayback_machine`/`email_harvesting`/`shodan_censys`/`github_recon`/`metadata_analysis`/`google_dorking`/`breach_data`/`socmint`/`employee_osint`/`dark_web_osint` PASSIVE_THIRDPARTY
+- `LLMClient.__init__` now accepts `max_retries: int = 3` kwarg
+- Job creation endpoint rejects `user_consent=False` with HTTP 400 (LATAM-aware consent enforcement)
 
 ### Security
-- `.env.example` only — no real secrets in repo
-- `.env` is gitignored + chmod 600 on install
-- Audit middleware logs all user actions (job_create, module_run, etc.)
-- Built-in banned-targets list (RFC 1918 + loopback + reserved) — aborts silently
-- CORS restricted to configured origins
-- LATAM-aware disclaimer with explicit consent + typed target confirmation
-- PII handling: `email_harvesting` filters role-based + privacy-protected domains; `breach_data` uses HIBP k-anonymity (never logs plaintext emails)
-- WCAG AA color contrast (verified with semantic tokens)
 
-### Stats
-- 251 backend tests passing (+ 14 E2E + 106 frontend = 371 total)
-- 91.43% modules package coverage
-- 96.04% frontend non-page coverage
-- Apache-2.0 license
-- 0 `Co-Authored-By` in commits (conventional commits only)
+- Privacy-by-design (L3 verified): raw emails NEVER in logs, handoff exports, or AI prompts — SHA-256 hashing at module boundary, Fernet at rest
+- SSRF defense: all external HTTP uses `BaseReconModule.safe_http_get` (follow_redirects=False, swallows `httpx.HTTPError`, returns None on failure)
+- API auth: `RECON_API_KEY` env-var-gated (env-disabled by default for backward compat)
+- RoE enforcement: middleware loads only when `ROE_ENABLED=true` (fail-open on startup, fail-closed on violations when enabled)
+- CORS strict: only `localhost:5173,8080` (no wildcard)
+- `tools_only_free` filter prevents accidental paid-module invocation
+- Privacy invariants verified at 3 layers (schema / code / storage)
 
-### Architecture
-- **Multi-repo ready**: handoff JSON schema is vendor-neutral. Future `ziimap.arecon-phase2` can consume the output without depending on this codebase.
-- **Single-user MVP**: no auth required (KISS). Multi-user is v0.3+ roadmap.
-- **No telemetry**: all data stays local in `./data/`. User can `make purge TARGET=example.com` to wipe everything.
+### Test results
 
-[Unreleased]: https://github.com/zimlama/recon/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/zimlama/recon/releases/tag/v0.1.0
+- **529 tests passing** (was 421 in v0.1.0)
+- 0 failed, 0 errors
+- Coverage: 90.32% on core modules (modules + orchestrator + middleware + handoff + utils + routes)
+
+### Compliance
+
+- 0 `Co-Authored-By` in all 37 commits
+- Apache-2.0 license header on every Python file (8/8 new files)
+- 0 DragonJar / JAIME / RESTREPO references in code, docs, or tests
+- All commits follow Conventional Commits format
+- Privacy invariants verified: 4 dedicated tests (`test_run_no_plaintext_in_logs`, `test_run_finding_metadata_has_no_plaintext_email`, `test_handoff_person_dossier_summary_rejects_plaintext_email`, `test_identity_map_stores_ciphertext_not_plaintext`)
+
+### Known follow-ups (v0.2.1+)
+
+- Per-module SSRF adoption (remaining modules)
+- GitHub Actions SHA pinning (currently using tag refs)
+- Observability: metrics, structured logs, Sentry integration
+- TLS via Caddy / Cloudflare Tunnel
+- Multi-user auth (JWT) for production

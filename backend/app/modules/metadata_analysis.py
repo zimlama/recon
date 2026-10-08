@@ -19,9 +19,17 @@ import re
 import shutil
 import time
 from typing import Any
+from urllib.parse import urlencode
 
 from app.models import ModuleTier
-from app.modules.base import BaseReconModule, Finding, FindingType, ModuleInput, ModuleOutput
+from app.modules.base import (
+    BaseReconModule,
+    Finding,
+    FindingType,
+    ModuleInput,
+    ModuleOutput,
+    TouchClass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +71,8 @@ class MetadataAnalysisModule(BaseReconModule):
     requires_consent = False
     estimated_duration_seconds = 30
     enabled_by_default = False  # Tier 2 — opt-in
+    touch_classification: TouchClass = TouchClass.PASSIVE_THIRDPARTY
+    requires_paid: bool = False
 
     async def run(self, input: ModuleInput) -> ModuleOutput:
         """Find public documents for the target, extract metadata."""
@@ -128,9 +138,11 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
     # ---- Private helpers ----
 
     async def _find_documents_via_wayback(self, domain: str) -> list[str]:
-        """Find public documents for the target via Wayback CDX."""
-        import httpx
+        """Find public documents for the target via Wayback CDX.
 
+        SSRF defense: routes through ``BaseReconModule.safe_http_get_async``
+        which enforces ``follow_redirects=False`` and swallows httpx errors.
+        """
         # Common document file extensions
         doc_extensions = r"\.(?:pdf|docx?|xlsx?|pptx?|odt|ods|odp)$"
         url_pattern = f"{domain}/.*{doc_extensions}"
@@ -142,14 +154,14 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
             "collapse": "urlkey",
             "limit": 50,
         }
+        full_url = f"{WAYBACK_CDX_URL}?{urlencode(params)}"
         try:
-            # SSRF defense: follow_redirects=False
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False) as client:
-                response = await client.get(WAYBACK_CDX_URL, params=params)
-                if response.status_code != 200:
-                    return []
-                data = response.json()
-        except httpx.HTTPError:
+            # SSRF defense: safe_http_get_async (follow_redirects=False, swallows HTTPError)
+            response = await self.safe_http_get_async(full_url, timeout=HTTP_TIMEOUT)
+            if response is None or response.status_code != 200:
+                return []
+            data = response.json()
+        except (ValueError, TypeError):
             return []
 
         if not data or len(data) < 2:
@@ -196,18 +208,17 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
     async def _extract_with_exiftool(self, url: str) -> dict[str, Any] | None:
         """Download URL to temp file, run exiftool, parse JSON output.
 
-        SSRF defense: follow_redirects=False.
+        SSRF defense: routes download through ``BaseReconModule.safe_http_get_async``
+        (follow_redirects=False, swallows HTTPError).
         """
-        import httpx
         import tempfile
 
         try:
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False) as client:
-                response = await client.get(url)
-                if response.status_code != 200:
-                    return None
-                content = response.content
-        except httpx.HTTPError:
+            response = await self.safe_http_get_async(url, timeout=HTTP_TIMEOUT)
+            if response is None or response.status_code != 200:
+                return None
+            content = response.content
+        except (ValueError, TypeError):
             return None
 
         # Write to temp file
@@ -245,21 +256,23 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         return None
 
     async def _extract_from_docx(self, url: str) -> dict[str, Any] | None:
-        """Extract metadata from .docx using python-docx (if available)."""
+        """Extract metadata from .docx using python-docx (if available).
+
+        SSRF defense: routes download through ``BaseReconModule.safe_http_get_async``
+        (follow_redirects=False, swallows HTTPError).
+        """
         try:
             import io
 
             import docx
-            import httpx
         except ImportError:
             return None
 
         try:
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-                response = await client.get(url)
-                if response.status_code != 200:
-                    return None
-                doc = docx.Document(io.BytesIO(response.content))
+            response = await self.safe_http_get_async(url, timeout=HTTP_TIMEOUT)
+            if response is None or response.status_code != 200:
+                return None
+            doc = docx.Document(io.BytesIO(response.content))
         except Exception:  # noqa: BLE001
             return None
 
@@ -276,25 +289,27 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         }
 
     async def _extract_from_pdf(self, url: str) -> dict[str, Any] | None:
-        """Extract metadata from .pdf using pypdf (if available)."""
+        """Extract metadata from .pdf using pypdf (if available).
+
+        SSRF defense: routes download through ``BaseReconModule.safe_http_get_async``
+        (follow_redirects=False, swallows HTTPError).
+        """
         try:
             import io
 
-            import httpx
             import pypdf
         except ImportError:
             return None
 
         try:
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-                response = await client.get(url)
-                if response.status_code != 200:
-                    return None
-                reader = pypdf.PdfReader(io.BytesIO(response.content))
-                meta = reader.metadata
-                if not meta:
-                    return None
-                return {k: str(v) for k, v in meta.items() if v}
+            response = await self.safe_http_get_async(url, timeout=HTTP_TIMEOUT)
+            if response is None or response.status_code != 200:
+                return None
+            reader = pypdf.PdfReader(io.BytesIO(response.content))
+            meta = reader.metadata
+            if not meta:
+                return None
+            return {k: str(v) for k, v in meta.items() if v}
         except Exception:  # noqa: BLE001
             return None
 

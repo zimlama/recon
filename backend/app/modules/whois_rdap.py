@@ -16,10 +16,15 @@ import re
 import time
 from typing import Any
 
-import httpx
-
 from app.models import ModuleTier
-from app.modules.base import BaseReconModule, Finding, FindingType, ModuleInput, ModuleOutput
+from app.modules.base import (
+    BaseReconModule,
+    Finding,
+    FindingType,
+    ModuleInput,
+    ModuleOutput,
+    TouchClass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +61,8 @@ class WhoisRDAPModule(BaseReconModule):
     requires_consent = False
     estimated_duration_seconds = 10
     enabled_by_default = True
+    touch_classification: TouchClass = TouchClass.PASSIVE_TARGET
+    requires_paid: bool = False
 
     # ---- Public API ----
 
@@ -126,22 +133,27 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
     async def _query_rdap(self, domain: str) -> dict[str, Any] | None:
         """Query RDAP for the domain. Returns parsed JSON or None on failure.
 
-        SSRF defense: follow_redirects=False to prevent pivoting.
+        SSRF defense: routes through ``BaseReconModule.safe_http_get_async``
+        which enforces ``follow_redirects=False`` and swallows httpx errors.
         """
         url = RDAP_BOOTSTRAP_URL.format(domain=domain)
-        try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
-                response = await client.get(
-                    url,
-                    headers={"Accept": "application/rdap+json"},
-                )
-                if response.status_code == 200:
-                    return response.json()
-                logger.debug("rdap_non_200", status=response.status_code, domain=domain)
-                return None
-        except httpx.HTTPError as e:
-            logger.debug("rdap_http_error", error=str(e), domain=domain)
+        # SSRF defense: safe_http_get_async (follow_redirects=False, swallows HTTPError)
+        response = await self.safe_http_get_async(
+            url,
+            timeout=10.0,
+            headers={"Accept": "application/rdap+json"},
+        )
+        if response is None:
+            logger.debug("rdap_no_response", domain=domain)
             return None
+        if response.status_code == 200:
+            try:
+                return response.json()
+            except (ValueError, TypeError) as e:
+                logger.debug("rdap_json_decode_error", error=str(e), domain=domain)
+                return None
+        logger.debug("rdap_non_200", status=response.status_code, domain=domain)
+        return None
 
     async def _query_whois(self, domain: str) -> str | None:
         """Run whois via subprocess. Returns raw text or None on failure."""
