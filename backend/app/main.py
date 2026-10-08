@@ -5,6 +5,7 @@ Boots the app, registers routes, configures middleware, manages lifespan.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -97,8 +98,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("app_ready")
     yield
 
-    # Cleanup
+    # Cleanup — graceful shutdown.
+    # Audit R4-H3: in-flight HTTP background jobs used to be killed
+    # on `SIGTERM` because `BackgroundTasks` from FastAPI only drains
+    # on response, not on shutdown. We now drain explicitly by
+    # awaiting any tasks registered during the lifetime, with a 30s
+    # cap so we don't hang forever on stuck work.
     logger.info("app_shutting_down")
+    from app.routes.jobs import (
+        drain_background_job_tasks_async,
+        get_background_job_tasks,
+    )
+
+    in_flight = get_background_job_tasks()
+    if in_flight:
+        logger.info(
+            "draining_background_tasks", count=len(in_flight)
+        )
+        done, pending = await drain_background_job_tasks_async(timeout=30.0)
+        logger.info(
+            "background_tasks_drained",
+            completed=done,
+            pending=pending,
+        )
+
     if hasattr(app.state, "llm_client"):
         await app.state.llm_client.close()
 

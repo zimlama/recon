@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from app.models import _now
 from typing import Any
@@ -21,6 +22,49 @@ from app.schemas import (
 )
 
 router = APIRouter()
+
+# Module-level set of in-flight asyncio.Tasks. The lifespan manager
+# in app/main.py reads this on shutdown so SIGTERM doesn't kill
+# mid-`asyncio.gather` jobs. The set is intentionally module-level
+# (not on app.state) so unit tests that bypass the lifespan can
+# still drive the same drain logic.
+_background_job_tasks: set[asyncio.Task] = set()
+
+
+def drain_background_job_tasks(timeout: float = 30.0) -> tuple[int, int]:
+    """Await every tracked background job task with a hard timeout.
+
+    Returns ``(completed, pending)``. Used by the lifespan manager on
+    SIGTERM (audit R4-H3) and by tests that need deterministic
+    shutdown semantics.
+
+    Synchronous interface for use inside an async-contextmanager —
+    callers should `await drain_background_job_tasks_async(...)` if
+    in an async context.
+    """
+    import asyncio as _asyncio
+
+    return _asyncio.run(_drain_async(timeout))
+
+
+async def drain_background_job_tasks_async(
+    timeout: float = 30.0,
+) -> tuple[int, int]:
+    """Async form of :func:`drain_background_job_tasks`."""
+    return await _drain_async(timeout)
+
+
+async def _drain_async(timeout: float) -> tuple[int, int]:
+    if not _background_job_tasks:
+        return (0, 0)
+    snapshot = list(_background_job_tasks)
+    done, pending = await asyncio.wait(snapshot, timeout=timeout)
+    return (len(done), len(pending))
+
+
+def get_background_job_tasks() -> set[asyncio.Task]:
+    """Public read-only access for tests and the lifespan manager."""
+    return _background_job_tasks
 
 
 @router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
@@ -72,10 +116,33 @@ async def create_job(
     db.commit()
     db.refresh(job)
 
-    # Queue execution in background
-    background_tasks.add_task(_run_job_background, job.id)
+    # Queue execution in background. Audit R4-H3: wrap the work in an
+    # asyncio.Task so the lifespan can drain it on SIGTERM (a plain
+    # BackgroundTasks.add_task is fire-and-forget for the lifespan).
+    task = asyncio.create_task(_run_job_background(job.id))
+    _background_job_tasks.add(task)
+    task.add_done_callback(_background_job_tasks.discard)
+    # Also schedule via BackgroundTasks so FastAPI's response path is
+    # consistent with prior versions of this route. The wrapper just
+    # awaits the asyncio.Task; the actual work is already running.
+    background_tasks.add_task(_await_task, task)
 
     return job
+
+
+async def _await_task(task: asyncio.Task) -> None:  # type: ignore[type-arg]
+    """FastAPI BackgroundTasks entry point.
+
+    Await the asyncio.Task so BackgroundTasks's drain-on-response
+    mechanism sees it complete. The actual work is already running
+    inside ``task``; this is just a sync point for FastAPI.
+    """
+    try:
+        await task
+    except Exception:  # noqa: BLE001
+        # The task already has its own error handling — silence the
+        # BackgroundTasks's "exception in background task" warning.
+        pass
 
 
 async def _run_job_background(job_id: str) -> None:
