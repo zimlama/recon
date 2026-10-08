@@ -22,6 +22,7 @@ already-gathered data, no new network IO).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 import time
@@ -35,9 +36,11 @@ from app.models import (
     FindingType,
     IdentityMap,
     Job,
-    ModuleRun as ModuleRunModel,
     ModuleStatus,
     ModuleTier,
+)
+from app.models import (
+    ModuleRun as ModuleRunModel,
 )
 from app.modules.base import (
     BaseReconModule,
@@ -353,7 +356,7 @@ async def _assess_coherence(
             ),
             timeout=AI_TIMEOUT_SECONDS,
         )
-    except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001
+    except (TimeoutError, Exception) as e:
         logger.warning("coherence_llm_failed error=%s", e)
         return None
 
@@ -366,6 +369,8 @@ async def _assess_coherence(
     if not isinstance(first, dict):
         return None
     raw_verdict = first.get("verdict")
+    if not isinstance(raw_verdict, str):
+        return None
     if raw_verdict not in {"HIGH", "MEDIUM", "LOW", "NONE"}:
         return None
     return raw_verdict
@@ -407,7 +412,7 @@ class PersonDossierModule(BaseReconModule):
     estimated_duration_seconds = 30  # bounded — pure DB + 1 LLM call per dossier
     enabled_by_default = False  # Tier 3 — opt-in
 
-    async def run(self, input: ModuleInput) -> ModuleOutput:
+    async def run(self, input: ModuleInput) -> ModuleOutput:  # noqa: C901 — orchestrator role
         """Build PersonDossier findings for the job.
 
         Pipeline:
@@ -426,7 +431,6 @@ class PersonDossierModule(BaseReconModule):
 
         # Lazy imports to avoid pulling SQLAlchemy at module-import time.
         from app.database import SessionLocal
-        from app.models import Finding as FindingModel
 
         with SessionLocal() as db:
             job = db.get(Job, input.job_id) if input.job_id else None
@@ -506,7 +510,7 @@ class PersonDossierModule(BaseReconModule):
                     tag = await _assess_coherence(dossier, llm_client, system_prompt)
                     if tag is not None:
                         dossier.coherence = tag
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     logger.warning(
                         "coherence_assessment_failed hash=%s err=%s",
                         dossier.email_hash[:8],
@@ -515,9 +519,7 @@ class PersonDossierModule(BaseReconModule):
 
             # ---- Step 6: emit DOSSIER findings + write IdentityMap ----
             encryption_key = self._encryption_key_bytes()
-            persona_counter = 0
-            for dossier in new_dossiers:
-                persona_counter += 1
+            for persona_counter, dossier in enumerate(new_dossiers, start=1):
                 base_persona = f"Persona_{persona_counter:03d}"
                 plaintext = plaintext_by_hash.get(dossier.email_hash)
                 row_inserted = self._store_identity_map(
@@ -542,10 +544,8 @@ class PersonDossierModule(BaseReconModule):
 
             db.commit()
 
-            try:
+            with contextlib.suppress(Exception):
                 await llm_client.close()
-            except Exception:  # noqa: BLE001
-                pass
 
         return ModuleOutput(
             module=self.name,
@@ -748,7 +748,7 @@ class PersonDossierModule(BaseReconModule):
 
 
 __all__ = [
+    "SOURCE_MODULES",
     "PersonDossier",
     "PersonDossierModule",
-    "SOURCE_MODULES",
 ]

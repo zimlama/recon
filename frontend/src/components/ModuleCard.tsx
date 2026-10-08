@@ -15,6 +15,13 @@ const statusVariants: Record<string, 'default' | 'success' | 'warning' | 'danger
   skipped: 'warning',
 };
 
+// Modules rendered by this component are entirely data-driven — the
+// backend's MODULE_REGISTRY (see backend/app/modules/__init__.py) is the
+// single source of truth. PR 4 added the `person_dossier` aggregator
+// (Tier 3, gated) to that registry; this component renders it
+// automatically without any change here. New modules surface here for
+// free as long as the backend registers them.
+
 export function ModuleCard({
   moduleRun,
   loading = false,

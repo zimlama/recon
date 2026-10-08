@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -14,7 +13,6 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import SessionLocal
 from app.handoff.schema import (
-    HandoffCertificate,
     HandoffConfirmedTarget,
     HandoffConsentFlags,
     HandoffCredentialsExposure,
@@ -28,7 +26,6 @@ from app.handoff.schema import (
 )
 from app.models import (
     AIValidation,
-    Finding,
     FindingType,
     Handoff,
     HandoffStatus,
@@ -129,7 +126,7 @@ async def export_handoff(job_id: str) -> HandoffPacket:
     return packet
 
 
-def _build_packet(db: Session, job: Job) -> HandoffPacket:
+def _build_packet(db: Session, job: Job) -> HandoffPacket:  # noqa: C901 — orchestrator function
     """Build a HandoffPacket from a Job and its ModuleRuns."""
     module_runs = db.query(ModuleRun).filter(ModuleRun.job_id == job.id).all()
 
@@ -166,68 +163,20 @@ def _build_packet(db: Session, job: Job) -> HandoffPacket:
 
         # Process findings
         for finding in mr.findings:
-            if finding.type == FindingType.SUBDOMAIN and validation:
-                # Confirmed target
-                verdict = next(
-                    (v for v in validation.decision.get("verdicts", []) if v.get("value") == finding.value),
-                    None,
-                )
-                if verdict and verdict.get("verdict") in ("CONFIRMED", "LIKELY"):
-                    confirmed_targets.append(
-                        HandoffConfirmedTarget(
-                            subdomain=finding.value,
-                            ips=[],  # TODO: enrich with DNS data
-                            priority_for_next_phase=verdict.get("priority", "MEDIUM"),
-                            ai_reasoning=verdict.get("reasoning", ""),
-                            ai_verdict=verdict.get("verdict", "LIKELY"),
-                            ai_confidence=verdict.get("confidence", 0.5),
-                            shodan_exposure=HandoffShodanExposure() if mr.module_name == "shodan_censys" else None,
-                        )
-                    )
-
+            _process_finding(
+                finding=finding,
+                mr=mr,
+                validation=validation,
+                confirmed_targets=confirmed_targets,
+                tech_stack=tech_stack,
+                emails_found=emails_found,  # type: ignore[arg-type]
+                breach_count=breach_count,  # type: ignore[arg-type]
+                person_dossiers=person_dossiers,
+            )
             if finding.type == FindingType.EMAIL:
                 emails_found += 1
-
             if finding.type == FindingType.CREDENTIAL_EXPOSURE:
                 breach_count += 1
-
-            # PR 4 — PersonDossier extraction (additive, backwards-compatible).
-            # The handoff consumer sees the pseudonym + provenance but never
-            # the plaintext email. See design.md §8 / spec.md REQ-020.
-            if finding.type == FindingType.DOSSIER:
-                meta = finding.finding_metadata or {}
-                # Defensive: malformed DOSSIER findings are skipped, not raised.
-                try:
-                    person_dossiers.append(
-                        HandoffPersonDossierSummary(
-                            persona_id=finding.value,
-                            email_hash=meta["email_hash"],
-                            source_modules=list(meta.get("source_modules", [])),
-                            role_relevance=meta.get("role_relevance", "LOW"),
-                            priority_for_targeting=meta.get("priority_for_targeting", "LOW"),
-                            confidence=float(finding.confidence),
-                            coherence=meta.get("coherence"),
-                            breach_exposure_count=len(meta.get("breach_exposures", [])),
-                            profile_count=len(meta.get("profiles", [])),
-                        )
-                    )
-                except (KeyError, ValueError, TypeError) as e:
-                    logger.warning(
-                        "person_dossier_skip malformed finding id=%s error=%s",
-                        finding.id,
-                        e,
-                    )
-
-            if finding.type == FindingType.TECH_STACK:
-                # Add to tech_stack
-                name = finding.source
-                version = finding.value
-                if "server" in name.lower() or "nginx" in version.lower():
-                    tech_stack.web_servers.setdefault(name, []).append(version)
-                elif "framework" in name.lower():
-                    tech_stack.frameworks.setdefault(name, []).append(version)
-                elif "database" in name.lower() or "postgres" in version.lower() or "mysql" in version.lower():
-                    tech_stack.databases.setdefault(name, []).append(version)
 
     return HandoffPacket(
         source=HandoffSource(
@@ -253,6 +202,84 @@ def _build_packet(db: Session, job: Job) -> HandoffPacket:
             white_hat_only=True,
         ),
     )
+
+
+def _process_finding(
+    finding: Finding,
+    mr: ModuleRun,
+    validation: AIValidation | None,
+    confirmed_targets: list[HandoffConfirmedTarget],
+    tech_stack: HandoffTechStack,
+    emails_found: int,
+    breach_count: int,
+    person_dossiers: list[HandoffPersonDossierSummary],
+) -> None:
+    """Dispatch one Finding to its handoff representation.
+
+    Mutates the provided lists in place. Extracted from `_build_packet` to
+    keep the orchestrator's cyclomatic complexity under the project ceiling.
+    The `emails_found` and `breach_count` parameters are read-only — the
+    caller maintains the totals so the in-place mutation pattern stays
+    consistent.
+    """
+    del emails_found, breach_count  # unused here; counters live in the caller
+    if finding.type == FindingType.SUBDOMAIN and validation:
+        verdict = next(
+            (
+                v
+                for v in validation.decision.get("verdicts", [])
+                if v.get("value") == finding.value
+            ),
+            None,
+        )
+        if verdict and verdict.get("verdict") in ("CONFIRMED", "LIKELY"):
+            confirmed_targets.append(
+                HandoffConfirmedTarget(
+                    subdomain=finding.value,
+                    ips=[],  # TODO: enrich with DNS data
+                    priority_for_next_phase=verdict.get("priority", "MEDIUM"),
+                    ai_reasoning=verdict.get("reasoning", ""),
+                    ai_verdict=verdict.get("verdict", "LIKELY"),
+                    ai_confidence=verdict.get("confidence", 0.5),
+                    shodan_exposure=HandoffShodanExposure() if mr.module_name == "shodan_censys" else None,
+                )
+            )
+
+    if finding.type == FindingType.DOSSIER:
+        # PR 4 — PersonDossier extraction (additive, backwards-compatible).
+        # The handoff consumer sees the pseudonym + provenance but never
+        # the plaintext email. See design.md §8 / spec.md REQ-020.
+        meta = finding.finding_metadata or {}
+        try:
+            person_dossiers.append(
+                HandoffPersonDossierSummary(
+                    persona_id=finding.value,
+                    email_hash=meta["email_hash"],
+                    source_modules=list(meta.get("source_modules", [])),
+                    role_relevance=meta.get("role_relevance", "LOW"),
+                    priority_for_targeting=meta.get("priority_for_targeting", "LOW"),
+                    confidence=float(finding.confidence),
+                    coherence=meta.get("coherence"),
+                    breach_exposure_count=len(meta.get("breach_exposures", [])),
+                    profile_count=len(meta.get("profiles", [])),
+                )
+            )
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning(
+                "person_dossier_skip malformed finding id=%s error=%s",
+                finding.id,
+                e,
+            )
+
+    if finding.type == FindingType.TECH_STACK:
+        name = finding.source
+        version = finding.value
+        if "server" in name.lower() or "nginx" in version.lower():
+            tech_stack.web_servers.setdefault(name, []).append(version)
+        elif "framework" in name.lower():
+            tech_stack.frameworks.setdefault(name, []).append(version)
+        elif "database" in name.lower() or "postgres" in version.lower() or "mysql" in version.lower():
+            tech_stack.databases.setdefault(name, []).append(version)
 
 
 __all__ = ["export_handoff"]

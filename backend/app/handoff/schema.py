@@ -210,15 +210,15 @@ class HandoffPacket(BaseModel):
 
 __all__ = [
     "SCHEMA_VERSION",
+    "HandoffCertificate",
+    "HandoffConfirmedTarget",
+    "HandoffConsentFlags",
+    "HandoffCredentialsExposure",
     "HandoffPacket",
+    "HandoffPersonDossierSummary",
+    "HandoffRecommendedModule",
+    "HandoffShodanExposure",
     "HandoffSource",
     "HandoffTarget",
-    "HandoffShodanExposure",
-    "HandoffConfirmedTarget",
     "HandoffTechStack",
-    "HandoffCredentialsExposure",
-    "HandoffRecommendedModule",
-    "HandoffCertificate",
-    "HandoffConsentFlags",
-    "HandoffPersonDossierSummary",
 ]
