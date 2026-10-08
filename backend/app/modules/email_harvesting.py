@@ -27,7 +27,14 @@ from typing import Any
 import httpx
 
 from app.models import ModuleTier
-from app.modules.base import BaseReconModule, Finding, FindingType, ModuleInput, ModuleOutput
+from app.modules.base import (
+    BaseReconModule,
+    Finding,
+    FindingType,
+    ModuleInput,
+    ModuleOutput,
+    TouchClass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +133,8 @@ class EmailHarvestingModule(BaseReconModule):
     requires_consent = True  # PII handling
     estimated_duration_seconds = 90
     enabled_by_default = True
+    touch_classification: TouchClass = TouchClass.PASSIVE_THIRDPARTY
+    requires_paid: bool = False
 
     async def run(self, input: ModuleInput) -> ModuleOutput:
         """Run email harvesting against the target domain."""

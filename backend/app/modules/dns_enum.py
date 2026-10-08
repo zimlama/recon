@@ -21,7 +21,14 @@ import dns.zone
 import httpx
 
 from app.models import ModuleTier
-from app.modules.base import BaseReconModule, Finding, FindingType, ModuleInput, ModuleOutput
+from app.modules.base import (
+    BaseReconModule,
+    Finding,
+    FindingType,
+    ModuleInput,
+    ModuleOutput,
+    TouchClass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +75,8 @@ class DNSEnumModule(BaseReconModule):
     requires_consent = False
     estimated_duration_seconds = 15
     enabled_by_default = True
+    touch_classification: TouchClass = TouchClass.ACTIVE_TARGET
+    requires_paid: bool = False
 
     async def run(self, input: ModuleInput) -> ModuleOutput:
         """Run DNS enumeration against the target."""

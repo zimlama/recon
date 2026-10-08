@@ -22,7 +22,14 @@ from typing import Any
 from urllib.parse import urlencode
 
 from app.models import ModuleTier
-from app.modules.base import BaseReconModule, Finding, FindingType, ModuleInput, ModuleOutput
+from app.modules.base import (
+    BaseReconModule,
+    Finding,
+    FindingType,
+    ModuleInput,
+    ModuleOutput,
+    TouchClass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +71,8 @@ class MetadataAnalysisModule(BaseReconModule):
     requires_consent = False
     estimated_duration_seconds = 30
     enabled_by_default = False  # Tier 2 — opt-in
+    touch_classification: TouchClass = TouchClass.PASSIVE_THIRDPARTY
+    requires_paid: bool = False
 
     async def run(self, input: ModuleInput) -> ModuleOutput:
         """Find public documents for the target, extract metadata."""

@@ -19,7 +19,14 @@ import time
 from typing import Any
 
 from app.models import ModuleTier
-from app.modules.base import BaseReconModule, Finding, FindingType, ModuleInput, ModuleOutput
+from app.modules.base import (
+    BaseReconModule,
+    Finding,
+    FindingType,
+    ModuleInput,
+    ModuleOutput,
+    TouchClass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +57,8 @@ class SOCMINTModule(BaseReconModule):
     requires_consent = True  # PII handling required
     estimated_duration_seconds = 120
     enabled_by_default = False  # Tier 3 — opt-in
+    touch_classification: TouchClass = TouchClass.PASSIVE_THIRDPARTY
+    requires_paid: bool = False
 
     async def run(self, input: ModuleInput) -> ModuleOutput:
         """Discover social media profiles for the target."""
