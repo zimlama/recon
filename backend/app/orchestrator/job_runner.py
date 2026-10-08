@@ -22,6 +22,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import SessionLocal
 from app.models import (
     AIValidation,
@@ -37,6 +38,8 @@ from app.orchestrator.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
+settings = get_settings()
+
 
 class JobRunner:
     """Runs recon jobs: executes modules, persists findings, triggers AI validation."""
@@ -46,10 +49,17 @@ class JobRunner:
         module_registry: dict[str, BaseReconModule],
         ai_validator: AIValidator,
         rate_limiter: RateLimiter | None = None,
+        module_concurrency: int | None = None,
     ) -> None:
         self.module_registry = module_registry
         self.ai_validator = ai_validator
         self.rate_limiter = rate_limiter or RateLimiter()
+        # Audit R4-H2: bound module fan-out. A job that selects all
+        # 14 modules would otherwise create 14 simultaneous httpx /
+        # LLM streams — operator can saturate the LLM provider with a
+        # single click. The semaphore caps the in-flight count.
+        cap = module_concurrency or settings.MAX_CONCURRENT_MODULES
+        self._module_sem = asyncio.Semaphore(cap)
 
     async def run_job(self, job_id: str) -> None:
         """Execute a full recon job.
@@ -91,9 +101,16 @@ class JobRunner:
         logger.info("job_started", job_id=job_id, target=target, modules=selected_modules)
 
         # Run modules in parallel (with per-module timeout — audit resilience)
+        # but capped by `_module_sem` so worst-case fan-out is bounded
+        # (audit R4-H2). Tasks are submitted as they arrive — the
+        # semaphore blocks the Nth+1 coroutine until one slot frees up.
+        async def _bounded(module_name: str) -> Any:
+            async with self._module_sem:
+                return await self._run_single_module(job_id, module_name, target)
+
         module_tasks = [
             asyncio.wait_for(
-                self._run_single_module(job_id, module_name, target),
+                _bounded(module_name),
                 timeout=600.0,  # 10 minutes max per module
             )
             for module_name in selected_modules

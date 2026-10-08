@@ -72,6 +72,30 @@ class Settings(BaseSettings):
     RATE_LIMIT_RECON_RPS: int = Field(default=10, ge=1, le=1000)
     RATE_LIMIT_RECON_BURST: int = Field(default=20, ge=1, le=10000)
 
+    # ---- Concurrency control ----
+    # Hard cap on how many recon modules (or jobs) can be active
+    # concurrently per process. Bounded so a job selecting all 14
+    # modules cannot create 14 simultaneous httpx pools against the
+    # LLM provider (audit finding R4-H2 / R4-M3).
+    MAX_CONCURRENT_MODULES: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        description=(
+            "Max recon modules running in parallel per job. Bounds "
+            "worst-case LLM and outbound IO fan-out."
+        ),
+    )
+    MAX_CONCURRENT_JOBS: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        description=(
+            "Max background jobs running in parallel per process. Bounds "
+            "global rate of LLM calls across all operators."
+        ),
+    )
+
     # ---- Optional API keys (Tier 2 modules) ----
     SHODAN_API_KEY: str | None = None
     CENSYS_API_ID: str | None = None

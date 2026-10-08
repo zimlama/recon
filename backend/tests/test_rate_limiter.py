@@ -373,6 +373,59 @@ async def test_jobrunner_running_job_is_skipped(jobrunner_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_module_execution_respects_concurrency_limit(jobrunner_db) -> None:
+    """JobRunner._module_sem bounds the in-flight module count.
+
+    Audit R4-H2: a job selecting all 14 modules used to fan out 14
+    parallel httpx + LLM streams. Now the `_module_sem` semaphore
+    caps concurrency at `MAX_CONCURRENT_MODULES` (default 4). We
+    drive the semaphore directly: launch `cap + 3` acquire operations
+    concurrently and verify that at most `cap` resolve synchronously
+    while the rest wait.
+    """
+    from app.orchestrator.job_runner import JobRunner
+
+    runner = JobRunner(
+        module_registry={},
+        ai_validator=None,  # type: ignore[arg-type]
+        module_concurrency=2,
+    )
+    sem = runner._module_sem  # type: ignore[attr-defined]
+    cap = 2
+    extra = 3
+
+    async def _one_acquire(idx: int) -> bool:
+        # Acquire without an immediate release. Returns True if the
+        # semaphore let us through synchronously.
+        await sem.acquire()
+        # Hold the slot for the duration of the test by NOT releasing.
+        # We track whether we got it.
+        return True
+
+    # Schedule cap + extra acquires — only cap should resolve fast.
+    tasks = [asyncio.create_task(_one_acquire(i)) for i in range(cap + extra)]
+    # Yield once so the cap tasks get a chance to run; the extras must
+    # be parked on the semaphore.
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    completed = sum(1 for t in tasks if t.done())
+    # Exactly `cap` tasks should have completed; the remaining `extra`
+    # must still be waiting (parity-2 inventory under asyncio).
+    assert completed == cap, (
+        f"semaphore oversubscribed: {completed} > {cap} acquired"
+    )
+
+    # Cancel the parked tasks and release the held slots so the test
+    # cleans up.
+    for t in tasks:
+        if not t.done():
+            t.cancel()
+    for _ in range(cap):
+        sem.release()
+
+
+@pytest.mark.asyncio
 async def test_jobrunner_missing_job_raises(jobrunner_db) -> None:
     """run_job() on a non-existent job must raise ValueError."""
     from app.orchestrator.job_runner import JobRunner
