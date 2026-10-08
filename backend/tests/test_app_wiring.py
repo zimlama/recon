@@ -119,9 +119,9 @@ def test_session_factory_passed_is_session_local(
     """AC-021a.3: the middleware's `session_factory` IS the global `SessionLocal`
     (a callable that returns fresh sessions), not a `Session` instance.
 
-    `app.user_middleware` stores `Middleware(cls, **kwargs)` namedtuples
-    where `.options` is the kwargs dict. We assert the callable identity
-    is the global `SessionLocal`.
+    `app.user_middleware` is a list of Starlette `Middleware(cls, *args,
+    **kwargs)` namedtuples (Starlette 1.0+ — `.kwargs`, not `.options`).
+    We assert the callable identity is the global `SessionLocal`.
     """
     monkeypatch.setenv("ROE_ENABLED", "true")
     _swap_settings(monkeypatch, ROE_ENABLED=True)
@@ -130,7 +130,7 @@ def test_session_factory_passed_is_session_local(
 
     app = create_app()
     roe_mw = next(m for m in app.user_middleware if m.cls.__name__ == "RoEMiddleware")
-    sf = roe_mw.options["session_factory"]
+    sf = roe_mw.kwargs["session_factory"]
     assert sf is SessionLocal, (
         f"session_factory must be SessionLocal (got {sf!r})"
     )
@@ -142,14 +142,21 @@ def test_session_factory_passed_is_session_local(
 def test_roe_middleware_positioned_between_cors_and_audit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Registration order: CORSMiddleware -> RoEMiddleware -> AuditLogMiddleware.
+    """Execution order: AuditLogMiddleware (outer) -> RoEMiddleware -> CORSMiddleware (inner).
 
-    FastAPI stores middleware in `user_middleware` in the order they were
-    added (which mirrors the OUTER-to-INNER execution order at request
-    time: CORSMiddleware runs first, then RoE, then Audit). The
-    rationale is in design.md §9: pre-flight CORS requests skip RoE
-    (only POSTs are gated), and 403s are still audited because Audit
-    wraps the response.
+    FastAPI's `add_middleware` INSERTS at position 0, so `user_middleware`
+    is the reverse of the registration order. Registration was:
+    CORS first (innermost), RoE second (middle), Audit third (outermost).
+    The list therefore reads [Audit, RoE, CORS] when all three are enabled.
+
+    Why this order matters (design.md §9):
+    - Audit outermost -> it sees the 403 response when RoE rejects and
+      still writes an `AuditLog` row for the denial.
+    - CORS innermost -> OPTIONS preflight is handled by CORS itself
+      before reaching the route, never touches RoE (which fast-paths
+      non-POST anyway).
+    - RoE in the middle -> gates POSTs, sees the same body bytes that
+      reach the route handler.
     """
     monkeypatch.setenv("ROE_ENABLED", "true")
     monkeypatch.setenv("AUDIT_LOGGING_ENABLED", "true")
@@ -159,11 +166,12 @@ def test_roe_middleware_positioned_between_cors_and_audit(
 
     app = create_app()
     names = [m.cls.__name__ for m in app.user_middleware]
-    cors_idx = names.index("CORSMiddleware")
-    roe_idx = names.index("RoEMiddleware")
     audit_idx = names.index("AuditLogMiddleware")
-    assert cors_idx < roe_idx < audit_idx, (
-        f"Wrong order: {names} (expected CORSMiddleware < RoEMiddleware < AuditLogMiddleware)"
+    roe_idx = names.index("RoEMiddleware")
+    cors_idx = names.index("CORSMiddleware")
+    assert audit_idx < roe_idx < cors_idx, (
+        f"Wrong execution order: {names} "
+        f"(expected AuditLog < RoE < CORS, i.e. Audit outermost, CORS innermost)"
     )
 
 
@@ -265,8 +273,8 @@ async def client_with_roe(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Asyn
     monkeypatch.setenv("ROE_ENABLED", "true")
     _swap_settings(monkeypatch, ROE_ENABLED=True)
 
-    from app.main import create_app
     import app.routes.jobs as jobs_routes
+    from app.main import create_app
 
     async def _no_op(job_id: str) -> None:
         return None
@@ -297,8 +305,8 @@ async def client_default(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Async
     monkeypatch.delenv("ROE_ENABLED", raising=False)
     _swap_settings(monkeypatch, ROE_ENABLED=False)
 
-    from app.main import create_app
     import app.routes.jobs as jobs_routes
+    from app.main import create_app
 
     async def _no_op(job_id: str) -> None:
         return None
@@ -333,7 +341,10 @@ async def test_roe_blocks_job_creation_without_roe(
     assert response.status_code == 403, response.text
     body = response.json()
     assert body["error"] == "roe_not_authorized"
-    assert "no RoE" in body["detail"].lower()
+    # The validator's reason string is "no RoE matches target+scope".
+    # We test against the original casing so a future change to the
+    # reason (e.g. lowercasing) is a deliberate operator-visible change.
+    assert "no roe" in body["detail"].lower()
 
 
 @pytest.mark.asyncio
