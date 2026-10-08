@@ -7,7 +7,7 @@ root (loaded via python-dotenv before pydantic-settings parses).
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -171,6 +171,33 @@ class Settings(BaseSettings):
             return False
         # Fail-open: garbage value → False (allow all modules)
         return False
+
+    @field_validator("PERSON_DOSSIER_ENCRYPTION_KEY")
+    @classmethod
+    def _validate_encryption_key(cls, v: str | None, info: Any) -> str | None:
+        """Fail-loud when the encryption key is missing in production.
+
+        Audit finding R1-M1 / R4-M2: ``person_dossier._store_identity_map``
+        silently caught ``EncryptionKeyMissingError`` and continued
+        without writing the encrypted backup row. In ``APP_ENV=production``
+        this made the "encrypted at rest" contract invisibly broken and
+        the handoff look complete when PII persistence was actually
+        absent. Raise at boot so a misconfigured production deployment
+        cannot start.
+
+        In dev/staging/test the operator often has no key — we let it
+        pass and let the runtime consumer log per-affected-hash, same
+        behavior as before the hardening.
+        """
+        env = info.data.get("APP_ENV", "development")
+        if env == "production" and not v:
+            raise ValueError(
+                "PERSON_DOSSIER_ENCRYPTION_KEY must be set in production. "
+                "Generate one with:\n"
+                "  python -c \"from cryptography.fernet import Fernet; "
+                "print(Fernet.generate_key().decode())\""
+            )
+        return v
 
     @property
     def cors_origins_list(self) -> list[str]:

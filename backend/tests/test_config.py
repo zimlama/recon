@@ -31,7 +31,12 @@ def test_settings_has_ai_key_detects_placeholder() -> None:
 
 def test_settings_is_production() -> None:
     """is_production is True only when APP_ENV is production."""
-    s = Settings(APP_ENV="production")
+    # Provide a non-empty key so the production-mode validator passes —
+    # see test_encryption_key_required_in_production for the missing-key path.
+    s = Settings(
+        APP_ENV="production",
+        PERSON_DOSSIER_ENCRYPTION_KEY="ZmFrZS1mZXJuZXQta2V5LXdlLWluc3BlY3QtY2Y=",
+    )
     assert s.is_production is True
 
     s2 = Settings(APP_ENV="development")
@@ -43,3 +48,45 @@ def test_settings_cached() -> None:
     a = get_settings()
     b = get_settings()
     assert a is b
+
+
+def test_encryption_key_required_in_production() -> None:
+    """PERSON_DOSSIER_ENCRYPTION_KEY is required when APP_ENV=production.
+
+    Audit finding R1-M1 / R4-M2: a deployment with the env var unset in
+    production silently skipped identity_map rows. Raising at boot
+    keeps the "encrypted at rest" contract from being silently broken.
+    """
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(APP_ENV="production", PERSON_DOSSIER_ENCRYPTION_KEY=None)
+    assert "PERSON_DOSSIER_ENCRYPTION_KEY" in str(exc_info.value)
+
+
+def test_encryption_key_optional_in_dev() -> None:
+    """In dev/staging/test the operator may run without the encryption key.
+
+    Running without a key in non-production is supported: ``person_dossier``
+    logs per-affected-hash and the dossier is still emitted. The Settings
+    load must NOT raise.
+    """
+    s = Settings(APP_ENV="development", PERSON_DOSSIER_ENCRYPTION_KEY=None)
+    assert s.PERSON_DOSSIER_ENCRYPTION_KEY is None
+
+    s2 = Settings(APP_ENV="staging", PERSON_DOSSIER_ENCRYPTION_KEY=None)
+    assert s2.PERSON_DOSSIER_ENCRYPTION_KEY is None
+
+
+def test_encryption_key_present_in_production_is_accepted() -> None:
+    """When APP_ENV=production AND the key is set, Settings load succeeds."""
+    # Fernet.generate_key() returns a URL-safe base64 32-byte key.
+    # We use a value-shaped valid one — value parsing happens lazily in
+    # `encryption.encrypt_email()`; Settings only checks that *some*
+    # value is present in production.
+    s = Settings(
+        APP_ENV="production",
+        PERSON_DOSSIER_ENCRYPTION_KEY="ZmFrZS1mZXJuZXQta2V5LXdlLWluc3BlY3QtY2Y=",  # 32B b64 fake
+    )
+    assert s.PERSON_DOSSIER_ENCRYPTION_KEY.startswith("ZmFrZS")

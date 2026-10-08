@@ -35,10 +35,12 @@ Design notes:
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable, Iterable
 
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -47,6 +49,8 @@ from starlette.types import ASGIApp
 from app.models import ScopeType
 from app.orchestrator.roe import RoEValidator
 
+logger = logging.getLogger(__name__)
+
 _DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (
     "/api/v1/jobs",  # POST
     "/api/v1/jobs/",  # POST cancel / DELETE
@@ -54,7 +58,13 @@ _DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (
 
 
 class RoEMiddleware(BaseHTTPMiddleware):
-    """Enforces active-RoE coverage on protected POST endpoints."""
+    """Enforces active-RoE coverage on protected state-changing endpoints."""
+
+    # Methods that mutate state and therefore require RoE coverage.
+    # GET / HEAD / OPTIONS are read-only and bypass the gate.
+    _STATE_CHANGING_METHODS: frozenset[str] = frozenset(
+        {"POST", "PUT", "PATCH", "DELETE"}
+    )
 
     def __init__(
         self,
@@ -68,12 +78,6 @@ class RoEMiddleware(BaseHTTPMiddleware):
         self._protected_paths: list[str] = list(
             protected_paths if protected_paths is not None else _DEFAULT_PROTECTED_PATHS
         )
-
-    # Methods that mutate state and therefore require RoE coverage.
-    # GET / HEAD / OPTIONS are read-only and bypass the gate.
-    _STATE_CHANGING_METHODS: frozenset[str] = frozenset(
-        {"POST", "PUT", "PATCH", "DELETE"}
-    )
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
         # Fast path: disabled OR read-only OR not on the protected list.
@@ -117,10 +121,38 @@ class RoEMiddleware(BaseHTTPMiddleware):
             )
 
         scope_type = _coerce_scope_type(payload)
-        validator = RoEValidator(self._session_factory)
-        authorized, reason, _ = validator.is_authorized(
-            target=target, scope_type=scope_type
-        )
+
+        # Audit R4-C2: wrap the RoE lookup in try/except so a DB outage
+        # returns a 503 (with Retry-After) instead of bubbling a 500.
+        # Previously a single SQLAlchemy OperationalError or
+        # DisconnectionError took the whole POST down with no signal
+        # the client could act on. Now the client gets a clear
+        # ``rules_of_engagement_unavailable`` body and may retry after
+        # ``retry_after`` seconds.
+        try:
+            validator = RoEValidator(self._session_factory)
+            authorized, reason, _ = validator.is_authorized(
+                target=target, scope_type=scope_type
+            )
+        except SQLAlchemyError as exc:
+            logger.error(
+                "roe_lookup_failed path=%s err=%s",
+                request.url.path,
+                exc,
+            )
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "rules_of_engagement_unavailable",
+                    "detail": (
+                        "RoE lookup failed — DB connection issue. "
+                        "Retry after a short backoff."
+                    ),
+                    "retry_after": 30,
+                },
+                headers={"Retry-After": "30"},
+            )
+
         if not authorized:
             return JSONResponse(
                 status_code=403,

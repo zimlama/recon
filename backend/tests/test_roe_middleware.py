@@ -10,11 +10,13 @@ from __future__ import annotations
 import json
 from datetime import timedelta
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, event
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.middleware.roe import RoEMiddleware
@@ -700,3 +702,97 @@ async def test_middleware_gates_put_and_patch_too(
     assert put_resp.json()["error"] == "roe_not_authorized"
     assert patch_resp.status_code == 403
     assert patch_resp.json()["error"] == "roe_not_authorized"
+
+
+@pytest.mark.asyncio
+async def test_middleware_returns_503_on_db_failure(
+    session_factory,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RoE DB lookup must surface as 503, not 500.
+
+    Audit finding R4-C2: a transient OperationalError (DB down,
+    connection pool exhausted) used to bubble from
+    ``validator.is_authorized()`` straight to Starlette and returned a
+    raw 500 with no Retry-After. Now the middleware catches
+    ``SQLAlchemyError`` at the dispatch boundary and returns a 503 with
+    ``rules_of_engagement_unavailable`` plus a ``Retry-After`` header.
+    """
+    monkeypatch.setenv("ROE_ENABLED", "true")
+    _db, factory = session_factory
+
+    app = FastAPI()
+    app.add_middleware(
+        RoEMiddleware,
+        session_factory=factory,
+        protected_paths=["/api/v1/jobs"],
+    )
+
+    @app.post("/api/v1/jobs")
+    async def create_job() -> dict[str, str]:
+        return {"created": "job"}
+
+    # Patch the validator to raise OperationalError — simulates DB down.
+    from app.orchestrator.roe import RoEValidator
+
+    boom = OperationalError("SELECT", {}, Exception("connection refused"))
+
+    def _raise(*_args: Any, **_kwargs: Any) -> tuple[bool, str, list[Any]]:
+        raise boom
+
+    with patch.object(RoEValidator, "is_authorized", side_effect=_raise):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
+            resp = await ac.post(
+                "/api/v1/jobs",
+                json={"target": "example.com"},
+            )
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["error"] == "rules_of_engagement_unavailable"
+    assert body["retry_after"] == 30
+    assert resp.headers["Retry-After"] == "30"
+
+
+@pytest.mark.asyncio
+async def test_middleware_503_on_disconnection(
+    session_factory,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``DisconnectionError`` (``SQLAlchemyError`` subclass) is also 503."""
+    monkeypatch.setenv("ROE_ENABLED", "true")
+    _db, factory = session_factory
+
+    app = FastAPI()
+    app.add_middleware(
+        RoEMiddleware,
+        session_factory=factory,
+        protected_paths=["/api/v1/jobs"],
+    )
+
+    @app.post("/api/v1/jobs")
+    async def create_job() -> dict[str, str]:
+        return {"created": "job"}
+
+    from sqlalchemy.exc import DisconnectionError
+
+    boom = DisconnectionError("connection invalidated")
+
+    from app.orchestrator.roe import RoEValidator
+
+    def _raise(*_args: Any, **_kwargs: Any) -> tuple[bool, str, list[Any]]:
+        raise boom
+
+    with patch.object(RoEValidator, "is_authorized", side_effect=_raise):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
+            resp = await ac.post(
+                "/api/v1/jobs",
+                json={"target": "example.com"},
+            )
+
+    assert resp.status_code == 503
+    assert resp.json()["error"] == "rules_of_engagement_unavailable"
