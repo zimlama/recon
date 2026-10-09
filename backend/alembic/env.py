@@ -24,8 +24,12 @@ settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 # Interpret the config file for Python logging
+# CRITICAL: pass `disable_existing_loggers=False` to prevent fileConfig from
+# disabling all pre-existing loggers (including `app.modules`). The default
+# `True` causes the test_paid_module_excluded_logs_warning flake — see
+# hardening bundle A.1 fix.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Add your model's MetaData object here for 'autogenerate' support
 target_metadata = Base.metadata
