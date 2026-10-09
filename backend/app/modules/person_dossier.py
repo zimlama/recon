@@ -29,7 +29,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
@@ -81,6 +81,14 @@ AI_MAX_TOKENS = 256
 AI_TIMEOUT_SECONDS = 30.0
 AI_TEMPERATURE = 0.1
 
+# Coherence / role-relevance / priority tag sets. Declared once and reused by
+# both the Pydantic ``Literal`` types (compile-time enforcement) and the
+# runtime validator at line ~377 (LLM-output guard). Mirror handoff schema.
+PriorityTag = Literal["HIGH", "MEDIUM", "LOW"]
+CoherenceTag = Literal["HIGH", "MEDIUM", "LOW", "NONE"]
+COHERENCE_LEVELS: frozenset[str] = frozenset({"HIGH", "MEDIUM", "LOW", "NONE"})
+PRIORITY_LEVELS: frozenset[str] = frozenset({"HIGH", "MEDIUM", "LOW"})
+
 
 # ---- Pydantic schema (REQ-018) ----
 
@@ -119,11 +127,11 @@ class PersonDossier(BaseModel):
         default_factory=list,
         description="CREDENTIAL_EXPOSURE metadata blobs",
     )
-    role_relevance: str = Field(
+    role_relevance: PriorityTag = Field(
         default="LOW",
         description="Role relevance tag",
     )
-    priority_for_targeting: str = Field(
+    priority_for_targeting: PriorityTag = Field(
         default="LOW",
         description="Priority for downstream targeting",
     )
@@ -137,24 +145,10 @@ class PersonDossier(BaseModel):
         le=1.0,
         description="Aggregated confidence (max + 0.1 boost, capped 1.0)",
     )
-    coherence: str | None = Field(
+    coherence: CoherenceTag | None = Field(
         default=None,
         description="AI-assessed tag (HIGH/MEDIUM/LOW/NONE), populated post-validation",
     )
-
-    @field_validator("role_relevance", "priority_for_targeting")
-    @classmethod
-    def _check_priority_literal(cls, v: str) -> str:
-        if v not in {"HIGH", "MEDIUM", "LOW"}:
-            raise ValueError(f"must be HIGH/MEDIUM/LOW, got {v!r}")
-        return v
-
-    @field_validator("coherence")
-    @classmethod
-    def _check_coherence_literal(cls, v: str | None) -> str | None:
-        if v is not None and v not in {"HIGH", "MEDIUM", "LOW", "NONE"}:
-            raise ValueError(f"must be HIGH/MEDIUM/LOW/NONE, got {v!r}")
-        return v
 
 
 # ---- Helpers (REQ-017) ----
@@ -374,7 +368,7 @@ async def _assess_coherence(
     raw_verdict = first.get("verdict")
     if not isinstance(raw_verdict, str):
         return None
-    if raw_verdict not in {"HIGH", "MEDIUM", "LOW", "NONE"}:
+    if raw_verdict not in COHERENCE_LEVELS:
         return None
     return raw_verdict
 
