@@ -101,13 +101,19 @@ def test_get_module_unknown_raises() -> None:
 # ---- run() stub tests ----
 
 @pytest.mark.asyncio
-async def test_all_modules_run_returns_module_output() -> None:
+async def test_all_modules_run_returns_module_output(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every module's run() returns a ModuleOutput (even if it's a stub).
 
     Network-dependent modules (Wayback CDX, Wayback Machine, metadata_analysis
     exiftool subprocess, etc.) are patched to return empty results.
+
+    Uses ``monkeypatch`` (not raw ``setattr``) so the test guarantees cleanup
+    even on crash / interrupt — the previous direct-attribute version would
+    leak ``asyncio.create_subprocess_exec`` into later tests if the test
+    process was killed mid-run (audit A.2).
     """
-    from unittest.mock import AsyncMock, MagicMock, patch
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
 
     from app.modules.base import ModuleInput
     from app.modules.base import ModuleOutput
@@ -132,51 +138,30 @@ async def test_all_modules_run_returns_module_output() -> None:
         "_search_github_api",
     )
 
-    # Subprocess-executing modules need create_subprocess_exec mocked
-    subprocess_modules = {
-        "wayback_machine", "whois_rdap", "metadata_analysis",
-        "email_harvesting", "employee_osint", "subdomain_enum",
-    }
-
-    original_methods: dict[tuple[str, str], object] = {}
-    # Save the REAL asyncio.create_subprocess_exec exactly ONCE — it is a
-    # global singleton, so saving it on every iteration captures the
-    # previously-mocked value, not the real one. Saving once guarantees
-    # we can restore it cleanly in the finally block.
-    original_subprocess_exec = __import__("asyncio").create_subprocess_exec
+    # Subprocess-executing modules need create_subprocess_exec mocked.
+    # We build an AsyncMock that, when awaited, returns a mock process whose
+    # `.communicate()` returns (b"", b"") — matches the real asyncio contract
+    # closely enough that production code can `await proc.communicate()`.
     mock_proc = MagicMock()
     mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-    # The mock itself MUST be an AsyncMock so that the production code's
-    # `await asyncio.create_subprocess_exec(...)` keeps working — a plain
-    # MagicMock isn't a coroutine and would raise
-    # `TypeError: object MagicMock can't be used in 'await' expression`,
-    # which then leaks into every other test that calls subprocess_exec.
     mock_exec = AsyncMock(return_value=mock_proc)
-    __import__("asyncio").create_subprocess_exec = mock_exec  # type: ignore[assignment]
-    try:
-        for name, module in MODULE_REGISTRY.items():
-            for method_name in network_methods:
-                if hasattr(module, method_name):
-                    original_methods[(name, method_name)] = getattr(module, method_name)
-                    setattr(module, method_name, AsyncMock(return_value=[]))
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", mock_exec)
 
-        for name, module in MODULE_REGISTRY.items():
-            if name == "person_dossier":
-                # person_dossier requires job_id (it's an aggregator).
-                # It's tested separately in test_person_dossier.py.
-                continue
-            result = await module.run(ModuleInput(target="example.com"))
-            assert isinstance(result, ModuleOutput), f"{name} run() did not return ModuleOutput"
-            assert result.module == name, f"{name} returned wrong module name in output"
-    finally:
-        # Restore all originals
-        for name, module in MODULE_REGISTRY.items():
-            for method_name in network_methods:
-                if (name, method_name) in original_methods:
-                    setattr(module, method_name, original_methods[(name, method_name)])
-        # Restore the REAL subprocess_exec exactly once. Saving and
-        # restoring it per-module leaks the mock into later tests.
-        __import__("asyncio").create_subprocess_exec = original_subprocess_exec  # type: ignore[assignment]
+    # Patch all the per-module network methods. monkeypatch.setattr restores
+    # each one automatically at teardown.
+    for name, module in MODULE_REGISTRY.items():
+        for method_name in network_methods:
+            if hasattr(module, method_name):
+                monkeypatch.setattr(module, method_name, AsyncMock(return_value=[]))
+
+    for name, module in MODULE_REGISTRY.items():
+        if name == "person_dossier":
+            # person_dossier requires job_id (it's an aggregator).
+            # It's tested separately in test_person_dossier.py.
+            continue
+        result = await module.run(ModuleInput(target="example.com"))
+        assert isinstance(result, ModuleOutput), f"{name} run() did not return ModuleOutput"
+        assert result.module == name, f"{name} returned wrong module name in output"
 
 
 @pytest.mark.asyncio
