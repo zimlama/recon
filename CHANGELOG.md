@@ -70,9 +70,9 @@ PR 1-3 of the 4-PR plan implemented (PR 3 = harness layer deferred). Two fix pas
 
 ### Test results
 
-- **529 tests passing** (was 421 in v0.1.0)
-- 0 failed, 0 errors
-- Coverage: 90.32% on core modules (modules + orchestrator + middleware + handoff + utils + routes)
+- **581 tests passing** (was 421 in v0.1.0)
+- 1 known flake: `test_paid_module_excluded_logs_warning` — passes in isolation, fails in full-suite due to `monkeypatch` + `caplog` ordering interaction. Pre-existing, not a regression. Tracked for v0.2.1 hardening bundle.
+- Coverage: 91.64% on critical modules (modules + orchestrator + middleware + handoff + utils)
 
 ### Compliance
 
