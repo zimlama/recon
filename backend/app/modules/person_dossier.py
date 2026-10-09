@@ -247,32 +247,23 @@ def _resolve_plaintext_email(findings: list[Finding]) -> str | None:
     return None
 
 
-def _collect_orphan_breaches_and_attach(
-    sibling_findings: list[tuple[str, Finding]],
+def _index_email_domains(
     bucket: dict[str, list[tuple[str, Finding]]],
-) -> tuple[list[tuple[str, Finding, str]], list[str]]:
-    """Two-step breach correlation (REQ-017 AC-017.4 / AC-017.5).
+) -> dict[str, list[str]]:
+    """Index the bucket by domain → list[email_hash] (REQ-017 AC-017.4 step 1).
 
-    Walks ALL sibling findings (not just bucketed ones) because
-    CREDENTIAL_EXPOSURE never gets bucketed by email_hash — its 10-char
-    SHA-1 prefix fails the 64-char check.
-
-    For each CREDENTIAL_EXPOSURE finding:
-
-    - If its metadata ``domain`` matches the domain of any EMAIL finding
-      (across any bucket) → attach to the matching dossier.
-    - Otherwise → orphan: surfaced via ``ModuleOutput.errors`` as
-      ``"orphan breach: <email_hash_prefix> for <domain>"``.
+    For each bucket entry, the first EMAIL finding in the bucket defines
+    the domain for that email_hash. CREDENTIAL_EXPOSURE findings are
+    bucketed by their ``domain`` metadata so this index supports breach
+    correlation downstream.
 
     Returns:
-        ``(attached, orphans)`` where each ``attached`` entry is
-        ``(module_name, breach_finding, target_email_hash)`` and each
-        ``orphan`` is the error string.
+        ``hashes_by_domain`` — maps lowercased domain → list of email_hash
+        pseudonyms whose EMAIL finding was on that domain.
     """
-    # Step 1: index EMAIL findings by domain → email_hash.
     domains_by_hash: dict[str, str] = {}
     for email_hash, items in bucket.items():
-        for _module_name, finding in items:
+        for _, finding in items:
             if finding.type == FindingType.EMAIL:
                 d = _domain_of_email(finding.value)
                 if d:
@@ -282,8 +273,26 @@ def _collect_orphan_breaches_and_attach(
     hashes_by_domain: dict[str, list[str]] = {}
     for email_hash, domain in domains_by_hash.items():
         hashes_by_domain.setdefault(domain, []).append(email_hash)
+    return hashes_by_domain
 
-    # Step 2: walk sibling findings; classify each CREDENTIAL_EXPOSURE.
+
+def _classify_breaches(
+    sibling_findings: list[tuple[str, Finding]],
+    hashes_by_domain: dict[str, list[str]],
+) -> tuple[list[tuple[str, Finding, str]], list[str]]:
+    """Classify each CREDENTIAL_EXPOSURE finding as attached or orphan (step 2).
+
+    For every ``(module_name, finding)`` in ``sibling_findings``:
+      - If finding.type != CREDENTIAL_EXPOSURE → skip
+      - If finding.metadata.domain matches a domain in ``hashes_by_domain``
+        → attach to the first email_hash on that domain
+      - Otherwise → record an orphan error string
+
+    Returns:
+        ``(attached, orphans)`` where each ``attached`` entry is
+        ``(module_name, breach_finding, target_email_hash)`` and each
+        ``orphan`` is the error string surfaced via ModuleOutput.errors.
+    """
     attached: list[tuple[str, Finding, str]] = []
     orphans: list[str] = []
     for module_name, finding in sibling_findings:
@@ -309,6 +318,31 @@ def _collect_orphan_breaches_and_attach(
         )
 
     return attached, orphans
+
+
+def _collect_orphan_breaches_and_attach(
+    sibling_findings: list[tuple[str, Finding]],
+    bucket: dict[str, list[tuple[str, Finding]]],
+) -> tuple[list[tuple[str, Finding, str]], list[str]]:
+    """Two-step breach correlation (REQ-017 AC-017.4 / AC-017.5).
+
+    Walks ALL sibling findings (not just bucketed ones) because
+    CREDENTIAL_EXPOSURE never gets bucketed by email_hash — its 10-char
+    SHA-1 prefix fails the 64-char check.
+
+    For each CREDENTIAL_EXPOSURE finding:
+
+    - If its metadata ``domain`` matches the domain of any EMAIL finding
+      (across any bucket) → attach to the matching dossier.
+    - Otherwise → orphan: surfaced via ``ModuleOutput.errors`` as
+      ``"orphan breach: <email_hash_prefix> for <domain>"``.
+
+    Delegates the two steps to ``_index_email_domains`` and
+    ``_classify_breaches`` so each is independently testable and the
+    orchestrator body stays under 5 lines (audit R2-W5).
+    """
+    hashes_by_domain = _index_email_domains(bucket)
+    return _classify_breaches(sibling_findings, hashes_by_domain)
 
 
 # ---- AI coherence helper (REQ-021) ----
