@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Resolved post-merge test-suite hang in `test_modules_stub.py`** —
+  the v0.2.1 hardening bundle's monkeypatch refactor did not address an
+  underlying gap: the per-method mock list (`network_methods`) used names like
+  `_query_pgp` that did not match the actual call sites (e.g.
+  `email_harvesting._query_pgp_servers` opens an `httpx.AsyncClient`
+  directly, while `subdomain_enum._query_crtsh` also uses httpx inline in
+  some paths). When `pytest` reached these tests in a full-suite run, both
+  `test_all_modules_run_returns_module_output` and
+  `test_stub_modules_have_not_implemented_error` blocked on live HTTP calls
+  to PGP keyservers (`keys.openpgp.org`, `pgp.mit.edu`) and `crt.sh` — the
+  `monkeypatch.setattr(...)` for individual method names did not catch the
+  inline httpx clients. Wrapped both tests' `module.run()` loops in a
+  `respx.mock(assert_all_mocked=False, assert_all_called=False)` block so any
+  httpx call returns `200` with an empty body — matching the per-test
+  pattern already used in `test_subdomain_enum.py`, `test_email_harvesting.py`,
+  etc. Verified 5 consecutive full-suite runs: 67s each, 582/582 passing.
+
 ### Changed (hardening bundle for v0.2.1)
 
 This release closes the audit follow-ups from the v0.2.0 final pass (R1/R2/R4)
