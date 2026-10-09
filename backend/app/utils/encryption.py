@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import hashlib
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet
 
 
 class EncryptionKeyMissingError(Exception):
@@ -92,8 +92,3 @@ __all__ = [
     "encrypt_email",
     "hash_email",
 ]
-
-
-# Re-export so callers can `from app.utils.encryption import InvalidToken`
-# without importing cryptography directly.
-InvalidToken = InvalidToken
