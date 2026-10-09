@@ -29,7 +29,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
@@ -81,6 +81,14 @@ AI_MAX_TOKENS = 256
 AI_TIMEOUT_SECONDS = 30.0
 AI_TEMPERATURE = 0.1
 
+# Coherence / role-relevance / priority tag sets. Declared once and reused by
+# both the Pydantic ``Literal`` types (compile-time enforcement) and the
+# runtime validator at line ~377 (LLM-output guard). Mirror handoff schema.
+PriorityTag = Literal["HIGH", "MEDIUM", "LOW"]
+CoherenceTag = Literal["HIGH", "MEDIUM", "LOW", "NONE"]
+COHERENCE_LEVELS: frozenset[str] = frozenset({"HIGH", "MEDIUM", "LOW", "NONE"})
+PRIORITY_LEVELS: frozenset[str] = frozenset({"HIGH", "MEDIUM", "LOW"})
+
 
 # ---- Pydantic schema (REQ-018) ----
 
@@ -119,11 +127,11 @@ class PersonDossier(BaseModel):
         default_factory=list,
         description="CREDENTIAL_EXPOSURE metadata blobs",
     )
-    role_relevance: str = Field(
+    role_relevance: PriorityTag = Field(
         default="LOW",
         description="Role relevance tag",
     )
-    priority_for_targeting: str = Field(
+    priority_for_targeting: PriorityTag = Field(
         default="LOW",
         description="Priority for downstream targeting",
     )
@@ -137,24 +145,10 @@ class PersonDossier(BaseModel):
         le=1.0,
         description="Aggregated confidence (max + 0.1 boost, capped 1.0)",
     )
-    coherence: str | None = Field(
+    coherence: CoherenceTag | None = Field(
         default=None,
         description="AI-assessed tag (HIGH/MEDIUM/LOW/NONE), populated post-validation",
     )
-
-    @field_validator("role_relevance", "priority_for_targeting")
-    @classmethod
-    def _check_priority_literal(cls, v: str) -> str:
-        if v not in {"HIGH", "MEDIUM", "LOW"}:
-            raise ValueError(f"must be HIGH/MEDIUM/LOW, got {v!r}")
-        return v
-
-    @field_validator("coherence")
-    @classmethod
-    def _check_coherence_literal(cls, v: str | None) -> str | None:
-        if v is not None and v not in {"HIGH", "MEDIUM", "LOW", "NONE"}:
-            raise ValueError(f"must be HIGH/MEDIUM/LOW/NONE, got {v!r}")
-        return v
 
 
 # ---- Helpers (REQ-017) ----
@@ -253,32 +247,23 @@ def _resolve_plaintext_email(findings: list[Finding]) -> str | None:
     return None
 
 
-def _collect_orphan_breaches_and_attach(
-    sibling_findings: list[tuple[str, Finding]],
+def _index_email_domains(
     bucket: dict[str, list[tuple[str, Finding]]],
-) -> tuple[list[tuple[str, Finding, str]], list[str]]:
-    """Two-step breach correlation (REQ-017 AC-017.4 / AC-017.5).
+) -> dict[str, list[str]]:
+    """Index the bucket by domain → list[email_hash] (REQ-017 AC-017.4 step 1).
 
-    Walks ALL sibling findings (not just bucketed ones) because
-    CREDENTIAL_EXPOSURE never gets bucketed by email_hash — its 10-char
-    SHA-1 prefix fails the 64-char check.
-
-    For each CREDENTIAL_EXPOSURE finding:
-
-    - If its metadata ``domain`` matches the domain of any EMAIL finding
-      (across any bucket) → attach to the matching dossier.
-    - Otherwise → orphan: surfaced via ``ModuleOutput.errors`` as
-      ``"orphan breach: <email_hash_prefix> for <domain>"``.
+    For each bucket entry, the first EMAIL finding in the bucket defines
+    the domain for that email_hash. CREDENTIAL_EXPOSURE findings are
+    bucketed by their ``domain`` metadata so this index supports breach
+    correlation downstream.
 
     Returns:
-        ``(attached, orphans)`` where each ``attached`` entry is
-        ``(module_name, breach_finding, target_email_hash)`` and each
-        ``orphan`` is the error string.
+        ``hashes_by_domain`` — maps lowercased domain → list of email_hash
+        pseudonyms whose EMAIL finding was on that domain.
     """
-    # Step 1: index EMAIL findings by domain → email_hash.
     domains_by_hash: dict[str, str] = {}
     for email_hash, items in bucket.items():
-        for _module_name, finding in items:
+        for _, finding in items:
             if finding.type == FindingType.EMAIL:
                 d = _domain_of_email(finding.value)
                 if d:
@@ -288,8 +273,26 @@ def _collect_orphan_breaches_and_attach(
     hashes_by_domain: dict[str, list[str]] = {}
     for email_hash, domain in domains_by_hash.items():
         hashes_by_domain.setdefault(domain, []).append(email_hash)
+    return hashes_by_domain
 
-    # Step 2: walk sibling findings; classify each CREDENTIAL_EXPOSURE.
+
+def _classify_breaches(
+    sibling_findings: list[tuple[str, Finding]],
+    hashes_by_domain: dict[str, list[str]],
+) -> tuple[list[tuple[str, Finding, str]], list[str]]:
+    """Classify each CREDENTIAL_EXPOSURE finding as attached or orphan (step 2).
+
+    For every ``(module_name, finding)`` in ``sibling_findings``:
+      - If finding.type != CREDENTIAL_EXPOSURE → skip
+      - If finding.metadata.domain matches a domain in ``hashes_by_domain``
+        → attach to the first email_hash on that domain
+      - Otherwise → record an orphan error string
+
+    Returns:
+        ``(attached, orphans)`` where each ``attached`` entry is
+        ``(module_name, breach_finding, target_email_hash)`` and each
+        ``orphan`` is the error string surfaced via ModuleOutput.errors.
+    """
     attached: list[tuple[str, Finding, str]] = []
     orphans: list[str] = []
     for module_name, finding in sibling_findings:
@@ -317,6 +320,31 @@ def _collect_orphan_breaches_and_attach(
     return attached, orphans
 
 
+def _collect_orphan_breaches_and_attach(
+    sibling_findings: list[tuple[str, Finding]],
+    bucket: dict[str, list[tuple[str, Finding]]],
+) -> tuple[list[tuple[str, Finding, str]], list[str]]:
+    """Two-step breach correlation (REQ-017 AC-017.4 / AC-017.5).
+
+    Walks ALL sibling findings (not just bucketed ones) because
+    CREDENTIAL_EXPOSURE never gets bucketed by email_hash — its 10-char
+    SHA-1 prefix fails the 64-char check.
+
+    For each CREDENTIAL_EXPOSURE finding:
+
+    - If its metadata ``domain`` matches the domain of any EMAIL finding
+      (across any bucket) → attach to the matching dossier.
+    - Otherwise → orphan: surfaced via ``ModuleOutput.errors`` as
+      ``"orphan breach: <email_hash_prefix> for <domain>"``.
+
+    Delegates the two steps to ``_index_email_domains`` and
+    ``_classify_breaches`` so each is independently testable and the
+    orchestrator body stays under 5 lines (audit R2-W5).
+    """
+    hashes_by_domain = _index_email_domains(bucket)
+    return _classify_breaches(sibling_findings, hashes_by_domain)
+
+
 # ---- AI coherence helper (REQ-021) ----
 
 
@@ -324,7 +352,7 @@ async def _assess_coherence(
     dossier: PersonDossier,
     llm_client: Any,
     system_prompt: str,
-) -> str | None:
+) -> CoherenceTag | None:
     """Ask the LLM to assess coherence of one dossier.
 
     - 1 LLM call per dossier (capped at ``AI_MAX_TOKENS=256``).
@@ -374,9 +402,9 @@ async def _assess_coherence(
     raw_verdict = first.get("verdict")
     if not isinstance(raw_verdict, str):
         return None
-    if raw_verdict not in {"HIGH", "MEDIUM", "LOW", "NONE"}:
+    if raw_verdict not in COHERENCE_LEVELS:
         return None
-    return raw_verdict
+    return cast(CoherenceTag, raw_verdict)
 
 
 # ---- Module class ----

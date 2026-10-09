@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (hardening bundle for v0.2.1)
+
+This release closes the audit follow-ups from the v0.2.0 final pass (R1/R2/R4)
+plus the test-reliability flakes that escaped the v0.2.0 cut. No new features —
+chore-only. Tracked in PR `chore/v0.2.1-hardening-bundle`.
+
+- **Fixed `test_paid_module_excluded_logs_warning` flake** — root cause was
+  `alembic/env.py:28` calling `logging.config.fileConfig()` with the default
+  `disable_existing_loggers=True`, which silently disabled every logger not
+  listed in `alembic.ini` (including `app.modules`). Once the first
+  `test_alembic_identity_map` test ran, every subsequent test's `caplog` could
+  not capture `app.modules` warnings. Pass `disable_existing_loggers=False`.
+- **Hardened `test_modules_stub` global patch** — refactored the
+  `asyncio.create_subprocess_exec` direct-attribute assignment to use
+  `monkeypatch.setattr`, guaranteeing restoration on teardown even if the
+  process is interrupted mid-test (no more `TypeError: ... used in 'await'`
+  leaks into later tests).
+- **Refactored PersonDossier typing** — replaced `str` + hand-rolled
+  `@field_validator` with `Literal["HIGH", "MEDIUM", "LOW"]` /
+  `Literal["HIGH", "MEDIUM", "LOW", "NONE"]` to match the handoff schema and
+  collapse the duplicated magic-string sets into a single source of truth
+  (`_COHERENCE_LEVELS` / `_PRIORITY_LEVELS` frozensets).
+- **Split `_collect_orphan_breaches_and_attach`** — 62-line helper decomposed
+  into `_index_email_domains` + `_classify_breaches`; the orchestrator is
+  now a 5-line delegator.
+- **Removed dead `InvalidToken` re-export** from `app/utils/encryption.py`
+  (no caller imported it).
+- **Tightened `_assess_coherence` return type** to `CoherenceTag | None`
+  with a `typing.cast` at the single return point so `mypy --strict` accepts
+  the runtime narrowing via `COHERENCE_LEVELS` membership.
+
+### Test results
+
+- **582 tests passing** (was 581 in v0.2.0; the flake now passes deterministically)
+- 0 failures, 0 known flakes
+- Coverage: 91.66% on critical modules (modules + orchestrator + middleware + handoff + utils) — gate ≥ 90%
+- `mypy --strict`: no new errors (pre-existing 1 unrelated `union-attr` remains)
+- `ruff check`: no new errors (7 pre-existing in `person_dossier.py` unrelated to this bundle)
+
+### CI hygiene (already in place from prior PRs, documented here for traceability)
+
+- All GitHub Actions references are SHA-pinned with tag comments
+  (`actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2`, etc.)
+- `dependabot.yml` covers pip + npm + github-actions + docker, weekly
+- `CODEOWNERS` auto-assigns `@zimlama` for backend, frontend, CI, docs
+- All workflows declare a `permissions:` block with the minimum scope
+  (CI: `contents: read`; CodeQL: + `security-events: write`; release: + `contents: write` + `packages: write`)
+
+### Compliance
+
+- 0 `Co-Authored-By` in all 6 new commits
+- 0 DragonJar / JAIME / RESTREPO references in code, docs, or tests
+- All commits follow Conventional Commits format
+- Apache-2.0 license header on every new/modified Python file
+
 ## [0.2.0] - 2026-10-13
 
 ### Sprint recap (v0.2.0)
