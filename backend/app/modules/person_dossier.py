@@ -29,7 +29,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
@@ -352,7 +352,7 @@ async def _assess_coherence(
     dossier: PersonDossier,
     llm_client: Any,
     system_prompt: str,
-) -> str | None:
+) -> CoherenceTag | None:
     """Ask the LLM to assess coherence of one dossier.
 
     - 1 LLM call per dossier (capped at ``AI_MAX_TOKENS=256``).
@@ -404,7 +404,7 @@ async def _assess_coherence(
         return None
     if raw_verdict not in COHERENCE_LEVELS:
         return None
-    return raw_verdict
+    return cast(CoherenceTag, raw_verdict)
 
 
 # ---- Module class ----
