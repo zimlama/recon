@@ -111,8 +111,17 @@ async def test_all_modules_run_returns_module_output(monkeypatch: pytest.MonkeyP
     even on crash / interrupt — the previous direct-attribute version would
     leak ``asyncio.create_subprocess_exec`` into later tests if the test
     process was killed mid-run (audit A.2).
+
+    HTTP traffic is mocked globally with ``respx`` (``assert_all_mocked=False``)
+    so any httpx call — including ones not covered by the per-method mock list
+    (e.g. ``email_harvesting._query_pgp_servers`` calls PGP key servers
+    directly via ``httpx.AsyncClient`` rather than through a method named
+    ``_query_pgp``) — returns an empty 200 response instead of hanging on a
+    live network round-trip. This was the root cause of the post-merge hang
+    (see fix/test-suite-hang-post-merge).
     """
     import asyncio
+    import respx
     from unittest.mock import AsyncMock, MagicMock
 
     from app.modules.base import ModuleInput
@@ -154,34 +163,58 @@ async def test_all_modules_run_returns_module_output(monkeypatch: pytest.MonkeyP
             if hasattr(module, method_name):
                 monkeypatch.setattr(module, method_name, AsyncMock(return_value=[]))
 
-    for name, module in MODULE_REGISTRY.items():
-        if name == "person_dossier":
-            # person_dossier requires job_id (it's an aggregator).
-            # It's tested separately in test_person_dossier.py.
-            continue
-        result = await module.run(ModuleInput(target="example.com"))
-        assert isinstance(result, ModuleOutput), f"{name} run() did not return ModuleOutput"
-        assert result.module == name, f"{name} returned wrong module name in output"
+    # Global httpx mock — catches any HTTP call (including ones not in
+    # ``network_methods``) and replies with 200 + empty body. respx rolls
+    # back its patches when the ``with`` block exits.
+    with respx.mock(assert_all_mocked=False, assert_all_called=False):
+        for name, module in MODULE_REGISTRY.items():
+            if name == "person_dossier":
+                # person_dossier requires job_id (it's an aggregator).
+                # It's tested separately in test_person_dossier.py.
+                continue
+            result = await module.run(ModuleInput(target="example.com"))
+            assert isinstance(result, ModuleOutput), f"{name} run() did not return ModuleOutput"
+            assert result.module == name, f"{name} returned wrong module name in output"
 
 
 @pytest.mark.asyncio
-async def test_stub_modules_have_not_implemented_error() -> None:
+async def test_stub_modules_have_not_implemented_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """After Day 6, ALL 14 modules are real implementations.
 
-    This test now serves as a sanity check that no stub remains.
+    This test now serves as a sanity check that no stub remains. It invokes
+    ``module.run()`` on every module — even though Day 6 modules are real,
+    we still need to mock out subprocess + HTTP so the test does not block
+    on live network calls (the post-merge hang root cause).
     """
-    # If a future Day adds a new module without implementing it, this catches it.
-    # As of Day 6, this list is empty — all modules are real.
-    expected_stubs_at_day6 = set()  # no stubs remaining
-    actual_stubs = []
+    import asyncio
+    import respx
+    from unittest.mock import AsyncMock, MagicMock
+
     from app.modules.base import ModuleInput
-    for name, module in MODULE_REGISTRY.items():
-        if name == "person_dossier":
-            # Requires job_id; tested in test_person_dossier.py
-            continue
-        result = await module.run(ModuleInput(target="example.com"))
-        if result.errors and "Not implemented" in str(result.errors):
-            actual_stubs.append(name)
+
+    # Mock subprocess (theHarvester, subfinder, exiftool, etc.) the same way
+    # ``test_all_modules_run_returns_module_output`` does — guarantees no
+    # external binary is actually invoked.
+    mock_proc = MagicMock()
+    mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+    mock_exec = AsyncMock(return_value=mock_proc)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", mock_exec)
+
+    # Mock HTTP globally — see ``test_all_modules_run_returns_module_output``
+    # for the rationale (handles any httpx call site, including ones not
+    # covered by a per-method whitelist).
+    with respx.mock(assert_all_mocked=False, assert_all_called=False):
+        # If a future Day adds a new module without implementing it, this catches it.
+        # As of Day 6, this list is empty — all modules are real.
+        expected_stubs_at_day6 = set()  # no stubs remaining
+        actual_stubs = []
+        for name, module in MODULE_REGISTRY.items():
+            if name == "person_dossier":
+                # Requires job_id; tested in test_person_dossier.py
+                continue
+            result = await module.run(ModuleInput(target="example.com"))
+            if result.errors and "Not implemented" in str(result.errors):
+                actual_stubs.append(name)
     assert set(actual_stubs) == expected_stubs_at_day6
 
 
