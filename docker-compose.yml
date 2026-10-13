@@ -92,13 +92,7 @@ services:
     command: ["pnpm", "dev"]
 
   # ---- Report Builder (Node + md-to-pdf, ephemeral) ----
-  report-builder:
-    profiles: [prod, dev]
-    build:
-      context: ./report-builder
-      dockerfile: Dockerfile
-    networks:
-      - recon-net
-    # The backend invokes this via docker socket or shared volume.
-    # For v0.1, the backend uses `npx md-to-pdf` directly (Node must be installed in backend image).
-    # This service is reserved for future use (e.g., a sidecar that watches for MD files).
+  # Removed in v0.2.x: the ./report-builder directory does not exist yet.
+  # The backend uses `npx md-to-pdf` directly (Node is installed in the
+  # backend image). A dedicated report-builder sidecar is planned for
+  # v0.3+ — see docs/REPORT_BUILDER.md for the design.
