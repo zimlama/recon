@@ -62,6 +62,9 @@ services:
           action: rebuild
         - path: ./backend/tests
           action: sync
+          target: /app/tests
+          ignore:
+            - ./backend/tests/__pycache__
 
   # ---- Frontend (production build via nginx) ----
   frontend:
