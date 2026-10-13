@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# zimlama/recon — Installer v0.2.3
+# zimlama/recon — Installer v0.2.4
 # Auto-installs system prerequisites (git, python3, Docker), then runs an
 # interactive wizard for every API key, auto-generates local secrets
 # (Fernet + SECRET), reports which external binaries are missing, builds
@@ -101,24 +101,38 @@ get_env() {
   awk -F= -v k="$key" '$1==k { sub(/^[^=]*=/, "", $0); print; exit }' .env 2>/dev/null
 }
 
-# Set (or replace) a key in .env. Cross-platform, safe for values containing
-# slashes, ampersands, pipes, and other special chars. We escape '&' (sed
-# back-reference) and '|' (our sed delimiter) in the value before substitution.
+# Set (or replace) a key in .env. Cross-platform, safe for arbitrary values
+# (including '|', '&', '\', quotes, newlines). Uses awk because sed's
+# delimiter + escape rules for the replacement half are fragile: values
+# containing an unescaped '|' terminate the `s|...|...|` command early on
+# BSD sed, and GNU sed's '\1' back-reference interacts badly with shell
+# quoting when the value contains digits. Awk just prints the line — no
+# special-char interpretation.
 set_env() {
   local key="$1"
   local value="$2"
-  # Escape sed-significant chars in the replacement: '&' → '\&', '|' → '\|'
-  local safe_value="${value//&/\&}"
-  safe_value="${safe_value//|/\|}"
-  if grep -qE "^${key}=" .env 2>/dev/null; then
-    if [ "${OS:-mac}" = "mac" ]; then
-      sed -i '' -E "s|^(${key})=.*$|\\1=${safe_value}|" .env
-    else
-      sed -i -E "s|^(${key})=.*$|\\1=${safe_value}|" .env
-    fi
-  else
-    printf "%s=%s\n" "$key" "$value" >> .env
+  local tmp
+  tmp="$(mktemp)"
+  # index($0, k "=") == 1 matches lines that BEGIN with KEY= (no leading
+  # whitespace, exact key boundary). The END block appends KEY=value if
+  # the key was not present.
+  if ! awk -v k="$key" -v v="$value" '
+    {
+      if (index($0, k "=") == 1) {
+        print k "=" v
+        found = 1
+        next
+      }
+      print
+    }
+    END {
+      if (!found) print k "=" v
+    }
+  ' .env > "$tmp"; then
+    rm -f "$tmp"
+    die "set_env: awk failed while writing key=$key"
   fi
+  mv "$tmp" .env
 }
 
 # Ask for an OPTIONAL value. Empty input is allowed and means "skip".

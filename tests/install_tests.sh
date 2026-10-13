@@ -24,6 +24,7 @@ set -euo pipefail
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/.." && pwd)"
 LIB="${REPO_ROOT}/install_lib.sh"
+INSTALL="${REPO_ROOT}/install.sh"
 
 if [ ! -f "$LIB" ]; then
   echo "FATAL: install_lib.sh not found at $LIB" >&2
@@ -231,6 +232,83 @@ if [ -n \"\$OS_FAMILY\" ] && [ \"\$OS_FAMILY\" != unknown ] \\
 else
   echo bad
 fi"
+
+# -----------------------------------------------------------------------------
+# set_env (from install.sh) — must be safe for arbitrary values
+# -----------------------------------------------------------------------------
+
+run_test "set_env: replaces existing key (normal value)" \
+  "FOO=bar123" \
+  "
+tmpdir=\$(mktemp -d)
+cd \"\$tmpdir\"
+printf 'FOO=old\\nBAR=stay\\n' > .env
+chmod 600 .env
+# Process substitution with . doesn't define functions in bash; use eval.
+eval \"\$(awk '/^set_env\\(\\)/,/^}\$/' '$INSTALL')\"
+set_env FOO 'bar123'
+grep '^FOO=' .env
+"
+
+run_test "set_env: replaces value containing pipe and ampersand (sed's nemesis)" \
+  'FOO=a|b&c' \
+  "
+tmpdir=\$(mktemp -d)
+cd \"\$tmpdir\"
+printf 'FOO=old\\n' > .env
+chmod 600 .env
+eval \"\$(awk '/^set_env\\(\\)/,/^}\$/' '$INSTALL')\"
+set_env FOO 'a|b&c'
+grep '^FOO=' .env
+"
+
+run_test "set_env: appends new key when not in file" \
+  "NEW_KEY=hello" \
+  "
+tmpdir=\$(mktemp -d)
+cd \"\$tmpdir\"
+printf 'FOO=bar\\n' > .env
+chmod 600 .env
+eval \"\$(awk '/^set_env\\(\\)/,/^}\$/' '$INSTALL')\"
+set_env NEW_KEY 'hello'
+grep '^NEW_KEY=' .env
+"
+
+run_test "set_env: empty value OK" \
+  "FOO=" \
+  "
+tmpdir=\$(mktemp -d)
+cd \"\$tmpdir\"
+printf 'FOO=old\\n' > .env
+chmod 600 .env
+eval \"\$(awk '/^set_env\\(\\)/,/^}\$/' '$INSTALL')\"
+set_env FOO ''
+grep '^FOO=' .env
+"
+
+run_test "set_env: preserves other lines untouched" \
+  "BAR=untouched" \
+  "
+tmpdir=\$(mktemp -d)
+cd \"\$tmpdir\"
+printf 'FOO=old\\nBAR=untouched\\nBAZ=last\\n' > .env
+chmod 600 .env
+eval \"\$(awk '/^set_env\\(\\)/,/^}\$/' '$INSTALL')\"
+set_env FOO 'newval'
+grep '^BAR=' .env
+"
+
+run_test "set_env: value with equals signs (Base64-ish)" \
+  "FOO=abc=def==ghi=" \
+  "
+tmpdir=\$(mktemp -d)
+cd \"\$tmpdir\"
+printf 'FOO=old\\n' > .env
+chmod 600 .env
+eval \"\$(awk '/^set_env\\(\\)/,/^}\$/' '$INSTALL')\"
+set_env FOO 'abc=def==ghi='
+grep '^FOO=' .env
+"
 
 # -----------------------------------------------------------------------------
 # Result
