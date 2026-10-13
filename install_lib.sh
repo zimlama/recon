@@ -277,6 +277,7 @@ ensure_user_in_docker_group() {
 }
 
 ensure_docker_daemon_running() {
+  # If the user can already access docker, nothing to do.
   if docker info >/dev/null 2>&1; then
     ok "Docker daemon is running"
     return 0
@@ -299,16 +300,36 @@ ensure_docker_daemon_running() {
       ;;
     linux|wsl)
       if command -v systemctl >/dev/null 2>&1; then
-        $sudo systemctl enable --now docker || warn "Could not enable docker.service — start it manually"
+        if ! $sudo systemctl enable --now docker 2>&1 | grep -v 'Created symlink' | tee -a /tmp/docker-install.log >/dev/null; then
+          warn "systemctl enable --now docker returned non-zero — check /tmp/docker-install.log"
+        fi
       else
         $sudo service docker start || warn "Could not start docker — start it manually with 'sudo service docker start'"
       fi
-      sleep 2
-      if docker info >/dev/null 2>&1; then
-        ok "Docker daemon is now running"
-      else
-        warn "Docker daemon still not reachable. You may need to log out and back in for the docker group change to take effect, or start Docker manually."
+      # Give the daemon a beat to fully initialize (it can take 3-5s after unit activation).
+      for _ in 1 2 3 4 5 6; do
+        if $sudo docker info >/dev/null 2>&1; then break; fi
+        sleep 1
+      done
+      # Authoritative check: can sudo reach the daemon?
+      if ! $sudo docker info >/dev/null 2>&1; then
+        warn "Docker daemon did not start. Last journal entries:"
+        $sudo journalctl -u docker.service -n 15 --no-pager 2>/dev/null | sed 's/^/    /' || true
+        die "Cannot start Docker daemon. Investigate: 'sudo journalctl -u docker -n 50'"
       fi
+      ok "Docker daemon is running (verified via sudo)"
+      # Best-effort user-level access. If we just added the user to the docker
+      # group, this fails until the session picks up the new supplementary
+      # group (which requires re-login — OR a re-exec via `sg docker`, see
+      # install.sh Step 1.3).
+      if ! docker info >/dev/null 2>&1; then
+        DOCKER_REQUIRES_RELOGIN=1
+        warn "Docker daemon is up but your user can't access it yet."
+        warn "Reason: usermod added you to 'docker' group; the change hasn't"
+        warn "        propagated to this shell session. The installer will"
+        warn "        re-exec via 'sg docker' to pick it up inline."
+      fi
+      return 0
       ;;
   esac
 }

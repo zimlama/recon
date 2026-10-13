@@ -19,6 +19,9 @@ set -euo pipefail
 
 # ---- CLI flags (parsed early, before any output) ----------------------------
 SKIP_PREREQS=0
+# Preserve original args (quoted) for re-exec via `sg docker` when the user's
+# docker group membership hasn't propagated to this session yet.
+SCRIPT_ARGS=""
 for arg in "$@"; do
   case "$arg" in
     --skip-prereqs) SKIP_PREREQS=1 ;;
@@ -26,9 +29,10 @@ for arg in "$@"; do
       printf "Usage: %s [--skip-prereqs]\n  --skip-prereqs  skip the system-prereq install block (use if you already have git/python3/Docker)\n" "$0"
       exit 0
       ;;
-    *) printf "Unknown argument: %s (ignored)\n" "$arg" >&2 ;;
+    *) SCRIPT_ARGS="$SCRIPT_ARGS $(printf '%q' "$arg")" ;;
   esac
 done
+SCRIPT_ARGS="${SCRIPT_ARGS# }"
 
 # ---- Colors (only if TTY) ----
 if [ -t 1 ]; then
@@ -239,6 +243,12 @@ esac
 log "Detected OS: ${BOLD}${OS}${NC}"
 
 # 1.3 Docker
+if [ "${DOCKER_REQUIRES_RELOGIN:-0}" = "1" ] && command -v sg >/dev/null 2>&1; then
+  # Step 0 just added us to the docker group; the change hasn't propagated
+  # to this shell session. Re-exec via `sg docker` to pick it up inline.
+  log "Re-executing installer with 'docker' group active (one-shot group fix)..."
+  exec sg docker -c "$(realpath "$0") $SCRIPT_ARGS"
+fi
 if ! command -v docker >/dev/null 2>&1; then
   die "Docker is not installed. Get it at: https://www.docker.com/products/docker-desktop"
 fi
