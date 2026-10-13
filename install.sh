@@ -1,177 +1,671 @@
 #!/usr/bin/env bash
 # =============================================================================
-# zimlama/recon — Installer
-# Detects mac/linux, verifies Docker, bootstraps .env, builds + starts services.
-# Idempotent — safe to re-run.
+# zimlama/recon — Installer v0.2.2
+# Detects mac/linux/WSL, verifies Docker, runs an interactive wizard for every
+# required and optional API key, auto-generates local secrets (Fernet + SECRET),
+# reports which external binaries are missing, builds + starts services, and
+# finishes with a self-test pass that verifies every configured integration.
+#
+# Idempotent: safe to re-run. Existing .env values are kept unless you type a
+# new value. Backwards compatible with bash 3.2 (macOS default).
 # =============================================================================
 
 set -euo pipefail
 
 # ---- Colors (only if TTY) ----
 if [ -t 1 ]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'
-    NC='\033[0m'
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  BLUE='\033[0;34m'
+  CYAN='\033[0;36m'
+  BOLD='\033[1m'
+  NC='\033[0m'
 else
-    RED='' GREEN='' YELLOW='' BLUE='' NC=''
+  RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD=''
 fi
 
-# ---- Helpers ----
-log()  { printf "${BLUE}>>>${NC} %s\n" "$*"; }
-ok()   { printf "${GREEN}✅${NC} %s\n" "$*"; }
-warn() { printf "${YELLOW}⚠️ ${NC} %s\n" "$*"; }
-die()  { printf "${RED}❌${NC} %s\n" "$*" >&2; exit 1; }
+log()    { printf "${BLUE}>>>${NC} %s\n" "$*"; }
+ok()     { printf "${GREEN} ✅${NC} %s\n" "$*"; }
+warn()   { printf "${YELLOW} ⚠ ${NC} %s\n" "$*"; }
+err()    { printf "${RED} ✗${NC} %s\n" "$*"; }
+section(){ printf "\n${CYAN}${BOLD}═══ %s ═══${NC}\n" "$*"; }
+die()    { err "$*"; printf "\n${RED}Install aborted.${NC} Fix the issue above and re-run.\n" >&2; exit 1; }
 
 banner() {
-    cat <<'EOF'
+  cat <<'EOF'
 
-  ███████╗██╗███╗   ███╗██╗      █████╗ ███╗   ███╗ █████╗
-  ╚══███╔╝██║████╗ ████║██║     ██╔══██╗████╗ ████║██╔══██╗
-    ███╔╝ ██║██╔████╔██║██║     ███████║██╔████╔██║███████║
-   ███╔╝  ██║██║╚██╔╝██║██║     ██╔══██║██║╚██╔╝██║██╔══██║
-  ███████╗██║██║ ╚═╝ ██║███████╗██║  ██║██║ ╚═╝ ██║██║  ██║
-  ╚══════╝╚═╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝
+    ███████╗██╗███╗   ███╗██╗      █████╗ ███╗   ███╗ █████╗
+    ╚══███╔╝██║████╗ ████║██║     ██╔══██╗████╗ ████║██╔══██╗
+      ███╔╝ ██║██╔████╔██║██║     ███████║██╔████╔██║███████║
+     ███╔╝  ██║██║╚██╔╝██║██║     ██╔══██║██║╚██╔╝██║██╔══██║
+    ███████╗██║██║ ╚═╝ ██║███████╗██║  ██║██║ ╚═╝ ██║██║  ██║
+    ╚══════╝╚═╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝
 
-  Recon Phase 1 — Installer
+    Recon Phase 1 — Installer v0.2.2
+    Self-testing wizard. Idempotent. Re-run any time.
 
 EOF
 }
 
-# ---- Sanity checks ----
+# Track test results across the self-test section
+TESTS_PASSED=0
+TESTS_FAILED=0
+TEST_FAILURES=""
+
+record_pass() { TESTS_PASSED=$((TESTS_PASSED + 1)); }
+record_fail() {
+  TESTS_FAILED=$((TESTS_FAILED + 1))
+  TEST_FAILURES="${TEST_FAILURES}\n  • $1"
+}
+
+# Print a masked preview of a secret value, e.g. "sk-abc...xyz"
+mask() {
+  local v="${1:-}"
+  if [ -z "$v" ]; then printf "(empty)"; return; fi
+  if [ "${#v}" -le 12 ]; then printf "%s" "$v"; return; fi
+  printf "%s...%s" "${v:0:6}" "${v: -4}"
+}
+
+# Read the current value of a key from .env, or empty string
+get_env() {
+  local key="$1"
+  awk -F= -v k="$key" '$1==k { sub(/^[^=]*=/, "", $0); print; exit }' .env 2>/dev/null
+}
+
+# Set (or replace) a key in .env. Cross-platform, safe for values containing
+# slashes, ampersands, pipes, and other special chars. We escape '&' (sed
+# back-reference) and '|' (our sed delimiter) in the value before substitution.
+set_env() {
+  local key="$1"
+  local value="$2"
+  # Escape sed-significant chars in the replacement: '&' → '\&', '|' → '\|'
+  local safe_value="${value//&/\&}"
+  safe_value="${safe_value//|/\|}"
+  if grep -qE "^${key}=" .env 2>/dev/null; then
+    if [ "${OS:-mac}" = "mac" ]; then
+      sed -i '' -E "s|^(${key})=.*$|\\1=${safe_value}|" .env
+    else
+      sed -i -E "s|^(${key})=.*$|\\1=${safe_value}|" .env
+    fi
+  else
+    printf "%s=%s\n" "$key" "$value" >> .env
+  fi
+}
+
+# Ask for an OPTIONAL value. Empty input is allowed and means "skip".
+# Echoes the value to stdout so the caller can act on it.
+ask_optional() {
+  local var_name="$1"
+  local help="$2"
+  local current="$3"
+
+  if [ ! -t 0 ]; then
+    printf "%s" "$current"
+    return 0
+  fi
+
+  local prompt="  ${var_name}"
+  if [ -n "$current" ]; then
+    prompt="${prompt} ${CYAN}[current: $(mask "$current") — Enter to keep]${NC}"
+  else
+    prompt="${prompt} ${CYAN}[Enter to skip]${NC}"
+  fi
+  printf "%s\n  %s\n" "$prompt" "  ${help}"
+
+  local value
+  read -r -p "  > " value
+  if [ -z "$value" ]; then
+    printf "%s" "$current"
+  else
+    printf "%s" "$value"
+  fi
+}
+
+# Ask for a SECRET value. Input is masked. Empty input means "keep current".
+# Echoes the value to stdout so the caller can act on it.
+ask_secret() {
+  local var_name="$1"
+  local help="$2"
+  local current="$3"
+  local required="${4:-false}"
+
+  if [ ! -t 0 ]; then
+    printf "%s" "$current"
+    return 0
+  fi
+
+  local prompt="  ${var_name}"
+  if [ -n "$current" ]; then
+    prompt="${prompt} ${CYAN}[current: $(mask "$current") — Enter to keep]${NC}"
+  else
+    prompt="${prompt} ${CYAN}[required, no default]${NC}"
+  fi
+  printf "%s\n  %s\n" "$prompt" "  ${help}"
+
+  local value
+  while true; do
+    read -r -s -p "  > " value
+    echo
+    if [ -z "$value" ] && [ "$required" = "true" ] && [ -z "$current" ]; then
+      warn "  ${var_name} is required. Get one at the link above."
+      continue
+    fi
+    break
+  done
+
+  if [ -z "$value" ]; then
+    printf "%s" "$current"
+  else
+    printf "%s" "$value"
+  fi
+}
+
+# Ask a yes/no question. Default if Enter.
+ask_yn() {
+  local question="$1"
+  local default="$2"  # "y" or "n"
+
+  if [ ! -t 0 ]; then
+    [ "$default" = "y" ] && return 0 || return 1
+  fi
+
+  local hint
+  if [ "$default" = "y" ]; then hint="[Y/n]"; else hint="[y/N]"; fi
+
+  local reply
+  read -r -p "  ${question} ${hint}: " reply
+  reply="${reply:-$default}"
+  case "${reply,,}" in
+    y|yes) return 0 ;;
+    *)     return 1 ;;
+  esac
+}
+
+# =============================================================================
+# STEP 1 — Pre-flight checks
+# =============================================================================
+section "Step 1/7 — Pre-flight checks"
 banner
 
-# 1. Working directory must be repo root
+# 1.1 Working directory
 if [ ! -f "docker-compose.yml" ] || [ ! -f ".env.example" ]; then
-    die "Run this from the repo root (where docker-compose.yml lives)."
+  die "Run this from the repo root (the directory with docker-compose.yml and .env.example)."
 fi
+ok "Repo root detected"
 
-# 2. Detect OS
+# 1.2 OS detection
 OS_RAW="$(uname -s)"
 case "$OS_RAW" in
-    Darwin) OS=mac ;;
-    Linux)
-        OS=linux
-        # WSL detection
-        if grep -qiE "microsoft|wsl" /proc/version 2>/dev/null; then
-            OS=wsl
-        fi
-        ;;
-    *) die "Unsupported OS: $OS_RAW. Use macOS, Linux, or WSL." ;;
+  Darwin) OS=mac ;;
+  Linux)
+    OS=linux
+    if grep -qiE "microsoft|wsl" /proc/version 2>/dev/null; then
+      OS=wsl
+    fi
+    ;;
+  *) die "Unsupported OS: $OS_RAW. Supported: macOS, Linux, WSL." ;;
 esac
-log "Detected OS: $OS"
+log "Detected OS: ${BOLD}${OS}${NC}"
 
-# 3. Verify Docker
-command -v docker >/dev/null 2>&1 || die "Docker not installed. Install Docker Desktop: https://www.docker.com/products/docker-desktop"
-docker info >/dev/null 2>&1 || die "Docker daemon not running. Start Docker Desktop."
-ok "Docker present"
-
-# 4. Verify Docker Compose v2
-if ! docker compose version >/dev/null 2>&1; then
-    die "Docker Compose v2 not installed. Update Docker Desktop or install compose-plugin."
+# 1.3 Docker
+if ! command -v docker >/dev/null 2>&1; then
+  die "Docker is not installed. Get it at: https://www.docker.com/products/docker-desktop"
 fi
-COMPOSE_VERSION="$(docker compose version --short)"
-ok "Docker Compose v$COMPOSE_VERSION"
+if ! docker info >/dev/null 2>&1; then
+  die "Docker daemon is not running. Start Docker Desktop (or 'sudo systemctl start docker' on Linux)."
+fi
+ok "Docker daemon reachable"
 
-# 5. Verify git
-command -v git >/dev/null 2>&1 || die "git not installed"
+# 1.4 Compose v2
+if ! docker compose version >/dev/null 2>&1; then
+  die "Docker Compose v2 not installed. Update Docker Desktop or install the compose-plugin (apt install docker-compose-plugin)."
+fi
+ok "Docker Compose v$(docker compose version --short 2>/dev/null || echo '2')"
+
+# 1.5 git
+command -v git >/dev/null 2>&1 || die "git not installed. Install with: brew install git / apt install git"
 ok "git present"
 
-# ---- Bootstrap .env ----
+# 1.6 Python (needed for key generation + Fernet check)
+if ! command -v python3 >/dev/null 2>&1; then
+  warn "python3 not found. Auto-generation of SECRET_KEY and PERSON_DOSSIER_ENCRYPTION_KEY will be skipped."
+  PYTHON_AVAILABLE=false
+else
+  PYTHON_AVAILABLE=true
+  ok "python3 present: $(python3 --version 2>&1 | awk '{print $2}')"
+  if ! python3 -c "from cryptography.fernet import Fernet" 2>/dev/null; then
+    warn "python3 'cryptography' module not installed. PERSON_DOSSIER_ENCRYPTION_KEY auto-gen disabled."
+    warn "  Install: pip3 install cryptography   (or let Docker handle it — backend image includes it)"
+    FERNET_AVAILABLE=false
+  else
+    FERNET_AVAILABLE=true
+  fi
+fi
+
+# =============================================================================
+# STEP 2 — Bootstrap .env
+# =============================================================================
+section "Step 2/7 — Environment file"
+
 if [ ! -f ".env" ]; then
-    log "Creating .env from .env.example"
-    cp .env.example .env
-    chmod 600 .env
-    ok ".env created"
+  log "Creating .env from .env.example (mode 600 — owner only)"
+  cp .env.example .env
+  chmod 600 .env
+  ok ".env created"
 else
-    log ".env already exists — keeping current values"
+  log ".env already exists. Existing values will be kept unless you type a new one."
 fi
 
-# 6. Prompt for API key (masked input)
-CURRENT_KEY="$(grep -E '^MINIMAX_API_KEY=' .env | cut -d= -f2- || true)"
-if [ -z "$CURRENT_KEY" ] || [ "$CURRENT_KEY" = "sk-minimax-replace-with-real-key" ]; then
-    log "Configuring MiniMax M3 API key (input is hidden)"
-    API_KEY=""
-    while [ -z "$API_KEY" ]; do
-        if [ -t 0 ]; then
-            read -r -s -p "  MINIMAX_API_KEY (sk-...): " API_KEY
-            echo
-        else
-            # Non-interactive (CI) — fail
-            die "MINIMAX_API_KEY is required. Set it in .env manually or run interactively."
-        fi
-        if [ -z "$API_KEY" ]; then
-            warn "API key cannot be empty. Try again."
-        fi
-    done
+# =============================================================================
+# STEP 3 — Wizard: required keys
+# =============================================================================
+section "Step 3/7 — Required keys (1)"
 
-    # Replace in .env (cross-platform sed)
-    if [ "$OS" = "mac" ]; then
-        sed -i '' "s|^MINIMAX_API_KEY=.*|MINIMAX_API_KEY=$API_KEY|" .env
-    else
-        sed -i "s|^MINIMAX_API_KEY=.*|MINIMAX_API_KEY=$API_KEY|" .env
-    fi
-    ok "API key set in .env"
+log "The LLM powers AI validation. Without it, jobs still run in 'stub mode'"
+log "  (findings are produced but not AI-classified). Get a key at the link below."
+log ""
+
+current="$(get_env MINIMAX_API_KEY)"
+new_value="$(ask_secret 'MINIMAX_API_KEY' 'Get one at: https://api.minimaxi.com/' "$current" true)"
+if [ -n "$new_value" ] && [ "$new_value" != "$current" ]; then
+  set_env MINIMAX_API_KEY "$new_value"
+  ok "MINIMAX_API_KEY set"
 else
-    log "MINIMAX_API_KEY already configured — keeping current value"
+  log "MINIMAX_API_KEY unchanged"
 fi
 
-# ---- Build + start ----
-log "Building Docker images (this may take 5-10 min on first run)..."
-docker compose build
+# =============================================================================
+# STEP 4 — Wizard: auto-generated local secrets
+# =============================================================================
+section "Step 4/7 — Local secrets (auto-generated)"
 
-log "Starting services (production profile)..."
-docker compose --profile prod up -d
+# 4.1 SECRET_KEY
+current="$(get_env SECRET_KEY)"
+if [ -n "$current" ] && [ "$current" != "change-me-in-production-this-is-only-for-local-dev" ]; then
+  log "SECRET_KEY already set (keeping current value: $(mask "$current"))"
+else
+  if [ "$PYTHON_AVAILABLE" = "true" ]; then
+    generated="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+    set_env SECRET_KEY "$generated"
+    ok "SECRET_KEY auto-generated: $(mask "$generated")"
+    warn "  Back up this key. If you lose it, all signed tokens become invalid."
+  else
+    warn "Cannot auto-generate SECRET_KEY (python3 missing). Edit .env manually."
+  fi
+fi
 
-# ---- Health check ----
-log "Waiting for backend to be healthy..."
-for i in {1..30}; do
-    if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
-        ok "Backend is up"
-        break
-    fi
-    if [ "$i" -eq 30 ]; then
-        warn "Backend did not respond within 30s. Check: docker compose logs backend"
-    fi
-    sleep 1
+# 4.2 PERSON_DOSSIER_ENCRYPTION_KEY
+current="$(get_env PERSON_DOSSIER_ENCRYPTION_KEY)"
+if [ -n "$current" ]; then
+  log "PERSON_DOSSIER_ENCRYPTION_KEY already set (keeping current value: $(mask "$current"))"
+else
+  if [ "$FERNET_AVAILABLE" = "true" ]; then
+    generated="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+    set_env PERSON_DOSSIER_ENCRYPTION_KEY "$generated"
+    ok "PERSON_DOSSIER_ENCRYPTION_KEY auto-generated: $(mask "$generated")"
+    warn "  CRITICAL: back this up in a password manager."
+    warn "  If you lose it, encrypted data in 'identity_map' is unrecoverable forever."
+    warn "  Key rotation is not supported in v0.2.x (tracked for v0.3.0)."
+  else
+    warn "Cannot auto-generate PERSON_DOSSIER_ENCRYPTION_KEY (cryptography missing)."
+    warn "  Edit .env manually with: python3 -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+  fi
+fi
+
+# =============================================================================
+# STEP 5 — Wizard: optional API keys
+# =============================================================================
+section "Step 5/7 — Optional API keys (free + paid)"
+
+log "Each one is skippable. Press Enter on any prompt to skip."
+log "Full guide: docs/EXTERNAL_SERVICES.md"
+log ""
+
+# 5.1 Censys
+log "${BOLD}Censys Search${NC} — free 250 queries/mo. Enriches shodan_censys with CVEs/services/geo."
+log "  Get credentials: https://search.censys.io/register"
+current_id="$(get_env CENSYS_API_ID)"
+new_id="$(ask_optional 'CENSYS_API_ID' 'API ID from the Censys account page.' "$current_id")"
+if [ -n "$new_id" ] && [ "$new_id" != "$current_id" ]; then
+  set_env CENSYS_API_ID "$new_id"
+  ok "CENSYS_API_ID set"
+fi
+
+# Only ask for SECRET if ID was provided (now or previously)
+current_secret="$(get_env CENSYS_API_SECRET)"
+have_id="$(get_env CENSYS_API_ID)"
+if [ -n "$have_id" ]; then
+  new_secret="$(ask_secret 'CENSYS_API_SECRET' 'API Secret from the same Censys account page.' "$current_secret" false)"
+  if [ -n "$new_secret" ] && [ "$new_secret" != "$current_secret" ]; then
+    set_env CENSYS_API_SECRET "$new_secret"
+    ok "CENSYS_API_SECRET set"
+  fi
+fi
+
+# 5.2 GitHub
+log ""
+log "${BOLD}GitHub personal access token${NC} — free with any account. 5000 req/h with token vs 60 without."
+log "  Generate (classic, no scopes): https://github.com/settings/tokens"
+current="$(get_env GITHUB_TOKEN)"
+new_value="$(ask_secret 'GITHUB_TOKEN' 'Classic token with no scopes is enough for public recon.' "$current" false)"
+if [ -n "$new_value" ] && [ "$new_value" != "$current" ]; then
+  set_env GITHUB_TOKEN "$new_value"
+  ok "GITHUB_TOKEN set"
+fi
+
+# 5.3 SerpAPI
+log ""
+log "${BOLD}SerpAPI${NC} — free 100/mo. Enables real Google dorking instead of curated GHDB templates."
+log "  Sign up: https://serpapi.com/"
+current="$(get_env SERP_API_KEY)"
+new_value="$(ask_secret 'SERP_API_KEY' 'Private API key from the SerpAPI dashboard.' "$current" false)"
+if [ -n "$new_value" ] && [ "$new_value" != "$current" ]; then
+  set_env SERP_API_KEY "$new_value"
+  ok "SERP_API_KEY set"
+fi
+
+# 5.4 HIBP
+log ""
+log "${BOLD}HIBP (Have I Been Pwned)${NC} — paid \$3.50/mo. Removes 429s on breach_data module."
+log "  Subscribe: https://haveibeenpwned.com/API/Key"
+current="$(get_env HIBP_API_KEY)"
+new_value="$(ask_secret 'HIBP_API_KEY' 'API key from the HIBP account page after subscribing.' "$current" false)"
+if [ -n "$new_value" ] && [ "$new_value" != "$current" ]; then
+  set_env HIBP_API_KEY "$new_value"
+  ok "HIBP_API_KEY set"
+fi
+
+# 5.5 RECON_API_KEY (Bearer auth, optional)
+log ""
+log "${BOLD}RECON_API_KEY${NC} — optional Bearer token to lock all business routes."
+log "  Leave empty for dev (no auth). For production, generate one and set it."
+current="$(get_env RECON_API_KEY)"
+new_value="$(ask_secret 'RECON_API_KEY' 'secrets.token_urlsafe(32). When set, every request needs: Authorization: Bearer <key>' "$current" false)"
+if [ -n "$new_value" ] && [ "$new_value" != "$current" ]; then
+  set_env RECON_API_KEY "$new_value"
+  ok "RECON_API_KEY set — auth is now enforced"
+fi
+
+# 5.6 ROE_ENABLED
+log ""
+log "${BOLD}RoE (Rules of Engagement) enforcement${NC} — opt-in. When true, POST /jobs requires"
+log "  an active RoE for the target. Recommended for production."
+current="$(get_env ROE_ENABLED)"
+if [ "$current" = "true" ]; then
+  log "ROE_ENABLED is already true (keeping)"
+else
+  if ask_yn "Enable ROE enforcement?" "n"; then
+    set_env ROE_ENABLED true
+    ok "ROE_ENABLED=true"
+  else
+    set_env ROE_ENABLED false
+    log "ROE_ENABLED=false (jobs accepted without RoE check)"
+  fi
+fi
+
+# =============================================================================
+# STEP 6 — External binaries check
+# =============================================================================
+section "Step 6/7 — External binaries (informational)"
+
+log "Required (used by dns_enum, mostly built-in on macOS):"
+for bin in dig host; do
+  if command -v "$bin" >/dev/null 2>&1; then
+    ok "  $bin — $(command -v "$bin")"
+  else
+    warn "  $bin — NOT FOUND (dns_enum may fail or skip)"
+  fi
 done
 
-log "Waiting for frontend to be healthy..."
-for i in {1..30}; do
-    if curl -fsS http://localhost:8080 >/dev/null 2>&1; then
-        ok "Frontend is up"
-        break
-    fi
-    if [ "$i" -eq 30 ]; then
-        warn "Frontend did not respond within 30s. Check: docker compose logs frontend"
-    fi
-    sleep 1
+log ""
+log "Optional (modules degrade gracefully if missing):"
+MISSING_BINARIES=""
+for bin in subfinder exiftool theHarvester gh gitleaks gau waybackurls recon-ng sherlock; do
+  if command -v "$bin" >/dev/null 2>&1; then
+    ok "  $bin — $(command -v "$bin")"
+  else
+    printf "  "
+    warn "$bin — not installed"
+    MISSING_BINARIES="${MISSING_BINARIES} $bin"
+  fi
 done
 
-# ---- Done ----
+if [ -n "$MISSING_BINARIES" ]; then
+  log ""
+  log "Install missing binaries per docs/EXTERNAL_SERVICES.md §Tier 0."
+  log "The app will still run without them — affected modules just produce less data."
+fi
+
+# =============================================================================
+# STEP 7 — Build + start + self-tests
+# =============================================================================
+section "Step 7/7 — Build, start, self-test"
+
+# 7.1 Build
+log "Building Docker images (first run takes 5-10 min)..."
+if ! docker compose build 2>&1 | tee /tmp/recon-install-build.log; then
+  printf "\n"
+  die "Docker build failed. Diagnostics:
+    • Port already in use:    docker compose ps ; lsof -i :8000 ; lsof -i :8080
+    • Out of disk space:      docker system df
+    • Network/proxy issues:   check .env for HTTPS_PROXY / NO_PROXY
+    Full log: /tmp/recon-install-build.log"
+fi
+ok "Images built"
+
+# 7.2 Start
+log "Starting services (prod profile)..."
+if ! docker compose --profile prod up -d 2>&1 | tee /tmp/recon-install-up.log; then
+  printf "\n"
+  die "docker compose up failed. Common causes:
+    • .env syntax error (run: bash -n install.sh is not enough — check with: grep -E '^[A-Z]' .env)
+    • Port 8000 or 8080 already in use:  lsof -i :8000 -i :8080
+    • Docker out of memory:               docker system df
+    Full log: /tmp/recon-install-up.log"
+fi
+ok "Services started"
+
+# 7.3 Wait for backend
+log "Waiting for backend to become healthy (up to 60s)..."
+BACKEND_OK=false
+for i in $(seq 1 60); do
+  if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+    ok "Backend is healthy (after ${i}s)"
+    BACKEND_OK=true
+    break
+  fi
+  if [ "$i" -eq 60 ]; then
+    die "Backend did not respond within 60s. Diagnose:
+    • docker compose ps                     (are all services Up?)
+    • docker compose logs backend --tail=100
+    • curl -v http://localhost:8000/health
+    If you see a 'module import' error, the .env may be malformed."
+  fi
+  sleep 1
+done
+
+# 7.4 Wait for frontend
+log "Waiting for frontend to become healthy (up to 60s)..."
+FRONTEND_OK=false
+for i in $(seq 1 60); do
+  if curl -fsS http://localhost:8080 >/dev/null 2>&1; then
+    ok "Frontend is healthy (after ${i}s)"
+    FRONTEND_OK=true
+    break
+  fi
+  if [ "$i" -eq 60 ]; then
+    warn "Frontend did not respond within 60s. The backend is up at :8000."
+    warn "  Diagnose: docker compose logs frontend"
+    break
+  fi
+  sleep 1
+done
+
+# 7.5 Self-tests
+log ""
+log "Running self-tests (verifying every integration actually works)..."
+log ""
+
+# We allow individual tests to fail without aborting the script — we want to
+# run all of them and report a summary at the end.
+set +e
+
+# Helper: run a self-test and record the outcome
+self_test() {
+  local name="$1"
+  local cmd="$2"
+  local fix="$3"
+
+  printf "  %-50s " "$name"
+  if eval "$cmd" >/dev/null 2>&1; then
+    printf "${GREEN}PASS${NC}\n"
+    record_pass
+  else
+    printf "${RED}FAIL${NC}\n"
+    record_fail "${name} — ${fix}"
+  fi
+}
+
+# T1: backend /health
+self_test "Backend /health" \
+  "curl -fsS http://localhost:8000/health" \
+  "docker compose logs backend"
+
+# T2: /health/ready (probes DB + LLM dependency)
+self_test "Backend /health/ready (DB + LLM)" \
+  "curl -fsS http://localhost:8000/health/ready" \
+  "Check: docker compose logs backend | tail -50. If 'DB fail', verify DATABASE_URL. If 'LLM fail', verify MINIMAX_API_KEY."
+
+# T3: module registry
+self_test "Module registry returns modules" \
+  "curl -fsS http://localhost:8000/api/v1/modules | python3 -c 'import sys,json; assert len(json.load(sys.stdin)) > 0'" \
+  "Backend did not load modules. Check: docker compose logs backend | grep -i 'module\\|registry'"
+
+# T4-T8: API key validation
+minimax="$(get_env MINIMAX_API_KEY)"
+if [ -n "$minimax" ] && [ "$minimax" != "sk-minimax-replace-with-real-key" ]; then
+  base_url="$(get_env MINIMAX_BASE_URL)"
+  base_url="${base_url:-https://api.minimaxi.com/v1}"
+  self_test "MiniMax API authentication" \
+    "curl -fsS -X POST '${base_url}/chat/completions' -H 'Authorization: Bearer ${minimax}' -H 'Content-Type: application/json' -d '{\"model\":\"MiniMax-M3\",\"messages\":[{\"role\":\"user\",\"content\":\"OK\"}],\"max_tokens\":5}'" \
+    "Wrong key or out of credits. Regenerate at: https://api.minimaxi.com/"
+else
+  printf "  %-50s ${YELLOW}SKIP${NC} (key not set — running in stub mode)\n" "MiniMax API authentication"
+fi
+
+gh_token="$(get_env GITHUB_TOKEN)"
+if [ -n "$gh_token" ]; then
+  self_test "GitHub API (5000 req/h with token)" \
+    "curl -fsS -H 'Authorization: Bearer ${gh_token}' https://api.github.com/rate_limit | python3 -c 'import sys,json; assert json.load(sys.stdin)[\"rate\"][\"limit\"] == 5000'" \
+    "Token invalid or wrong type. Regenerate (classic): https://github.com/settings/tokens"
+fi
+
+censys_id="$(get_env CENSYS_API_ID)"
+censys_secret="$(get_env CENSYS_API_SECRET)"
+if [ -n "$censys_id" ] && [ -n "$censys_secret" ]; then
+  self_test "Censys Search API authentication" \
+    "curl -fsS -u '${censys_id}:${censys_secret}' https://search.censys.io/api/v1/hosts/8.8.8.8 | python3 -c 'import sys,json; d=json.load(sys.stdin); assert \"ip\" in d'" \
+    "Wrong credentials. Verify: https://search.censys.io/account/api"
+fi
+
+serp="$(get_env SERP_API_KEY)"
+if [ -n "$serp" ]; then
+  self_test "SerpAPI authentication" \
+    "curl -fsS 'https://serpapi.com/search?q=test&api_key=${serp}' | python3 -c 'import sys,json; assert json.load(sys.stdin)[\"search_metadata\"][\"status\"] == \"Success\"'" \
+    "Wrong key. Verify: https://serpapi.com/dashboard"
+fi
+
+hibp="$(get_env HIBP_API_KEY)"
+if [ -n "$hibp" ]; then
+  self_test "HIBP API authentication" \
+    "curl -fsS -H 'hibp-api-key: ${hibp}' https://api.haveibeenpwned.com/range/21DA1 | head -1 | grep -qE '^[A-F0-9]{35}:'" \
+    "Wrong key or subscription inactive. Verify: https://haveibeenpwned.com/API/Key"
+fi
+
+# Fernet key works
+fernet="$(get_env PERSON_DOSSIER_ENCRYPTION_KEY)"
+if [ -n "$fernet" ] && [ "$FERNET_AVAILABLE" = "true" ]; then
+  self_test "Fernet encryption key valid" \
+    "PERSON_DOSSIER_ENCRYPTION_KEY='${fernet}' python3 -c 'from cryptography.fernet import Fernet; import os; f=Fernet(os.environ[\"PERSON_DOSSIER_ENCRYPTION_KEY\"].encode()); assert f.decrypt(f.encrypt(b\"x\")) == b\"x\"'" \
+    "Key is malformed. Regenerate: python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+fi
+
+# Docker containers
+self_test "Docker containers running" \
+  "[ \$(docker compose ps --format json 2>/dev/null | python3 -c 'import sys,json; print(sum(1 for s in json.load(sys.stdin) if s.get(\"State\") == \"running\"))' 2>/dev/null) -gt 0 ]" \
+  "Check: docker compose ps — restart with: docker compose --profile prod up -d"
+
+# Restore strict mode
+set -e
+
+# =============================================================================
+# Final report
+# =============================================================================
+section "Summary"
+
+cat <<EOF
+${BOLD}Services${NC}
+  Backend   http://localhost:8000  (API docs: http://localhost:8000/docs)
+  Frontend  http://localhost:8080
+
+${BOLD}Self-tests${NC}
+  Passed: ${GREEN}${TESTS_PASSED}${NC}
+  Failed: $([ "$TESTS_FAILED" -gt 0 ] && printf "${RED}${TESTS_FAILED}${NC}" || printf "${GREEN}0${NC}")
+EOF
+
+if [ "$TESTS_FAILED" -gt 0 ]; then
+  printf "${RED}Failures:${NC}\n"
+  printf "${TEST_FAILURES}\n"
+  printf "\n${YELLOW}The install completed but some tests failed.${NC}\n"
+  printf "${YELLOW}Read the error above and fix the configuration. Then:${NC}\n"
+  printf "  1. Edit .env to correct the failing key\n"
+  printf "  2. Restart: docker compose --profile prod restart backend\n"
+  printf "  3. Re-run: ./install.sh (it is idempotent — re-runs self-tests only)\n\n"
+  exit 1
+fi
+
+cat <<EOF
+${BOLD}Configuration${NC}
+EOF
+for key in MINIMAX_API_KEY SECRET_KEY PERSON_DOSSIER_ENCRYPTION_KEY CENSYS_API_ID GITHUB_TOKEN SERP_API_KEY HIBP_API_KEY RECON_API_KEY; do
+  val="$(get_env "$key")"
+  if [ -n "$val" ]; then
+    printf "  ${GREEN}✓${NC} %-35s = %s\n" "$key" "$(mask "$val")"
+  else
+    printf "  ${YELLOW}○${NC} %-35s (not set)\n" "$key"
+  fi
+done
+
+if [ -n "$MISSING_BINARIES" ]; then
+  cat <<EOF
+
+${YELLOW}Missing optional binaries:${NC}$(echo "$MISSING_BINARIES" | tr ' ' '\n' | sed 's/^/  •/')
+  Install per docs/EXTERNAL_SERVICES.md §Tier 0. The app still runs.
+EOF
+fi
+
 cat <<EOF
 
-${GREEN}🎉 Installation complete!${NC}
+${BOLD}Next steps${NC}
+  1. Open http://localhost:8080
+  2. Click "New Job" → enter target domain (e.g. example.com)
+  3. Accept the pentester responsibility modal
+  4. Watch the recon pipeline run
 
-  🌐 Frontend:    http://localhost:8080
-  🔌 Backend API: http://localhost:8000
-  📚 API docs:    http://localhost:8000/docs
-  📂 Data:        ./data/
+${BOLD}Common commands${NC}
+  make logs            # tail all container logs
+  make shell-backend   # open a shell in the backend container
+  make test            # run the test suite
+  make down            # stop everything
+  ./install.sh         # re-run this installer (idempotent — updates only what you change)
 
-  ${YELLOW}Quick commands:${NC}
-     make logs         # tail all logs
-     make shell-backend  # shell into backend container
-     make test         # run all tests
-     make down         # stop everything
-     make help         # show all targets
+${BOLD}To add API keys later${NC}
+  1. Edit .env
+  2. docker compose --profile prod restart backend
+  3. Re-run ./install.sh to verify
 
-  ${YELLOW}First steps:${NC}
-     1. Open http://localhost:8080
-     2. Click "New Job" → enter target domain
-     3. Accept the pentester responsibility modal
-     4. Watch the recon run
+${RED}⚠  Use only on systems you have WRITTEN AUTHORIZATION to test.${NC}
 
-  ${RED}⚠️  Use only on systems you have WRITTEN AUTHORIZATION to test.${NC}
-
+${GREEN}Install complete.${NC}
 EOF
