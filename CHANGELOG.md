@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (installer hardening v0.2.2)
+
+- **Auto-install system prerequisites** — `install.sh` now detects the host
+  OS (macOS / Ubuntu / Debian / Fedora / RHEL / Arch / WSL) and
+  auto-installs missing prerequisites (git, python3, the `cryptography`
+  Python module, Docker) using the host's package manager (Homebrew / apt
+  / dnf / pacman). On macOS, Docker Desktop is installed via
+  `brew install --cask docker-desktop`. On Linux, Docker's official
+  apt/yum repo is added before installing the engine. Ubuntu-derivatives
+  (Pop OS, Linux Mint, Elementary, Zorin) automatically map to the Ubuntu
+  repo. The new Step 0/8 (`ensure_prereqs`) runs before pre-flight; use
+  `--skip-prereqs` to bypass for dev machines. The detection + dispatch
+  logic lives in `install_lib.sh` (sourced at the top of `install.sh`) so
+  it can be unit-tested without root; 24 pure-bash tests cover OS family,
+  distro ID, package-manager dispatch, privilege helpers, and idempotency
+  under `tests/install_tests.sh`. The installer itself is now v0.2.3
+  internally but ships with the next project release.
+
 ### Fixed
 
 - **Resolved post-merge test-suite hang in `test_modules_stub.py`** —

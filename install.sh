@@ -1,16 +1,34 @@
 #!/usr/bin/env bash
 # =============================================================================
-# zimlama/recon — Installer v0.2.2
-# Detects mac/linux/WSL, verifies Docker, runs an interactive wizard for every
-# required and optional API key, auto-generates local secrets (Fernet + SECRET),
-# reports which external binaries are missing, builds + starts services, and
-# finishes with a self-test pass that verifies every configured integration.
+# zimlama/recon — Installer v0.2.3
+# Auto-installs system prerequisites (git, python3, Docker), then runs an
+# interactive wizard for every API key, auto-generates local secrets
+# (Fernet + SECRET), reports which external binaries are missing, builds
+# + starts services, and finishes with a self-test pass that verifies
+# every configured integration.
 #
-# Idempotent: safe to re-run. Existing .env values are kept unless you type a
-# new value. Backwards compatible with bash 3.2 (macOS default).
+# Idempotent: safe to re-run. Existing .env values are kept unless you type
+# a new value. Backwards compatible with bash 3.2 (macOS default).
+#
+# Supported OSes: macOS (Homebrew), Ubuntu/Debian (apt), Fedora/RHEL (dnf),
+# Arch/Manjaro (pacman), WSL (treated as the underlying distro).
+# Use --skip-prereqs to bypass auto-install.
 # =============================================================================
 
 set -euo pipefail
+
+# ---- CLI flags (parsed early, before any output) ----------------------------
+SKIP_PREREQS=0
+for arg in "$@"; do
+  case "$arg" in
+    --skip-prereqs) SKIP_PREREQS=1 ;;
+    -h|--help)
+      printf "Usage: %s [--skip-prereqs]\n  --skip-prereqs  skip the system-prereq install block (use if you already have git/python3/Docker)\n" "$0"
+      exit 0
+      ;;
+    *) printf "Unknown argument: %s (ignored)\n" "$arg" >&2 ;;
+  esac
+done
 
 # ---- Colors (only if TTY) ----
 if [ -t 1 ]; then
@@ -31,6 +49,12 @@ warn()   { printf "${YELLOW} ⚠ ${NC} %s\n" "$*"; }
 err()    { printf "${RED} ✗${NC} %s\n" "$*"; }
 section(){ printf "\n${CYAN}${BOLD}═══ %s ═══${NC}\n" "$*"; }
 die()    { err "$*"; printf "\n${RED}Install aborted.${NC} Fix the issue above and re-run.\n" >&2; exit 1; }
+
+# ---- Source install_lib.sh (detection + install helpers) -------------------
+# Sourced AFTER color/log helpers so ensure_* functions can use them.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=install_lib.sh
+. "${SCRIPT_DIR}/install_lib.sh"
 
 banner() {
   cat <<'EOF'
@@ -183,9 +207,15 @@ ask_yn() {
 }
 
 # =============================================================================
+# STEP 0 — System prerequisites (auto-install)
+# =============================================================================
+section "Step 0/8 — System prerequisites"
+ensure_prereqs
+
+# =============================================================================
 # STEP 1 — Pre-flight checks
 # =============================================================================
-section "Step 1/7 — Pre-flight checks"
+section "Step 1/8 — Pre-flight checks"
 banner
 
 # 1.1 Working directory
@@ -246,7 +276,7 @@ fi
 # =============================================================================
 # STEP 2 — Bootstrap .env
 # =============================================================================
-section "Step 2/7 — Environment file"
+section "Step 2/8 — Environment file"
 
 if [ ! -f ".env" ]; then
   log "Creating .env from .env.example (mode 600 — owner only)"
@@ -260,7 +290,7 @@ fi
 # =============================================================================
 # STEP 3 — Wizard: required keys
 # =============================================================================
-section "Step 3/7 — Required keys (1)"
+section "Step 3/8 — Required keys (1)"
 
 log "The LLM powers AI validation. Without it, jobs still run in 'stub mode'"
 log "  (findings are produced but not AI-classified). Get a key at the link below."
@@ -278,7 +308,7 @@ fi
 # =============================================================================
 # STEP 4 — Wizard: auto-generated local secrets
 # =============================================================================
-section "Step 4/7 — Local secrets (auto-generated)"
+section "Step 4/8 — Local secrets (auto-generated)"
 
 # 4.1 SECRET_KEY
 current="$(get_env SECRET_KEY)"
@@ -316,7 +346,7 @@ fi
 # =============================================================================
 # STEP 5 — Wizard: optional API keys
 # =============================================================================
-section "Step 5/7 — Optional API keys (free + paid)"
+section "Step 5/8 — Optional API keys (free + paid)"
 
 log "Each one is skippable. Press Enter on any prompt to skip."
 log "Full guide: docs/EXTERNAL_SERVICES.md"
@@ -407,7 +437,7 @@ fi
 # =============================================================================
 # STEP 6 — External binaries check
 # =============================================================================
-section "Step 6/7 — External binaries (informational)"
+section "Step 6/8 — External binaries (informational)"
 
 log "Required (used by dns_enum, mostly built-in on macOS):"
 for bin in dig host; do
@@ -440,7 +470,7 @@ fi
 # =============================================================================
 # STEP 7 — Build + start + self-tests
 # =============================================================================
-section "Step 7/7 — Build, start, self-test"
+section "Step 7/8 — Build, start, self-test"
 
 # 7.1 Build
 log "Building Docker images (first run takes 5-10 min)..."

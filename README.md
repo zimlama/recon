@@ -47,10 +47,11 @@ Open http://localhost:8080 in your browser.
 
 ### Prerequisites
 
-- macOS (Intel or Apple Silicon) or Linux (x86_64 / aarch64)
-- Docker Engine 24+ with Compose v2
+- macOS (Intel or Apple Silicon) or Linux (x86_64 / aarch64) — that's it.
 - Internet connection (for tool installation + AI validation)
 - MiniMax API key (M Plan Subscription Key from [platform.minimax.io](https://platform.minimax.io/) — pay-as-you-go API Key also works, with `MINIMAX_MODEL=MiniMax-M3`)
+
+> The installer auto-installs missing system prerequisites: `git`, `python3`, the `cryptography` Python module, and Docker (via apt/dnf/pacman on Linux, or `brew install --cask docker-desktop` on macOS). It runs idempotently — re-running is a no-op if everything is already present. Use `--skip-prereqs` to bypass.
 
 ### Install
 
@@ -62,12 +63,13 @@ chmod +x install.sh
 ```
 
 The installer will:
-1. Detect your OS (mac / linux / wsl)
-2. Verify Docker + Compose v2
-3. Create `.env` from `.env.example`
-4. Ask for your `MINIMAX_API_KEY` (input is masked)
-5. Build + start the containers
-6. Open the UI at http://localhost:5173
+1. **Step 0 — Auto-install system prerequisites** (git, python3, cryptography, Docker) if any are missing
+2. **Step 1 — Pre-flight checks** (Docker daemon running, Compose v2 installed)
+3. **Step 2 — Create `.env`** from `.env.example` with `chmod 600`
+4. **Step 3 — Ask for your `MINIMAX_API_KEY`** (input is masked)
+5. **Steps 4-6 — Auto-generate local secrets, optional API keys, external binaries**
+6. **Step 7 — Build + start the containers**
+7. Open the UI at http://localhost:5173
 
 ### First recon
 
