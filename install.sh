@@ -153,10 +153,16 @@ ask_optional() {
   else
     prompt="${prompt} ${CYAN}[Enter to skip]${NC}"
   fi
-  printf "%s\n  %s\n" "$prompt" "  ${help}"
+  # Print prompt to stderr (>/dev/tty if available) and read input separately.
+  # See ask_secret() for why split print + read matters under PTY.
+  if [ -w /dev/tty ]; then
+    printf "%s\n  %s\n  > " "$prompt" "$help" >/dev/tty
+  else
+    printf "%s\n  %s\n  > " "$prompt" "$help" >&2
+  fi
 
   local value
-  read -r -p "  > " value
+  IFS= read -r value </dev/tty 2>/dev/null || IFS= read -r value
   if [ -z "$value" ]; then
     printf "%s" "$current"
   else
@@ -183,14 +189,24 @@ ask_secret() {
   else
     prompt="${prompt} ${CYAN}[required, no default]${NC}"
   fi
-  printf "%s\n  %s\n" "$prompt" "  ${help}"
+  # Print prompt to stderr (>/dev/tty if available) and read input separately.
+  # Using `read -p` echoes the prompt string back through the PTY in some
+  # terminal configurations (tmux, screen, `script`, certain SSH clients),
+  # causing read to capture the prompt text as the value. Splitting print and
+  # read, with the print on stderr, avoids that round-trip.
+  if [ -w /dev/tty ]; then
+    printf "%s\n  %s\n  > " "$prompt" "$help" >/dev/tty
+  else
+    printf "%s\n  %s\n  > " "$prompt" "$help" >&2
+  fi
 
   local value
   while true; do
-    read -r -s -p "  > " value
-    echo
+    IFS= read -r -s value </dev/tty 2>/dev/null || IFS= read -r -s value
+    echo >/dev/tty 2>/dev/null || echo >&2
     if [ -z "$value" ] && [ "$required" = "true" ] && [ -z "$current" ]; then
       warn "  ${var_name} is required. Get one at the link above."
+      if [ -w /dev/tty ]; then printf "  > " >/dev/tty; else printf "  > " >&2; fi
       continue
     fi
     break
