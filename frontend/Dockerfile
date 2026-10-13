@@ -7,7 +7,12 @@ RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 FROM base AS deps
 WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile
+# Use plain `pnpm install` (no --frozen-lockfile) so the build works even
+# when pnpm-lock.yaml is absent from the repo. The first build generates
+# the lockfile inside the container; subsequent builds reuse it via
+# Docker's layer cache. Once pnpm-lock.yaml is committed to the repo,
+# switch back to `--frozen-lockfile` for reproducible builds.
+RUN pnpm install
 
 # ---- Builder ----
 FROM base AS builder
