@@ -23,18 +23,24 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ---- LLM provider (MiniMax M3, OpenAI-compatible) ----
+    # ---- LLM provider (MiniMax M3.1-Flash-Preview, Anthropic Messages API) ----
+    # The client speaks the Anthropic Messages API against MiniMax's
+    # Anthropic-compatible endpoint. The same code also works against
+    # the Anthropic API directly or a local gateway by overriding
+    # MINIMAX_BASE_URL and MINIMAX_API_KEY.
+    # Default model is M3.1-Flash-Preview (1M context, M Plan). For
+    # pay-as-you-go accounts, set MINIMAX_MODEL=MiniMax-M3 instead.
     MINIMAX_API_KEY: str = Field(
         default="sk-minimax-not-configured",
-        description="MiniMax M3 API key. Required for AI validation.",
+        description="MiniMax API key (M Plan Subscription Key or pay-as-you-go API Key).",
     )
     MINIMAX_BASE_URL: str = Field(
-        default="https://api.minimaxi.com/v1",
-        description="MiniMax M3 API base URL.",
+        default="https://api.minimax.io/anthropic/v1",
+        description="Anthropic-compatible base URL. Default points to MiniMax; override for Anthropic direct or a local gateway.",
     )
     MINIMAX_MODEL: str = Field(
-        default="MiniMax-M3",
-        description="MiniMax M3 model identifier.",
+        default="MiniMax-M3.1-Flash-Preview",
+        description="Model identifier. Defaults to M3.1-Flash-Preview (M Plan). Use MiniMax-M3 for pay-as-you-go.",
     )
     MINIMAX_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=300)
     MINIMAX_MAX_RETRIES: int = Field(default=3, ge=0, le=10)

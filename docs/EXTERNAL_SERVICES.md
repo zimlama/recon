@@ -21,7 +21,7 @@ SPDX-License-Identifier: Apache-2.0
 
 | Service          | Type             | Required?                   | Cost                | Where to get it                                                  | Env var(s)                                          |
 | ---------------- | ---------------- | --------------------------- | ------------------- | ---------------------------------------------------------------- | --------------------------------------------------- |
-| MiniMax M3 (LLM) | Cloud API        | **Yes** (for AI validation) | Pay-per-token       | [api.minimaxi.com](https://api.minimaxi.com/)                    | `MINIMAX_API_KEY`                                   |
+| MiniMax M3.1-Flash-Preview (LLM) | Cloud API        | **Yes** (for AI validation) | M Plan / pay-per-token | [platform.minimax.io](https://platform.minimax.io/)                    | `MINIMAX_API_KEY`                                   |
 | Censys Search    | Cloud API        | Optional                    | Free 250 queries/mo | [search.censys.io/register](https://search.censys.io/register)   | `CENSYS_API_ID`, `CENSYS_API_SECRET`                |
 | GitHub           | Cloud API        | Optional (recommended)      | Free with account   | [github.com/settings/tokens](https://github.com/settings/tokens) | `GITHUB_TOKEN`                                      |
 | SerpAPI          | Cloud API        | Optional                    | Free 100 queries/mo | [serpapi.com](https://serpapi.com/)                              | `SERP_API_KEY`                                      |
@@ -243,48 +243,53 @@ Should return a list of hash suffixes (40-char hex strings). If you get 401, the
 
 ---
 
-## MiniMax M3 (mandatory for AI validation)
+## MiniMax M3.1-Flash-Preview (mandatory for AI validation)
+
+The LLM client speaks the **Anthropic Messages API** against MiniMax's Anthropic-compatible endpoint at `https://api.minimax.io/anthropic/v1/messages`. Auth uses the `x-api-key` header (not `Authorization: Bearer`).
 
 Without `MINIMAX_API_KEY` set, the project **runs** in **stub mode**: jobs execute, findings are produced, but the AI validator returns empty verdicts with `recommended_action=CONTINUE`. Reports still render but lack the "AI validation badges".
 
-To get real AI validation, you need a MiniMax M3 API key.
+**Two ways to get a key** — pick the one that matches your billing:
 
-**Cost**: pay-per-token. New accounts typically get free credits to start. See [api.minimaxi.com](https://api.minimaxi.com/) for current pricing.
+| Plan | Key type | URL | Available models |
+|------|----------|-----|------------------|
+| **M Plan** (recommended) | Subscription Key | [platform.minimax.io/user-center/payment/token-plan](https://platform.minimax.io/user-center/payment/token-plan) | `MiniMax-M3.1-Flash-Preview`, `MiniMax-M3`, `MiniMax-M2.7`... |
+| **Pay-as-you-go** | API Key | [platform.minimax.io/user-center/basic-information/interface-key](https://platform.minimax.io/user-center/basic-information/interface-key) | `MiniMax-M3`, `MiniMax-M2.7`... (no M3.1-Flash-Preview) |
 
 **How to get it** (3 min):
 
-1. Go to [api.minimaxi.com](https://api.minimaxi.com/)
-2. Sign up with email
-3. Verify email
-4. Go to your dashboard / API keys section
-5. Create a new API key
-6. Copy the key (it starts with `eyJ...` or `sk-...` depending on the current format)
+1. Go to [platform.minimax.io](https://platform.minimax.io/) and sign up
+2. Verify email
+3. Subscribe to M Plan OR activate pay-as-you-go billing
+4. Open the relevant URL above and copy your key (starts with `sk-`)
 
 **Configure**:
 
 ```bash
 # In backend/.env
 MINIMAX_API_KEY=your-key-here
-# Optional: override the endpoint if you proxy it
-# MINIMAX_BASE_URL=https://api.minimaxi.com/v1
-# Optional: override the model
+# Default URL targets MiniMax's Anthropic-compatible endpoint:
+MINIMAX_BASE_URL=https://api.minimax.io/anthropic/v1
+# Default model is M3.1-Flash-Preview (M Plan). For pay-as-you-go:
 # MINIMAX_MODEL=MiniMax-M3
 ```
 
-**Verify**:
+**Verify** (Anthropic Messages format):
 
 ```bash
-curl -X POST "$MINIMAX_BASE_URL/chat/completions" \
-  -H "Authorization: Bearer $MINIMAX_API_KEY" \
+curl -X POST "${MINIMAX_BASE_URL:-https://api.minimax.io/anthropic/v1}/messages" \
+  -H "x-api-key: $MINIMAX_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "'"${MINIMAX_MODEL:-MiniMax-M3}"'",
-    "messages": [{"role": "user", "content": "Reply with the word OK"}],
-    "max_tokens": 10
-  }' | jq '.choices[0].message.content'
+    "model": "'"${MINIMAX_MODEL:-MiniMax-M3.1-Flash-Preview}"'",
+    "max_tokens": 10,
+    "system": "Reply with just the word OK.",
+    "messages": [{"role": "user", "content": "OK"}]
+  }' | jq '.content[0].text'
 ```
 
-Should return `"OK"`. If you get 401, the key is wrong. If 402, out of credits.
+Should return `"OK"`. If you get 401, the key is wrong or you're sending `Authorization: Bearer` (use `x-api-key` instead). If 402, out of credits. If 404, the URL is wrong. If 400 with "thinking cannot be disabled", you're sending the `thinking` param against M3.1-Flash-Preview (it always thinks — don't send the param).
 
 ---
 

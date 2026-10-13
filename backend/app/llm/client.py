@@ -1,12 +1,27 @@
-"""MiniMax M3 (OpenAI-compatible) client.
+"""MiniMax M3.1-Flash-Preview (Anthropic Messages API) client.
 
-Async httpx client. Supports JSON mode for structured output, retries with
-exponential backoff, and graceful degradation when the API is unavailable.
+Async httpx client targeting MiniMax's Anthropic-compatible endpoint at
+https://api.minimax.io/anthropic/v1/messages.
+
+Notes on the protocol:
+- Auth uses ``x-api-key`` header (NOT ``Authorization: Bearer``). MiniMax
+  server-side explicitly checks for the ``X-Api-Key`` field per its error
+  message: "Please carry the API secret key in the 'X-Api-Key' field of
+  the request header".
+- The Anthropic Messages API has no native JSON mode flag. JSON mode is
+  enforced via the system prompt, which is sent as a separate top-level
+  ``system`` field (NOT as ``messages[0].role="system"``).
+- The M3.1-Flash-Preview model always emits a ``thinking`` content block
+  before the ``text`` block. We ignore ``thinking`` blocks in our
+  single-shot AI validation path (no multi-turn state to preserve).
+- Supports retries with exponential backoff + jitter on 429/5xx. Auth
+  errors (401/403) raise immediately.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -19,8 +34,17 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+# MiniMax Anthropic-compatible API version (per Anthropic SDK convention)
+ANTHROPIC_API_VERSION = "2023-06-01"
+
+
 class LLMClient:
-    """Async client for MiniMax M3 via OpenAI-compatible API."""
+    """Async client for MiniMax M3.1-Flash-Preview via the Anthropic Messages API.
+
+    The same client also works against any Anthropic-compatible endpoint
+    (the Anthropic API directly, or a local gateway) by overriding
+    ``MINIMAX_BASE_URL`` and ``MINIMAX_API_KEY``.
+    """
 
     def __init__(
         self,
@@ -39,12 +63,13 @@ class LLMClient:
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """Lazy-init the httpx client."""
+        """Lazy-init the httpx client with Anthropic-compatible headers."""
         if self._client is None:
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",
+                    "x-api-key": self.api_key,
+                    "anthropic-version": ANTHROPIC_API_VERSION,
                     "Content-Type": "application/json",
                 },
                 timeout=httpx.Timeout(self.timeout),
@@ -60,36 +85,60 @@ class LLMClient:
     async def chat_completion(
         self,
         messages: list[dict[str, str]],
-        response_format: dict[str, str] | None = None,
+        response_format: dict[str, str] | None = None,  # accepted for back-compat; ignored
         temperature: float = 0.1,
         max_tokens: int = 4096,
     ) -> dict[str, Any]:
-        """Send a chat completion request.
+        """Send a messages request to the Anthropic-compatible endpoint.
 
         Args:
-            messages: List of {role, content} messages
-            response_format: e.g., {"type": "json_object"} for JSON mode
-            temperature: 0.0-1.0, lower = more deterministic
-            max_tokens: Max tokens in response
+            messages: List of ``{role, content}`` messages. The Anthropic
+                Messages API expects alternating ``user`` / ``assistant``
+                roles. Any system message is extracted and sent via the
+                top-level ``system`` field instead of in ``messages``.
+            response_format: Accepted for back-compat with the previous
+                OpenAI-based client. **Ignored** — the Anthropic Messages
+                API has no native JSON mode. JSON enforcement comes from
+                the system prompt (see ``backend/app/llm/prompts.py``).
+            temperature: 0.0-1.0 for M3.x (Anthropic range is 0-2). Lower
+                = more deterministic.
+            max_tokens: Max tokens to generate. Note: for
+                M3.1-Flash-Preview, *thinking* tokens count toward this
+                limit, so a too-low value yields ``stop_reason:
+                max_tokens`` with no text output.
 
         Returns:
-            Parsed response dict (the message content as dict, or raw if not JSON)
+            Parsed response dict (the message content as dict, or raw if
+            not JSON). When the LLM returns 200 OK with JSON but the
+            shape doesn't match ``LDMValidationResult``, surfaces a
+            ``_malformed`` marker so the caller (AIValidator) can decide.
 
         Raises:
-            LLMError on failure after all retries exhausted
+            LLMError on failure after all retries exhausted.
         """
         if not self.api_key or self.api_key.startswith("sk-minimax-replace"):
             logger.warning("MINIMAX_API_KEY not configured — AI validation will be skipped")
             return self._stub_response(messages)
 
+        system, user_messages = self._split_system(messages)
+
+        # Per MiniMax docs: the API accepts both dict and string content
+        # for the user role. We pass strings as-is (the standard form).
+        anthropic_messages: list[dict[str, Any]] = []
+        for m in user_messages:
+            anthropic_messages.append({
+                "role": m["role"],
+                "content": m["content"],
+            })
+
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
             "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": anthropic_messages,
         }
-        if response_format:
-            payload["response_format"] = response_format
+        if system:
+            payload["system"] = system
 
         client = await self._get_client()
 
@@ -97,7 +146,7 @@ class LLMClient:
         for attempt in range(self.max_retries + 1):
             try:
                 response = await client.post(
-                    "/chat/completions",
+                    "/messages",
                     json=payload,
                 )
                 response.raise_for_status()
@@ -159,20 +208,53 @@ class LLMClient:
 
         raise LLMError(f"LLM failed after {self.max_retries} retries: {last_error}")
 
+    @staticmethod
+    def _split_system(
+        messages: list[dict[str, str]],
+    ) -> tuple[str, list[dict[str, str]]]:
+        """Separate a leading ``system`` message from user/assistant turns.
+
+        The Anthropic Messages API wants the system prompt in a top-level
+        ``system`` field, NOT in ``messages[0]``. If a caller passes a
+        list starting with ``role="system"`` (the OpenAI convention), we
+        extract it and pass the rest as the messages list.
+        """
+        if not messages:
+            return "", []
+        if messages[0].get("role") == "system":
+            return messages[0].get("content", ""), messages[1:]
+        return "", list(messages)
+
     def _extract_content(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Extract the message content from the response and parse as JSON if possible."""
+        """Extract the text content from an Anthropic Messages response.
+
+        Skips ``thinking`` blocks (M3.1-Flash-Preview always emits them).
+        If multiple ``text`` blocks are present, they are concatenated.
+        """
         try:
-            content = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError) as e:
+            content_blocks = data["content"]
+        except (KeyError, TypeError) as e:
             raise LLMError(f"Unexpected LLM response shape: {data}") from e
 
+        text_parts: list[str] = []
+        for block in content_blocks:
+            # Only read text blocks. thinking/tool_use blocks are ignored
+            # for our single-shot validation; in a multi-turn conversation
+            # they would need to be preserved in the message history.
+            if isinstance(block, dict) and block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+
+        text = "".join(text_parts)
+        if not text:
+            # Model returned only thinking blocks, or empty content.
+            return {"_raw": text}
+
         # Try to parse as JSON
-        import json
         try:
-            return json.loads(content)
+            return json.loads(text)
         except (json.JSONDecodeError, TypeError):
             # Return as raw text wrapped in dict
-            return {"_raw": content}
+            return {"_raw": text}
 
     def _stub_response(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         """Return a stub response when API key is not configured.

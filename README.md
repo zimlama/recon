@@ -17,7 +17,7 @@
 ## Features
 
 - **15 recon modules** across 3 tiers (6 passive + 4 semi-passive + 5 white-hat gated) — includes the `person_dossier` cross-module aggregator (v0.2.0)
-- **AI-validated findings** via MiniMax-M3 (or any OpenAI-compatible provider)
+- **AI-validated findings** via MiniMax M3.1-Flash-Preview (Anthropic Messages API)
 - **Modular architecture** — every module is a standalone Pydantic class, repairable in isolation
 - **Self-hosted** — single `install.sh` command, no SaaS dependency, no telemetry
 - **Handoff contract** — public JSON schema (v1.0.0, additive through v0.2.0) for future Phase 2 (scanning) consumers
@@ -50,7 +50,7 @@ Open http://localhost:8080 in your browser.
 - macOS (Intel or Apple Silicon) or Linux (x86_64 / aarch64)
 - Docker Engine 24+ with Compose v2
 - Internet connection (for tool installation + AI validation)
-- MiniMax M3 API key (get one at [api.minimaxi.com](https://api.minimaxi.com/))
+- MiniMax API key (M Plan Subscription Key from [platform.minimax.io](https://platform.minimax.io/) — pay-as-you-go API Key also works, with `MINIMAX_MODEL=MiniMax-M3`)
 
 ### Install
 
@@ -151,7 +151,7 @@ See [docs/HANDOFF.md](docs/HANDOFF.md) for the schema and [docs/MULTI_REPO.md](d
 
 ## AI Validation
 
-Every module's findings are validated by **MiniMax M3** (or any OpenAI-compatible LLM). The validator:
+Every module's findings are validated by **MiniMax M3.1-Flash-Preview** via the Anthropic Messages API. The validator:
 - Filters false positives (typosquats, parked domains, sinkholes)
 - Enriches findings with context (tech hints, priority for next phase)
 - Suggests what to do next (which modules to run, what to investigate)
@@ -159,8 +159,8 @@ Every module's findings are validated by **MiniMax M3** (or any OpenAI-compatibl
 
 Configure via `.env`:
 - `MINIMAX_API_KEY` (required)
-- `MINIMAX_BASE_URL` (default: `https://api.minimaxi.com/v1`)
-- `MINIMAX_MODEL` (default: `MiniMax-M3`)
+- `MINIMAX_BASE_URL` (default: `https://api.minimax.io/anthropic/v1`)
+- `MINIMAX_MODEL` (default: `MiniMax-M3.1-Flash-Preview`, M Plan — use `MiniMax-M3` for pay-as-you-go)
 
 See [docs/AI_VALIDATION.md](docs/AI_VALIDATION.md) for the per-module prompts and validation schema.
 

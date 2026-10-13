@@ -1,8 +1,8 @@
 # AI Validation
 
 > **Layer**: Backend (FastAPI + Pydantic v2 + httpx async)
-> **Provider**: MiniMax M3 (OpenAI-compatible). Any OpenAI-compat endpoint works by setting `MINIMAX_BASE_URL`.
-> **Status**: Released in v0.1.0, hardened in v0.2.0.
+> **Provider**: MiniMax M3.1-Flash-Preview (Anthropic Messages API). Any Anthropic-compatible endpoint works by setting `MINIMAX_BASE_URL`.
+> **Status**: Released in v0.1.0, hardened in v0.2.0, MiniMax Anthropic protocol adopted in v0.2.1.
 
 This document explains how `zimlama/recon` uses an external LLM to filter, enrich, and prioritize the raw output of every recon module. It complements [ARCHITECTURE.md](ARCHITECTURE.md) (where the validator sits in the request flow) and [MODULE_GUIDE.md](MODULE_GUIDE.md) (what each module actually does before AI sees it).
 
@@ -30,7 +30,7 @@ The LLM is optional — `zimlama/recon` runs without a key in dev/test, never bu
 | Mode | Trigger | Behavior |
 |------|---------|----------|
 | **Stub** | `MINIMAX_API_KEY` unset or matches the placeholder `sk-minimax-replace-with-real-key` | Every `chat_completion` returns a stub `LDMValidationResult` with empty verdicts, summary `"AI validation skipped — MINIMAX_API_KEY not configured."`, and `recommended_action=CONTINUE`. The job completes normally; the report renders a "skipped" notice. |
-| **Real** | A real key is set | `httpx.AsyncClient` is built lazily, JSON-mode requests are sent to `MINIMAX_BASE_URL/v1/chat/completions`, retries with exponential backoff + jitter on 429/5xx, auth errors (401/403) raise immediately. |
+| **Real** | A real key is set | `httpx.AsyncClient` is built lazily with `x-api-key` and `anthropic-version: 2023-06-01` headers. Requests are sent to `POST {MINIMAX_BASE_URL}/messages` with the Anthropic Messages body shape. JSON enforcement is via the system prompt (no native JSON mode flag in the Anthropic API). Retries with exponential backoff + jitter on 429/5xx, auth errors (401/403) raise immediately. |
 | **Error** | Provider returns a schema-mismatching body, or is unreachable | `LLMClient` returns `{"_malformed": true, "_raw": ..., "_error": ...}` for shape problems, raises `LLMError` for transport problems. `AIValidator` catches both and emits an `LDMValidationResult` with `recommended_action=REQUEST_USER_DECISION` so the operator sees a "review required" badge instead of the job crashing. |
 
 The split between **LLM-down vs LLM-wrong** matters: the first is an infrastructure incident (retry harder, alert ops); the second is a model regression (re-prompt, re-fine-tune). They are logged as `ai_api_failure` and `ai_schema_mismatch` respectively.
@@ -83,17 +83,29 @@ Two classes, both in `backend/app/`.
 
 ### `LLMClient` ([`backend/app/llm/client.py`](../backend/app/llm/client.py))
 
-Async httpx wrapper around the OpenAI-compatible `/chat/completions` endpoint.
+Async httpx wrapper around the Anthropic Messages API (`POST /messages`). Targets MiniMax's Anthropic-compatible endpoint by default; works against any Anthropic-compatible URL by overriding `MINIMAX_BASE_URL`.
 
 ```python
 async def chat_completion(
     self,
     messages: list[dict[str, str]],
-    response_format: dict[str, str] | None = None,  # {"type": "json_object"}
+    response_format: dict[str, str] | None = None,  # accepted for back-compat; ignored
     temperature: float = 0.1,                       # low = deterministic
     max_tokens: int = 4096,
 ) -> dict[str, Any]: ...
 ```
+
+**Protocol details** (Anthropic Messages API):
+
+| Aspect | Value |
+|--------|-------|
+| Endpoint | `POST {MINIMAX_BASE_URL}/messages` |
+| Auth header | `x-api-key: <key>` (NOT `Authorization: Bearer`) |
+| Version header | `anthropic-version: 2023-06-01` |
+| System prompt | Top-level `system` field (extracted from leading `messages[0].role="system"`) |
+| JSON mode | Via system prompt (no native flag) |
+| Response shape | `{"content": [{"type": "thinking", ...}, {"type": "text", "text": "<JSON>"}], "stop_reason": "end_turn", "usage": {...}}` |
+| Thinking blocks | Ignored in single-shot mode (read only `type == "text"`) |
 
 **Retry behavior**:
 
@@ -260,9 +272,9 @@ All knobs are in [`backend/app/config.py`](../backend/app/config.py) (Pydantic `
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `MINIMAX_API_KEY` | `sk-minimax-not-configured` | Triggers **stub mode** if unset/placeholder |
-| `MINIMAX_BASE_URL` | `https://api.minimaxi.com/v1` | Override to point at OpenAI, Anthropic via gateway, local Ollama, etc. |
-| `MINIMAX_MODEL` | `MiniMax-M3` | Model name in the chat-completions payload |
+| `MINIMAX_API_KEY` | `sk-minimax-not-configured` | Triggers **stub mode** if unset/placeholder. M Plan Subscription Key or pay-as-you-go API Key from MiniMax. |
+| `MINIMAX_BASE_URL` | `https://api.minimax.io/anthropic/v1` | Anthropic-compatible base URL. Override to point at the Anthropic API directly, a local gateway, or a self-hosted model. |
+| `MINIMAX_MODEL` | `MiniMax-M3.1-Flash-Preview` | Model name in the request payload. M3.1-Flash-Preview is M Plan only; for pay-as-you-go use `MiniMax-M3`. |
 | `MINIMAX_TIMEOUT_SECONDS` | `60` | Total request timeout (httpx) |
 | `MINIMAX_MAX_RETRIES` | `3` | Retries on 429/5xx after the first attempt |
 | `AI_VALIDATION_ENABLED` | `True` | Master toggle — disable for fully offline runs |
@@ -273,6 +285,8 @@ All knobs are in [`backend/app/config.py`](../backend/app/config.py) (Pydantic `
 cp .env.example .env
 # Edit .env and set:
 MINIMAX_API_KEY=sk-minimax-XXXXXXXXXXXXXXXXXXXXXX
+# Defaults below are correct for M Plan. For pay-as-you-go, change the model:
+# MINIMAX_MODEL=MiniMax-M3
 ```
 
 The installer (`./install.sh`) prompts for the key and writes it with `chmod 600`.
@@ -283,11 +297,15 @@ The installer (`./install.sh`) prompts for the key and writes it with `chmod 600
 
 The validator and LLM client are independently covered:
 
-- [`backend/tests/test_llm_client.py`](../backend/tests/test_llm_client.py) — 7+ tests covering:
+- [`backend/tests/test_llm_client.py`](../backend/tests/test_llm_client.py) — 9 tests covering:
   - `test_stub_response_when_no_api_key` — placeholder key returns stub
-  - `test_chat_completion_success` — round-trip with mocked httpx
+  - `test_chat_completion_success` — round-trip with mocked httpx (Anthropic-format response)
+  - `test_chat_completion_sends_x_api_key_header` — verifies `x-api-key` + `anthropic-version` headers
+  - `test_chat_completion_ignores_thinking_blocks` — M3.1-Flash-Preview thinking blocks are skipped
+  - `test_chat_completion_extracts_system_prompt` — system message goes to top-level `system` field
   - `test_chat_completion_malformed_response_surfaces_marker` — `_malformed` contract
-  - `test_chat_completion_auth_error_no_retry` — 401/403 raise immediately
+  - `test_chat_completion_auth_error_no_retry` — 401/403 raise immediately, no retry
+  - `test_chat_completion_429_retries_with_backoff` — 429 honors Retry-After + retries
   - `test_ldm_validation_result_helpers` — counter properties
 - [`backend/tests/test_integration_day6.py`](../backend/tests/test_integration_day6.py) — full orchestrator + modules + handoff end-to-end with mock LLM (asserts all 14 modules run, validations persist, handoff generates).
 
@@ -308,7 +326,9 @@ Coverage on `app/llm/` and `app/orchestrator/ai_validator.py` is > 90% (the proj
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | Every report says "AI validation skipped" | `MINIMAX_API_KEY` placeholder | Set a real key in `.env` |
-| `LLMError: Authentication failed: 401` | Bad or revoked key | Regenerate at `api.minimaxi.com`, update `.env` |
+| `LLMError: Authentication failed: 401` | Bad or revoked key, or wrong header scheme | MiniMax expects `x-api-key` header (not `Authorization: Bearer`). Regenerate at [platform.minimax.io](https://platform.minimax.io/), update `.env` |
+| `404 Not Found` from `/messages` | Wrong `MINIMAX_BASE_URL` or wrong path | Default is `https://api.minimax.io/anthropic/v1` — confirm the path is `/messages`, not `/chat/completions` |
+| `LLMError: 400 - thinking cannot be disabled` | Tried to send `thinking: {"type": "disabled"}` against M3.1-Flash-Preview | M3.1-Flash-Preview always thinks — the client does not send the `thinking` param. Switch to `MiniMax-M3` if you need thinking off |
 | `ai_api_failure` warnings with backoff | LLM provider is down | Wait or switch `MINIMAX_BASE_URL` to a backup provider |
 | `ai_schema_mismatch` warnings | Model regression / prompt drift | Re-run validation; check `prompts.py` matches expected JSON schema |
 | Job hangs in `VALIDATING` for > 30 min | Module crashed mid-validation | Restart — `JobRunner.sweep_stuck_jobs()` (added v0.2.0) marks them FAILED |

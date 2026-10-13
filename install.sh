@@ -267,7 +267,7 @@ log "  (findings are produced but not AI-classified). Get a key at the link belo
 log ""
 
 current="$(get_env MINIMAX_API_KEY)"
-new_value="$(ask_secret 'MINIMAX_API_KEY' 'Get one at: https://api.minimaxi.com/' "$current" true)"
+new_value="$(ask_secret 'MINIMAX_API_KEY' 'M Plan Subscription Key: https://platform.minimax.io/user-center/payment/token-plan  |  Pay-as-you-go: https://platform.minimax.io/user-center/basic-information/interface-key' "$current" true)"
 if [ -n "$new_value" ] && [ "$new_value" != "$current" ]; then
   set_env MINIMAX_API_KEY "$new_value"
   ok "MINIMAX_API_KEY set"
@@ -546,10 +546,12 @@ self_test "Module registry returns modules" \
 minimax="$(get_env MINIMAX_API_KEY)"
 if [ -n "$minimax" ] && [ "$minimax" != "sk-minimax-replace-with-real-key" ]; then
   base_url="$(get_env MINIMAX_BASE_URL)"
-  base_url="${base_url:-https://api.minimaxi.com/v1}"
-  self_test "MiniMax API authentication" \
-    "curl -fsS -X POST '${base_url}/chat/completions' -H 'Authorization: Bearer ${minimax}' -H 'Content-Type: application/json' -d '{\"model\":\"MiniMax-M3\",\"messages\":[{\"role\":\"user\",\"content\":\"OK\"}],\"max_tokens\":5}'" \
-    "Wrong key or out of credits. Regenerate at: https://api.minimaxi.com/"
+  base_url="${base_url:-https://api.minimax.io/anthropic/v1}"
+  model="$(get_env MINIMAX_MODEL)"
+  model="${model:-MiniMax-M3.1-Flash-Preview}"
+  self_test "MiniMax API authentication (Anthropic Messages)" \
+    "curl -fsS -X POST '${base_url}/messages' -H 'x-api-key: ${minimax}' -H 'anthropic-version: 2023-06-01' -H 'Content-Type: application/json' -d '{\"model\":\"${model}\",\"max_tokens\":10,\"system\":\"Reply with just the word OK.\",\"messages\":[{\"role\":\"user\",\"content\":\"OK\"}]}'" \
+    "Wrong key, out of credits, or wrong model. M Plan: https://platform.minimax.io/user-center/payment/token-plan  |  Pay-as-you-go: https://platform.minimax.io/user-center/basic-information/interface-key"
 else
   printf "  %-50s ${YELLOW}SKIP${NC} (key not set — running in stub mode)\n" "MiniMax API authentication"
 fi
