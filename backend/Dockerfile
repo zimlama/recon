@@ -63,6 +63,15 @@ ENV PATH="/usr/local/go/bin:/home/recon/go/bin:${PATH}" \
     GOPATH=/home/recon/go \
     GOBIN=/home/recon/go/bin
 
+# Go module proxy. The default `proxy.golang.org` is fine in most networks
+# but gets blocked by some corporate firewalls, Pi-hole setups, and local
+# DNS filters (symptom: "dial tcp: lookup proxy.golang.org: no such host").
+# Override at build time with:
+#   docker compose build --build-arg GOPROXY=https://goproxy.cn,direct
+# Common mirrors: goproxy.io, goproxy.cn, goproxy.io/goproxy, mirrors.aliyun.com/goproxy/
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
+
 # Create non-root user
 RUN groupadd -r recon && useradd -r -g recon -m -d /home/recon recon
 

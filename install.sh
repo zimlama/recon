@@ -512,6 +512,25 @@ fi
 # =============================================================================
 section "Step 7/8 — Build, start, self-test"
 
+# 7.0 Reachability pre-check for Go module proxy.
+# Some networks (corporate firewalls, Pi-hole, MikroTik DNS filters) block
+# proxy.golang.org, which makes `go install` fail mid-build with
+# "lookup proxy.golang.org: no such host". Detect that here and suggest a
+# mirror via the GOPROXY env var so the user fixes it before the build dies.
+GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
+GOPROXY_HOST="$(printf '%s' "$GOPROXY" | sed -E 's|^https?://||; s|/.*$||; s|,direct$||')"
+if ! getent hosts "$GOPROXY_HOST" >/dev/null 2>&1; then
+  warn "Go module proxy ${GOPROXY_HOST} does not resolve from this host."
+  warn "  Likely blocked by local DNS / firewall / Pi-hole."
+  warn "  Re-run with a mirror:"
+  warn "    GOPROXY=https://goproxy.io,direct  ./install.sh"
+  warn "    GOPROXY=https://goproxy.cn,direct   ./install.sh"
+  warn "    GOPROXY=https://mirrors.aliyun.com/goproxy/,direct  ./install.sh"
+  warn "  Continuing anyway — the build may still succeed if your DNS"
+  warn "  resolves inside the Docker build context but not from the host."
+fi
+export GOPROXY
+
 # 7.1 Build
 log "Building Docker images (first run takes 5-10 min)..."
 if ! docker compose build 2>&1 | tee /tmp/recon-install-build.log; then
@@ -520,6 +539,8 @@ if ! docker compose build 2>&1 | tee /tmp/recon-install-build.log; then
     • Port already in use:    docker compose ps ; lsof -i :8000 ; lsof -i :8080
     • Out of disk space:      docker system df
     • Network/proxy issues:   check .env for HTTPS_PROXY / NO_PROXY
+    • Go module proxy blocked:
+        re-run with:  GOPROXY=https://goproxy.io,direct ./install.sh
     Full log: /tmp/recon-install-build.log"
 fi
 ok "Images built"

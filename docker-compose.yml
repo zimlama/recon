@@ -13,6 +13,13 @@ x-backend-common: &backend-common
   build:
     context: ./backend
     dockerfile: Dockerfile
+    args:
+      # Go module proxy. Default = official (works in 95% of networks).
+      # If proxy.golang.org is blocked by your DNS/firewall/Pi-hole,
+      # override at install time:
+      #   GOPROXY=https://goproxy.io,direct ./install.sh
+      # See backend/Dockerfile for the full list of mirrors.
+      GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
   env_file: .env
   environment:
     - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/recon.db}
