@@ -43,8 +43,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Go + recon tools (subfinder, httpx, waybackurls, katana, gau)
+# Architecture-aware: maps `uname -m` → Go tarball suffix so the same
+# Dockerfile builds on x86_64 and aarch64 (Graviton, Raspberry Pi, M-series
+# Macs running arm64 Linux). Without this, arm64 hosts get
+# 'go: Exec format error' (exit 126) when invoking the downloaded binary.
 ENV GO_VERSION=1.22.1
-RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o go.tar.gz \
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    case "$arch" in \
+        x86_64)  go_arch=amd64 ;; \
+        aarch64) go_arch=arm64 ;; \
+        armv7l|armv6l) go_arch=armv6l ;; \
+        *) echo "Unsupported architecture: $arch"; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" -o go.tar.gz \
     && tar -C /usr/local -xzf go.tar.gz \
     && rm go.tar.gz
 ENV PATH="/usr/local/go/bin:/home/recon/go/bin:${PATH}" \
