@@ -29,7 +29,10 @@ WORKDIR /app
 # Copy Next.js standalone build
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
+# /app/public is intentionally NOT copied: the directory is empty and the
+# app code references no public assets. If you later add static files
+# (favicon, robots.txt, OG image), reintroduce this COPY line:
+#   COPY --from=builder /app/public ./public
 
 # Copy nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
