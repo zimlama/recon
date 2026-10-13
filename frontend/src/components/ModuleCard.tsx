@@ -1,13 +1,13 @@
 'use client';
 
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeVariant } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AIValidationBadge } from './AIValidationBadge';
 import { formatDuration } from '@/lib/utils';
 import type { ModuleRun, AIValidation } from '@/lib/api-client';
 
-const statusVariants: Record<string, 'default' | 'success' | 'warning' | 'danger' | 'info'> = {
+const statusVariants: Record<string, BadgeVariant> = {
   pending: 'neutral',
   running: 'info',
   completed: 'success',

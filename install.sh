@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# zimlama/recon — Installer v0.2.4
+# zimlama/recon — Installer v0.2.5
 # Auto-installs system prerequisites (git, python3, Docker), then runs an
 # interactive wizard for every API key, auto-generates local secrets
 # (Fernet + SECRET), reports which external binaries are missing, builds
@@ -70,7 +70,7 @@ banner() {
     ███████╗██║██║ ╚═╝ ██║███████╗██║  ██║██║ ╚═╝ ██║██║  ██║
     ╚══════╝╚═╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝
 
-    Recon Phase 1 — Installer v0.2.2
+    Recon Phase 1 — Installer v0.2.5
     Self-testing wizard. Idempotent. Re-run any time.
 
 EOF

@@ -160,8 +160,104 @@ export async function getFindings(
   return data;
 }
 
-export async function getHandoff(jobId: string): Promise<Record<string, unknown>> {
-  const { data } = await api.get(`/api/v1/jobs/${jobId}/handoff`);
+// ---- Handoff packet (mirrors backend/app/handoff/schema.py) ----
+// Vendor-neutral public contract for Phase 2 consumers. Schema is
+// semver'd via `schema_version`; consumers MUST validate it before
+// consuming. See docs/HANDOFF.md.
+
+export interface HandoffSource {
+  repo: 'zimlama/recon';
+  version: string;
+  job_id: string;
+  phase: '01-recon-osint';
+  completed_at: string;
+}
+
+export interface HandoffTarget {
+  primary_domain: string;
+  authorization_scope: string;
+  active_scan_authorized: boolean;
+}
+
+export interface HandoffShodanExposure {
+  open_ports: number[];
+  products: string[];
+  cves_observed: string[];
+}
+
+export interface HandoffConfirmedTarget {
+  subdomain: string;
+  ips: string[];
+  asn: string | null;
+  country: string | null;
+  tech_stack_hint: Record<string, string>;
+  shodan_exposure: HandoffShodanExposure | null;
+  priority_for_next_phase: 'HIGH' | 'MEDIUM' | 'LOW';
+  ai_reasoning: string;
+  ai_verdict: 'CONFIRMED' | 'LIKELY' | 'SUSPECTED';
+  ai_confidence: number;
+}
+
+export interface HandoffTechStack {
+  web_servers: Record<string, string[]>;
+  frameworks: Record<string, string[]>;
+  databases: Record<string, string[]>;
+  cloud_providers: Record<string, string[]>;
+}
+
+export interface HandoffCredentialsExposure {
+  emails_found: number;
+  breach_count: number;
+}
+
+export interface HandoffRecommendedModule {
+  module: string;
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  rationale: string;
+}
+
+export interface HandoffCertificate {
+  cn: string;
+  issuer: string;
+  valid_from: string;
+  valid_to: string;
+  san: string[];
+}
+
+export interface HandoffConsentFlags {
+  tier_3_modules_run: string[];
+  white_hat_only: boolean;
+}
+
+export interface HandoffPersonDossierSummary {
+  persona_id: string;
+  email_hash: string;
+  source_modules: string[];
+  role_relevance: 'HIGH' | 'MEDIUM' | 'LOW';
+  priority_for_targeting: 'HIGH' | 'MEDIUM' | 'LOW';
+  confidence: number;
+  coherence: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE' | null;
+  breach_exposure_count: number;
+  profile_count: number;
+}
+
+export interface HandoffPacket {
+  schema_version: string;
+  schema_url: string;
+  source: HandoffSource;
+  target: HandoffTarget;
+  confirmed_targets: HandoffConfirmedTarget[];
+  tech_stack_summary: HandoffTechStack;
+  credentials_exposure_summary: HandoffCredentialsExposure;
+  certificates: HandoffCertificate[];
+  recommended_modules: HandoffRecommendedModule[];
+  person_dossiers: HandoffPersonDossierSummary[];
+  do_not_scan: string[];
+  consent_flags: HandoffConsentFlags;
+}
+
+export async function getHandoff(jobId: string): Promise<HandoffPacket> {
+  const { data } = await api.get<HandoffPacket>(`/api/v1/jobs/${jobId}/handoff`);
   return data;
 }
 

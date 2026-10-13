@@ -3,13 +3,13 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeVariant } from '@/components/ui/badge';
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { listJobs, type Job } from '@/lib/api-client';
 import { formatDate, formatDuration } from '@/lib/utils';
 
-const statusVariants: Record<string, 'default' | 'success' | 'warning' | 'danger' | 'info'> = {
+const statusVariants: Record<string, BadgeVariant> = {
   pending: 'neutral',
   running: 'info',
   validating: 'info',
