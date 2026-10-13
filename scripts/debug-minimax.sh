@@ -54,10 +54,11 @@ def is_sensitive(name: str) -> bool:
     return bool(re.search(r'(KEY|TOKEN|SECRET|PASSWORD|ENCRYPTION)', name, re.IGNORECASE))
 
 def mask_value(name: str, value: str) -> str:
+    """Returns a fully-redacted marker. NEVER shows any chars of sensitive values."""
     if not value:
         return '(empty)'
     if is_sensitive(name):
-        return f'{value[:6]}***REDACTED***'
+        return f'(set, length {len(value)})'
     return value
 
 def scrub(text: str) -> str:
@@ -85,13 +86,12 @@ if not LINE_ISSUES:
     print('  ok: all lines parse cleanly')
 else:
     for lineno, line, reason in LINE_ISSUES:
-        # Mask the value before printing
+        # Print only line number + key name (NEVER any part of the value).
         if isinstance(line, str) and '=' in line:
-            k, v = line.split('=', 1)
-            masked = f'{k}={mask_value(k.strip(), v.strip())}'
+            k = line.split('=', 1)[0].strip()
         else:
-            masked = repr(line)[:80]
-        print(f'  FAIL: line {lineno} ({reason}): {masked}')
+            k = '(no key)'
+        print(f'  FAIL: line {lineno} ({reason}): key={k!r}')
     print('  FIX: edit .env manually, then re-run this script')
     sys.exit(1)
 print()
