@@ -8,10 +8,12 @@ MITRE ATT&CK: T1590.002, T1596.001
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 import dns.exception
 import dns.rdatatype
@@ -28,7 +30,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # Public DNS resolvers (fallback chain)
@@ -88,7 +90,11 @@ class DNSEnumModule(BaseReconModule):
         # Query each record type
         for label, rdatatype, finding_type in RECORD_TYPES:
             try:
-                records = await self._query_records(resolver, target, rdatatype)
+                records = await self._query_records(
+                    resolver,
+                    target,
+                    cast(dns.rdatatype.RdataType | str, rdatatype),
+                )
                 for value, metadata in records:
                     findings.append(
                         Finding(
@@ -164,7 +170,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         self,
         resolver: dns.resolver.Resolver,
         domain: str,
-        rdatatype: int,
+        rdatatype: dns.rdatatype.RdataType | str,
     ) -> list[tuple[str, dict[str, Any]]]:
         """Query one record type. Returns list of (value, metadata) tuples.
 
@@ -201,23 +207,27 @@ Respond with structured JSON matching the LDMValidationResult schema."""
     def _format_rdata(  # noqa: C901 - complexity 14, refactor tracked in issue #43
         self,
         rdata: dns.rdata.Rdata,
-        rdatatype: int,
+        rdatatype: dns.rdatatype.RdataType | str,
         metadata: dict[str, Any],
     ) -> str | None:
         """Format an rdata object as a string + extract metadata."""
+        # dnspython's Rdata subclasses have type-specific attributes
+        # (address, target, preference, etc.) that aren't on the base class.
+        # Cast to Any so we can access them without per-branch type ignores.
+        rdata_any: Any = rdata
         try:
             if rdatatype == dns.rdatatype.A:
-                return str(rdata.address)
+                return str(rdata_any.address)
             if rdatatype == dns.rdatatype.AAAA:
-                return str(rdata.address)
+                return str(rdata_any.address)
             if rdatatype == dns.rdatatype.NS:
-                return str(rdata.target).rstrip(".")
+                return str(rdata_any.target).rstrip(".")
             if rdatatype == dns.rdatatype.MX:
-                metadata["preference"] = rdata.preference
-                return f"{rdata.preference} {rdata.exchange}".strip()
+                metadata["preference"] = rdata_any.preference
+                return f"{rdata_any.preference} {rdata_any.exchange}".strip()
             if rdatatype == dns.rdatatype.TXT:
                 # Concatenate TXT strings (DKIM, SPF, DMARC, verification tokens)
-                txt = b"".join(rdata.strings).decode("utf-8", errors="replace")
+                txt = b"".join(rdata_any.strings).decode("utf-8", errors="replace")
                 # Capture well-known TXT record types for metadata
                 txt_lower = txt.lower()
                 if txt_lower.startswith("v=spf1"):
@@ -230,23 +240,23 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                     metadata["type"] = "verification"
                 return txt
             if rdatatype == dns.rdatatype.CNAME:
-                return str(rdata.target).rstrip(".")
+                return str(rdata_any.target).rstrip(".")
             if rdatatype == dns.rdatatype.SOA:
-                metadata["mname"] = str(rdata.mname).rstrip(".")
-                metadata["rname"] = str(rdata.rname).rstrip(".")
-                metadata["serial"] = rdata.serial
-                metadata["refresh"] = rdata.refresh
-                metadata["retry"] = rdata.retry
-                metadata["expire"] = rdata.expire
-                metadata["minimum"] = rdata.minimum
-                return str(rdata.mname).rstrip(".")
+                metadata["mname"] = str(rdata_any.mname).rstrip(".")
+                metadata["rname"] = str(rdata_any.rname).rstrip(".")
+                metadata["serial"] = rdata_any.serial
+                metadata["refresh"] = rdata_any.refresh
+                metadata["retry"] = rdata_any.retry
+                metadata["expire"] = rdata_any.expire
+                metadata["minimum"] = rdata_any.minimum
+                return str(rdata_any.mname).rstrip(".")
             if rdatatype == dns.rdatatype.SRV:
-                metadata["port"] = rdata.port
-                metadata["priority"] = rdata.priority
-                metadata["weight"] = rdata.weight
-                return f"{rdata.target}".rstrip(".")
+                metadata["port"] = rdata_any.port
+                metadata["priority"] = rdata_any.priority
+                metadata["weight"] = rdata_any.weight
+                return f"{rdata_any.target}".rstrip(".")
             # Fallback
-            return rdata.to_text()
+            return cast(str | None, rdata_any.to_text())
         except Exception as e:
             logger.debug("rdata_format_error", error=str(e), rdatatype=rdatatype)
             return None

@@ -14,6 +14,8 @@ MITRE ATT&CK: T1593.003, T1552.001
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import logging
 import re
 import shutil
@@ -32,7 +34,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 GITHUB_API_URL = "https://api.github.com"
 GITHUB_TIMEOUT = 20
@@ -159,7 +161,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         API: GET /search/code?q={domain}
         """
         url = f"{GITHUB_API_URL}/search/code"
-        params = {
+        params: dict[str, str | int] = {
             "q": f'"{domain}" in:file',
             "per_page": 30,  # limit per page
         }
@@ -251,7 +253,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         API: GET /search/commits?q={domain}
         """
         url = f"{GITHUB_API_URL}/search/commits"
-        params = {"q": domain, "per_page": 20}
+        params: dict[str, str | int] = {"q": domain, "per_page": 20}
         try:
             async with httpx.AsyncClient(timeout=GITHUB_TIMEOUT) as client:
                 response = await client.get(url, params=params, headers=self._get_headers())

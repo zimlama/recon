@@ -13,6 +13,8 @@ MITRE ATT&CK: T1589.002
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import logging
 import os
@@ -34,7 +36,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # PGP key server endpoints (free, no auth)
 PGP_KEYSERVERS = [

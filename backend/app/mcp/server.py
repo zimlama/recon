@@ -8,10 +8,13 @@ Run with: `recon mcp` or `python -m app.mcp.server`
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import json
 import logging
 import sys
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.database import SessionLocal
@@ -19,7 +22,7 @@ from app.handoff.exporter import export_handoff
 from app.models import Handoff, Job, JobStatus, ModuleRun
 from app.modules import MODULE_REGISTRY
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ReconMCPServer:
@@ -35,7 +38,7 @@ class ReconMCPServer:
     """
 
     def __init__(self) -> None:
-        self.tools = {
+        self.tools: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
             "start_recon_job": self.start_recon_job,
             "get_job_status": self.get_job_status,
             "get_findings": self.get_findings,
@@ -47,7 +50,7 @@ class ReconMCPServer:
         # this, asyncio.create_task() is fire-and-forget and the task is
         # GC'd if the MCP server process shuts down (e.g. on stdin EOF or
         # SIGTERM), leaving the job stuck in RUNNING.
-        self._running_tasks: dict[str, asyncio.Task] = {}
+        self._running_tasks: dict[str, asyncio.Task[Any]] = {}
         self._shutdown_event = asyncio.Event()
 
     async def run(self) -> None:

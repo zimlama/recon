@@ -268,4 +268,4 @@ def get_settings() -> Settings:
     Cached because pydantic-settings does a one-time read from env + .env.
     Use this function in FastAPI dependencies: `Depends(get_settings)`.
     """
-    return Settings()  # type: ignore[call-arg]
+    return Settings()
