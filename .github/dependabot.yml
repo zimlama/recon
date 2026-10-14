@@ -1,15 +1,21 @@
 # Dependabot configuration for zimlama/recon
-# Auto-merge patch updates; review minor + major updates manually.
+# Strategy: SILENCE PRs, KEEP security alerts.
+# - open-pull-requests-limit: 0 stops Dependabot from opening PRs automatically
+# - Security alerts remain enabled at the repo level (Settings → Code security)
+# - When you want to update deps, raise the limit or trigger manually:
+#   `gh api -X POST repos/zimlama/recon/dependabot/repository_updates` or
+#   bump the limit temporarily in this file.
 
 version: 2
 
 updates:
-  # GitHub Actions — keep on patch, review minor/major
+  # GitHub Actions — keep on patch, review minor + major
   - package-ecosystem: "github-actions"
     directory: "/.github/workflows"
     schedule:
       interval: "weekly"
       day: "monday"
+    open-pull-requests-limit: 0
     groups:
       patch:
         patterns:
@@ -28,6 +34,7 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    open-pull-requests-limit: 0
     groups:
       patch:
         patterns:
@@ -41,6 +48,7 @@ updates:
     schedule:
       interval: "weekly"
       day: "tuesday"
+    open-pull-requests-limit: 0
     groups:
       patch:
         patterns:
@@ -53,3 +61,4 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 0
