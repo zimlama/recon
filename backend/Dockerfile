@@ -61,7 +61,14 @@ RUN set -eux; \
     && rm go.tar.gz
 ENV PATH="/usr/local/go/bin:/home/recon/go/bin:${PATH}" \
     GOPATH=/home/recon/go \
-    GOBIN=/home/recon/go/bin
+    GOBIN=/home/recon/go/bin \
+    # Move Go build cache and temp dirs OUT of /tmp (tmpfs, ~RAM/2, ~2.7 GB
+    # on 5 GB hosts — too small for subfinder+katana+httpx+waybackurls combined,
+    # which can exceed 3 GB of build artifacts and fail with "no space left on
+    # device" mid-compile). Use real disk in /home/recon.
+    GOCACHE=/home/recon/.cache/go-build \
+    GOMODCACHE=/home/recon/go/pkg/mod \
+    TMPDIR=/home/recon/tmp
 
 # Go module proxy. The default `proxy.golang.org` is fine in most networks
 # but gets blocked by some corporate firewalls, Pi-hole setups, and local
@@ -73,7 +80,9 @@ ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
 
 # Create non-root user
-RUN groupadd -r recon && useradd -r -g recon -m -d /home/recon recon
+RUN groupadd -r recon && useradd -r -g recon -m -d /home/recon recon \
+    && mkdir -p /home/recon/.cache/go-build /home/recon/go/pkg/mod /home/recon/tmp \
+    && chown -R recon:recon /home/recon
 
 WORKDIR /app
 
