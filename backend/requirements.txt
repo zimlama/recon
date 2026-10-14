@@ -5,31 +5,36 @@
 # =============================================================================
 
 # --- Web framework ---
-fastapi==0.110.0
-uvicorn[standard]==0.27.0
-# CVE-2026-53540 (HIGH, code exec via crafted multipart): bump from 0.0.9
-# Fixed in 0.0.20. Last 0.0.x with security backports.
-python-multipart==0.0.20
+# fastapi 0.135.0 drops the starlette<1.0.0 cap, letting pip pull
+# starlette 1.8.0 (the latest), which fixes 6 CVEs in 0.x. Earlier
+# fastapi versions (e.g., 0.130) cap starlette at 0.x.
+# Requires pydantic>=2.7.0 (we bump from 2.6.1).
+fastapi==0.135.0
+uvicorn[standard]==0.32.1
+# CVE-2026-53540 + 6 more (PYSEC-2026-1852/3036-40): bump 0.0.9 -> 0.0.32
+# 0.0.20 was still vulnerable; 0.0.32 (latest 0.0.x) clears all CVEs.
+python-multipart==0.0.32
 
 # --- Validation + settings ---
-pydantic==2.6.1
-pydantic-settings==2.2.1
+# pydantic 2.7.0 is the minimum required by fastapi 0.135.0. 2.6.1 was
+# pinned for fastapi 0.110.0; bump is required for the fastapi upgrade.
+pydantic==2.7.0
+pydantic-settings==2.3.0
 
 # --- Database ---
 # NOTE: SQLAlchemy >= 2.0.30 required for Python 3.13 compatibility
 sqlalchemy==2.0.30
 alembic==1.13.1
-# CVE-2026-28684 (MEDIUM, .env parsing): bump from 1.0.1
-# 1.0.1 had parsing issues with quoted values. 1.1.1 is current stable.
-python-dotenv==1.1.1
+# CVE-2026-28684 + PYSEC-2026-2270: bump 1.0.1 -> 1.2.4 (latest)
+# 1.1.1 still had 1 CVE; 1.2.4 is clean.
+python-dotenv==1.2.4
 
 # --- HTTP clients ---
 # httpx 0.28 has a different transport interface; respx >= 0.22 needed for mocking
 httpx==0.28.1
-# CVE-2026-54280 + multiple HIGH CVEs (request smuggling, SSRF in resolver)
-# 3.9.3 → 3.13.x has dozens of fixes. Last stable in 3.x series.
-# Test: any ClientSession/ClientResponse API changes? Most code is internal.
-aiohttp==3.13.1
+# aiohttp 3.14.5 is the latest 3.14.x. 3.14.1 had 3 residual CVEs
+# (PYSEC-2026-3545/3546/3547) fixed in 3.14.2+. Total: 23 CVEs -> 0.
+aiohttp==3.14.5
 
 # --- Logging ---
 structlog==24.1.0
