@@ -44,7 +44,7 @@ if [ -t 1 ]; then
   BOLD='\033[1m'
   NC='\033[0m'
 else
-  RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD=''
+  RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
 fi
 
 log()    { printf "${BLUE}>>>${NC} %s\n" "$*"; }
