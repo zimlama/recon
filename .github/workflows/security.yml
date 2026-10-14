@@ -165,40 +165,8 @@ jobs:
           sarif_file: reports/trivy-fs.sarif
           category: trivy-fs
 
-      - name: Run trivy rootfs scan on backend Dockerfile
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: "image"
-          image-ref: "backend/Dockerfile"
-          format: "sarif"
-          output: "reports/trivy-backend.sarif"
-          severity: "HIGH,CRITICAL"
-          ignore-unfixed: true
-          exit-code: "1"
-          hide-progress: true
-
-      - name: Upload SARIF backend image
-        if: always()
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: reports/trivy-backend.sarif
-          category: trivy-backend-image
-
-      - name: Run trivy rootfs scan on frontend Dockerfile
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: "image"
-          image-ref: "frontend/Dockerfile"
-          format: "sarif"
-          output: "reports/trivy-frontend.sarif"
-          severity: "HIGH,CRITICAL"
-          ignore-unfixed: true
-          exit-code: "1"
-          hide-progress: true
-
-      - name: Upload SARIF frontend image
-        if: always()
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: reports/trivy-frontend.sarif
-          category: trivy-frontend-image
+      # NOTE: image scans (backend/Dockerfile, frontend/Dockerfile) deferred to
+      # Phase 1.5. They need a working Docker build context inside the runner
+      # which requires docker/setup-buildx-action + a more complex workflow.
+      # The filesystem scan above already catches Dockerfile misconfigs and
+      # lockfile-based dep CVEs (the highest-leverage surfaces).
