@@ -422,7 +422,47 @@ docker compose --profile prod up -d
 
 ---
 
-## 8. Where to get more help
+## 8. CI failures (maintainer / contributor)
+
+### "Invalid workflow file: `.github/workflows/release.yml#L15` — workflow is not reusable as it is missing a `on.workflow_call` trigger"
+
+The `release.yml` workflow calls `uses: ./.github/workflows/ci.yml` to re-run regression tests before publishing Docker images, but `ci.yml` was missing the required `on: workflow_call` trigger. Without it, every release run fails at parse time, contaminating the CI status UI on `main` and silently breaking the automated release pipeline (Docker image publish + GitHub Release notes for future tags).
+
+**Fix** (one line in `.github/workflows/ci.yml`):
+
+```yaml
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:       # required for `uses: ./.github/workflows/ci.yml` from release.yml
+```
+
+Other triggers are unaffected; only enables `release.yml` to call `ci.yml` as a reusable workflow. See commit `0bc82bc` (PR #18).
+
+**Verify after merge**:
+
+```bash
+gh run list --workflow release.yml --limit 5    # should show green runs after next tag push
+gh pr view 18 --json statusCheckRollup          # on PR; CI jobs should pass
+```
+
+### "Failed to restore: Cache service responded with 400" / `pip install` exit code 1 in backend CI
+
+GitHub Actions Cache Service intermittently returns HTTP 400 when restoring `pip` or `pnpm` cache. Backend pytest, ruff, and mypy all die in setup because `pip install -e ".[dev]"` can't run while the cache restore is failing. Backend tests fail in 7–9 seconds (before any actual test runs).
+
+**Workaround A** — clear caches from the GitHub UI: `Actions → Caches → Delete all`, then re-trigger the workflow.
+
+**Workaround B** — re-open the PR: `gh pr close <num> && gh pr reopen` resets the run state.
+
+**Workaround C** (last resort) — make the cache optional by removing `cache: 'pip'` and `cache-dependency-path` from `actions/setup-python`. CI will run ~30 s slower per job but won't depend on the cache service.
+
+This is a GitHub Actions infrastructure issue, not a code issue. v0.2.1 was shipped with manual image publish + manual release notes because of this combined with the missing `workflow_call` trigger above.
+
+---
+
+## 9. Where to get more help
 
 For the **v0.2.1 install-failure series in detail** (timeline + commit messages + verbatim shell transcripts), see [postmortems/v0.2.1-release.md](postmortems/v0.2.1-release.md).
 
