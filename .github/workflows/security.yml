@@ -169,8 +169,72 @@ jobs:
           sarif_file: reports/trivy-fs.sarif
           category: trivy-fs
 
-      # NOTE: image scans (backend/Dockerfile, frontend/Dockerfile) deferred to
-      # Phase 1.5. They need a working Docker build context inside the runner
-      # which requires docker/setup-buildx-action + a more complex workflow.
-      # The filesystem scan above already catches Dockerfile misconfigs and
-      # lockfile-based dep CVEs (the highest-leverage surfaces).
+      # ---------- 5b. Container image scans (Phase 1.5 (3/3)) ----------
+      # Build the Docker images with buildx, then scan with trivy.
+      # Surfaces OS-level CVEs (glibc, openssl, base image packages)
+      # that filesystem scan cannot detect.
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          tags: recon-backend:scan
+          push: false
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan backend image with trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: "image"
+          image-ref: "recon-backend:scan"
+          format: "sarif"
+          output: "reports/trivy-backend-image.sarif"
+          severity: "HIGH,CRITICAL"
+          ignore-unfixed: true
+          exit-code: "0"
+          hide-progress: true
+        # exit-code: "0" = advisory. Will be tightened once we triage
+        # the OS-level CVEs that surface in the base images (likely python:3.11-slim).
+
+      - name: Upload SARIF backend image
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/trivy-backend-image.sarif
+          category: trivy-backend-image
+
+      - name: Build frontend image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          tags: recon-frontend:scan
+          push: false
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan frontend image with trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: "image"
+          image-ref: "recon-frontend:scan"
+          format: "sarif"
+          output: "reports/trivy-frontend-image.sarif"
+          severity: "HIGH,CRITICAL"
+          ignore-unfixed: true
+          exit-code: "0"
+          hide-progress: true
+
+      - name: Upload SARIF frontend image
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/trivy-frontend-image.sarif
+          category: trivy-frontend-image
