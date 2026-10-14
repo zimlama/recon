@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import shlex
 import shutil
 import time
 from typing import Any
@@ -310,11 +309,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         """Dedupe by URL value, preserving the highest-confidence entry per URL."""
         by_url: dict[str, Finding] = {}
         for f in findings:
-            if f.value not in by_url:
-                by_url[f.value] = f
-            elif f.confidence > by_url[f.value].confidence:
-                by_url[f.value] = f
-            elif (
+            if f.value not in by_url or f.confidence > by_url[f.value].confidence or (
                 f.finding_metadata.get("timestamp")
                 and not by_url[f.value].finding_metadata.get("timestamp")
             ):

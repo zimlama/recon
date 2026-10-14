@@ -19,8 +19,8 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.main import app
 from app.database import Base, engine
+from app.main import app
 
 
 @pytest.fixture
@@ -38,11 +38,10 @@ async def client():
     async def _lifespan_runner():
         # Run the FastAPI lifespan context manager — it handles
         # startup (init_db + LLMClient) and teardown (close LLMClient).
-        async with app.router.lifespan_context(app):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as ac:
-                yield ac
+        async with app.router.lifespan_context(app), AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
+            yield ac
 
     async with _lifespan_runner() as ac:
         yield ac

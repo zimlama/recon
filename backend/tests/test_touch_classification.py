@@ -344,7 +344,7 @@ def test_get_module_unknown_name_raises_keyerror() -> None:
     msg = str(exc_info.value)
     assert "does_not_exist_anywhere" in msg
     # At least one known module name appears in the error context
-    assert any(name in msg for name in MODULE_REGISTRY.keys())
+    assert any(name in msg for name in MODULE_REGISTRY)
 
 
 def test_get_module_picks_correct_instance_per_name() -> None:

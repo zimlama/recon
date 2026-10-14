@@ -168,7 +168,7 @@ class ReconMCPServer:
                     "id": request_id,
                     "result": {"content": [{"type": "text", "text": json.dumps(result, default=str)}]},
                 }
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # Never leak the raw exception text to MCP clients: it can
                 # carry SQL fragments, file paths, secrets, stack frames,
                 # and other internal details. Log the full traceback
@@ -198,7 +198,6 @@ class ReconMCPServer:
         modules: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a new job and trigger background execution."""
-        from datetime import datetime
         from app.models import _now
 
         if modules is None:
@@ -286,7 +285,7 @@ class ReconMCPServer:
                             "Job cancelled (server shutdown or client disconnect)"
                         )
                         db.commit()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception("job_cancellation_cleanup_failed job_id=%s", job_id)
             raise
 
@@ -340,7 +339,7 @@ class ReconMCPServer:
         verdict: str | None = None,
     ) -> dict[str, Any]:
         """Get findings for a job."""
-        from app.models import AIValidation, Finding
+        from app.models import AIValidation
 
         with SessionLocal() as db:
             job = db.get(Job, job_id)

@@ -10,7 +10,6 @@ MITRE ATT&CK: T1596.002 (WHOIS), T1590.001 (IP WHOIS)
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import time
@@ -83,7 +82,7 @@ class WhoisRDAPModule(BaseReconModule):
         rdap_data: dict[str, Any] | None = None
         try:
             rdap_data = await self._query_rdap(target)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"RDAP query failed: {e!s}")
 
         # 2. WHOIS fallback (if RDAP failed or returned empty)
@@ -91,7 +90,7 @@ class WhoisRDAPModule(BaseReconModule):
         if not rdap_data:
             try:
                 whois_text = await self._query_whois(target)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"WHOIS query failed: {e!s}")
 
         # 3. Build findings
@@ -126,7 +125,7 @@ Prioritize findings by:
 
 Watch for: very recent creation (potential phishing setup), privacy redaction, nameservers in unexpected jurisdictions.
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 

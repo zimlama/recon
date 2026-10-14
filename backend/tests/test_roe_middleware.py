@@ -9,6 +9,7 @@ existence of an active RoE for the target declared in the request body.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import timedelta
 from typing import Any
@@ -75,10 +76,8 @@ def session_factory(tmp_path):  # type: ignore[no-untyped-def]
         SignOff.__table__.drop(bind=eng, checkfirst=True)
         RoE.__table__.drop(bind=eng, checkfirst=True)
         eng.dispose()
-        try:
+        with contextlib.suppress(FileNotFoundError):
             db_path.unlink()
-        except FileNotFoundError:
-            pass
 
 def _make_test_app(session_factory):  # type: ignore[no-untyped-def]
     """A tiny FastAPI app with the RoE middleware mounted.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -10,7 +9,7 @@ import pytest
 import respx
 
 from app.modules.base import ModuleInput
-from app.modules.google_dorking import DORK_TEMPLATES, GoogleDorkingModule, SERPAPI_URL
+from app.modules.google_dorking import DORK_TEMPLATES, GoogleDorkingModule
 
 
 @pytest.fixture

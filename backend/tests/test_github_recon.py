@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -158,7 +157,6 @@ async def test_commit_search_success(
 
 def test_aws_access_key_pattern_detected(module: GitHubReconModule) -> None:
     """AWS access key ID (AKIA...) is detected."""
-    from app.modules.base import Finding
     from app.models import FindingType
 
     # Simulate search result with a file name that contains an AWS key
@@ -189,8 +187,8 @@ def test_aws_access_key_pattern_detected(module: GitHubReconModule) -> None:
 
 
 def test_dedupe_dedupes_by_value_and_source(module: GitHubReconModule) -> None:
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     f1 = Finding(type=FindingType.OTHER, value="x", source="y", confidence=0.9)
     f2 = Finding(type=FindingType.OTHER, value="x", source="y", confidence=0.9)

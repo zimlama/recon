@@ -18,8 +18,6 @@ import dns.rdatatype
 import dns.resolver
 import dns.zone
 
-import httpx
-
 from app.models import ModuleTier
 from app.modules.base import (
     BaseReconModule,
@@ -111,14 +109,14 @@ class DNSEnumModule(BaseReconModule):
                 # to avoid piling up work in the executor queue.
                 errors.append(f"DNS query failed at {label}: {e!s}")
                 break
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"{label} query failed: {e!s}")
 
         # Attempt AXFR (zone transfer)
         try:
             axfr_findings = await self._attempt_axfr(resolver, target)
             findings.extend(axfr_findings)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"AXFR attempt failed: {e!s}")
 
         return ModuleOutput(
@@ -251,7 +249,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                 return f"{rdata.target}".rstrip(".")
             # Fallback
             return rdata.to_text()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.debug("rdata_format_error", error=str(e), rdatatype=rdatatype)
             return None
 

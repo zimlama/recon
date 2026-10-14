@@ -14,19 +14,17 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
-from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.handoff.exporter import export_handoff
-from app.llm.schemas import Priority, RecommendedAction, VerdictType
-from app.modules import MODULE_REGISTRY
+from app.llm.schemas import RecommendedAction, VerdictType
 from app.models import FindingType
+from app.modules import MODULE_REGISTRY
 from app.modules.base import Finding, ModuleInput, ModuleOutput
 
 
@@ -328,7 +326,7 @@ async def test_all_14_modules_can_run_in_parallel_with_mocks() -> None:
 
         # Verify all results are ModuleOutput (no exceptions escaped)
         assert len(results) == len(MODULE_REGISTRY) == 15
-        for name, result in zip(MODULE_REGISTRY.keys(), results):
+        for name, result in zip(MODULE_REGISTRY.keys(), results, strict=False):
             assert not isinstance(result, Exception), f"{name} raised: {result}"
             assert isinstance(result, ModuleOutput), f"{name} did not return ModuleOutput"
     finally:
@@ -355,7 +353,7 @@ async def test_all_14_modules_can_run_serially_with_mocks() -> None:
 
 def test_module_consistency() -> None:
     """Every module's name matches its class attribute."""
-    for name, module in MODULE_REGISTRY.items():
+    for _name, module in MODULE_REGISTRY.items():
         instance = module
         assert isinstance(instance.name, str)
         assert len(instance.name) > 0

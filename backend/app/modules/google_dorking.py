@@ -100,7 +100,7 @@ class GoogleDorkingModule(BaseReconModule):
             try:
                 serp_findings = await self._search_serpapi(target, settings.SERP_API_KEY)
                 findings.extend(serp_findings)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"SerpAPI search failed: {e!s}")
         else:
             logger.debug("serpapi_key_not_set", module=self.name)
@@ -231,7 +231,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                             },
                         )
                     )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue  # continue with next dork
         return findings
 

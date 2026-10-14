@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shutil
@@ -59,8 +60,8 @@ class PDFGenerator:
                 start_new_session=True,  # child gets its own process group
             )
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
-            except asyncio.TimeoutError:
+                _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
+            except TimeoutError:
                 # Kill the entire process group (npx spawns child processes),
                 # not just the parent — prevents leaked Chromium/node workers.
                 try:
@@ -69,11 +70,9 @@ class PDFGenerator:
                     proc.kill()
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=5)
-                except asyncio.TimeoutError:
-                    try:
+                except TimeoutError:
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
                         os.killpg(proc.pid, signal.SIGKILL)
-                    except (ProcessLookupError, PermissionError):
-                        pass
                 logger.error("pdf_conversion_timeout", md=str(md_path))
                 return None
 
@@ -91,15 +90,13 @@ class PDFGenerator:
 
             logger.error("pdf_not_created_after_success", path=str(pdf_path))
             return None
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.exception("pdf_conversion_error", error=str(e))
             return None
         finally:
             if css_path and css_path.exists():
-                try:
+                with contextlib.suppress(OSError):
                     css_path.unlink()
-                except OSError:
-                    pass
 
 
 __all__ = ["PDFGenerator"]

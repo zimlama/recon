@@ -91,12 +91,12 @@ def test_create_app_accepts_explicit_cors_origin_list(monkeypatch: pytest.Monkey
     assert app is not None
 
 
-def test_resolve_under_reports_rejects_traversal(tmp_path: "Path") -> None:
+def test_resolve_under_reports_rejects_traversal(tmp_path: Path) -> None:
     """Path traversal escapes from REPORTS_DIR return 403."""
     from fastapi import HTTPException
 
-    from app.routes.reports import _resolve_under_reports
     from app.config import Settings
+    from app.routes.reports import _resolve_under_reports
 
     cfg = Settings(REPORTS_DIR=str(tmp_path / "reports"))
     (tmp_path / "reports").mkdir()
@@ -112,12 +112,12 @@ def test_resolve_under_reports_rejects_traversal(tmp_path: "Path") -> None:
     assert exc.value.status_code == 403
 
 
-def test_resolve_under_reports_rejects_absolute_escape(tmp_path: "Path") -> None:
+def test_resolve_under_reports_rejects_absolute_escape(tmp_path: Path) -> None:
     """Absolute paths outside REPORTS_DIR return 403."""
     from fastapi import HTTPException
 
-    from app.routes.reports import _resolve_under_reports
     from app.config import Settings
+    from app.routes.reports import _resolve_under_reports
 
     cfg = Settings(REPORTS_DIR=str(tmp_path / "reports"))
     (tmp_path / "reports").mkdir()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -84,6 +83,7 @@ async def test_pgp_query_with_actual_response(
     """End-to-end: sample PGP response is parsed correctly."""
     # Test the _query_single_pgp_server method directly with httpx_mock
     import respx
+
     from app.modules.email_harvesting import EmailHarvestingModule as Mod
 
     m = Mod()
@@ -255,8 +255,8 @@ async def test_theharvester_not_installed(
 
 def test_dedupe_and_filter_removes_test_patterns(module: EmailHarvestingModule) -> None:
     """Test/placeholder patterns are filtered."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     findings = [
         Finding(type=FindingType.EMAIL, value="real@acmecorp.com", source="x", confidence=0.9),
@@ -274,8 +274,8 @@ def test_dedupe_and_filter_removes_test_patterns(module: EmailHarvestingModule) 
 
 def test_dedupe_and_filter_removes_privacy_protected(module: EmailHarvestingModule) -> None:
     """Privacy-protected example domains are filtered."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     findings = [
         Finding(type=FindingType.EMAIL, value="user@acmecorp.com", source="x"),
@@ -291,8 +291,8 @@ def test_dedupe_and_filter_removes_privacy_protected(module: EmailHarvestingModu
 
 def test_dedupe_and_filter_dedupes_by_value(module: EmailHarvestingModule) -> None:
     """Same email from multiple sources is deduped (highest confidence wins)."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     findings = [
         Finding(type=FindingType.EMAIL, value="admin@acmecorp.com", source="low", confidence=0.5),

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -279,7 +278,9 @@ def test_ai_prompt_is_substantive(module: WhoisRDAPModule) -> None:
     assert "WHOIS" in prompt or "RDAP" in prompt
     assert "CONFIRMED" in prompt
     assert "FALSE_POSITIVE" in prompt
-    assert "HIGH" in prompt and "MEDIUM" in prompt and "LOW" in prompt
+    assert "HIGH" in prompt
+    assert "MEDIUM" in prompt
+    assert "LOW" in prompt
     assert len(prompt) > 200
 
 

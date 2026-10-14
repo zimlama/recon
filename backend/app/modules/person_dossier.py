@@ -443,7 +443,7 @@ class PersonDossierModule(BaseReconModule):
     estimated_duration_seconds = 30  # bounded — pure DB + 1 LLM call per dossier
     enabled_by_default = False  # Tier 3 — opt-in
 
-    async def run(self, input: ModuleInput) -> ModuleOutput:  # noqa: C901 — orchestrator role
+    async def run(self, input: ModuleInput) -> ModuleOutput:
         """Build PersonDossier findings for the job.
 
         Pipeline (each step a helper):
@@ -511,7 +511,7 @@ class PersonDossierModule(BaseReconModule):
 
     def _load_sibling_state(
         self, db: Any, job_id: str
-    ) -> "ModuleOutput | _SkipSignal | None":  # noqa: F821 — forward
+    ) -> ModuleOutput | _SkipSignal | None:
         """Poll sibling ModuleRun rows.
 
         If any sibling is still RUNNING, signal a skip via the
@@ -567,7 +567,7 @@ class PersonDossierModule(BaseReconModule):
         self,
         bucket: dict[str, list[tuple[str, Finding]]],
         attached_breaches: list[tuple[str, Finding, str]],
-    ) -> tuple[list["PersonDossier"], dict[str, str | None]]:
+    ) -> tuple[list[PersonDossier], dict[str, str | None]]:
         """Build one PersonDossier per bucket + the plaintext-email map.
 
         Returns ``(dossiers, plaintext_by_hash)`` — ``plaintext_by_hash``
@@ -602,7 +602,7 @@ class PersonDossierModule(BaseReconModule):
         return dossiers, plaintext_by_hash
 
     async def _apply_coherence(
-        self, dossiers: list["PersonDossier"]
+        self, dossiers: list[PersonDossier]
     ) -> None:
         """Run LLM coherence on each dossier (best-effort).
 
@@ -636,7 +636,7 @@ class PersonDossierModule(BaseReconModule):
         self,
         db: Any,
         job_id: str,
-        dossiers: list["PersonDossier"],
+        dossiers: list[PersonDossier],
         plaintext_by_hash: dict[str, str | None],
         errors: list[str],
     ) -> list[Finding]:

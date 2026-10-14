@@ -50,7 +50,7 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                 db.commit()
             finally:
                 db.close()
-        except Exception:  # noqa: BLE001
+        except Exception:
             # Audit logging must never break the request
             pass
 

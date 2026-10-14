@@ -12,9 +12,10 @@ import os
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+
+from alembic import command
 
 # Skip the whole module if alembic is unavailable — keeps the rest of
 # the suite runnable in minimal environments.
@@ -148,14 +149,13 @@ def test_identity_map_unique_constraint_exists(tmp_path: Path) -> None:
     )
     from sqlalchemy.exc import IntegrityError
 
-    with eng.begin() as conn:
-        with pytest.raises(IntegrityError):
-            conn.execute(
-                sql,
-                {
-                    "id1": "row-1",
-                    "id2": "row-2",
-                    "job_id": "job-1",
-                    "email_hash": "a" * 64,
-                },
-            )
+    with eng.begin() as conn, pytest.raises(IntegrityError):
+        conn.execute(
+            sql,
+            {
+                "id1": "row-1",
+                "id2": "row-2",
+                "job_id": "job-1",
+                "email_hash": "a" * 64,
+            },
+        )

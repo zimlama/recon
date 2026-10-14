@@ -14,11 +14,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from typing import Any
 
 import httpx
 
-from app.config import get_settings
 from app.models import ModuleTier
 from app.modules.base import (
     BaseReconModule,
@@ -100,7 +98,7 @@ class BreachDataModule(BaseReconModule):
                             },
                         )
                     )
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"HIBP check failed: {e!s}")
 
         return ModuleOutput(
@@ -127,7 +125,7 @@ Enrich each with:
 
 PRIVACY: NEVER transmit, log, or share actual emails or credentials. Only count breach exposure.
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 

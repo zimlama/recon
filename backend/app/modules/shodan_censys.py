@@ -99,7 +99,7 @@ class ShodanCensysModule(BaseReconModule):
                 shodan_data = await self._query_shodan_internetdb(ip)
                 if shodan_data:
                     findings.extend(self._shodan_to_findings(ip, shodan_data))
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"Shodan InternetDB query for {ip} failed: {e!s}")
 
         # 4. Query Censys if keys are set (also only public IPs)
@@ -110,7 +110,7 @@ class ShodanCensysModule(BaseReconModule):
                     censys_data = await self._query_censys(ip, settings.CENSYS_API_ID, settings.CENSYS_API_SECRET)
                     if censys_data:
                         findings.extend(self._censys_to_findings(ip, censys_data))
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     errors.append(f"Censys query for {ip} failed: {e!s}")
         else:
             # Not an error — just inform
@@ -162,7 +162,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         try:
             answers = dns.resolver.resolve(domain, "A", raise_on_no_answer=False)
             return [str(rdata.address) for rdata in answers]
-        except Exception:  # noqa: BLE001
+        except Exception:
             return []
 
     async def _query_shodan_internetdb(self, ip: str) -> dict[str, Any] | None:

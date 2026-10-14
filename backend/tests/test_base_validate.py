@@ -5,8 +5,7 @@ Target: lines 95, 108, 122-161 of base.py (default validate impl + abstract bodi
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -19,7 +18,6 @@ from app.llm.schemas import (
 from app.models import FindingType, ModuleTier
 from app.modules.base import BaseReconModule, Finding, ModuleInput, ModuleOutput
 from app.modules.whois_rdap import WhoisRDAPModule
-
 
 # ---- Concrete test module for testing default behavior ----
 

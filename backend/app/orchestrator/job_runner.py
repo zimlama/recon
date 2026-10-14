@@ -16,21 +16,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta
-from app.models import _now
+from datetime import timedelta
 from typing import Any
-
-from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import (
     AIValidation,
-    Finding as FindingModel,
     Job,
     JobStatus,
     ModuleRun,
     ModuleStatus,
+    _now,
+)
+from app.models import (
+    Finding as FindingModel,
 )
 from app.modules.base import BaseReconModule, Finding, ModuleInput, ModuleOutput
 from app.orchestrator.ai_validator import AIValidator
@@ -158,7 +158,7 @@ class JobRunner:
         try:
             from app.handoff.bridge import generate_handoff_for_job
             await generate_handoff_for_job(job_id)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("handoff_generation_failed", job_id=job_id)
 
         # Mark complete
@@ -200,7 +200,7 @@ class JobRunner:
                 db.commit()
                 db.refresh(module_run)
                 module_run_id = module_run.id
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.exception(
                 "module_run_creation_failed module=%s error=%s",
                 module_name,
@@ -220,7 +220,7 @@ class JobRunner:
         start = time.time()
         try:
             output = await module.run(ModuleInput(target=target, job_id=job_id, module_run_id=module_run_id))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.exception("module_run_failed", module=module_name, error=str(e))
             output = ModuleOutput(
                 module=module_name,

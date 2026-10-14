@@ -54,7 +54,7 @@ class RateLimiter:
         self.default_burst = default_burst or settings.RATE_LIMIT_RECON_BURST
         # OrderedDict preserves insertion order; ``move_to_end()`` at
         # touch time keeps the LRU at the front of the dict.
-        self._buckets: "OrderedDict[tuple[str, str], _Bucket]" = OrderedDict()
+        self._buckets: OrderedDict[tuple[str, str], _Bucket] = OrderedDict()
         # Per-key asyncio.Lock to serialize acquire() calls on a key.
         # Created lazily + guarded by a sync lock to avoid the
         # ``defaultdict(asyncio.Lock)`` race (each coroutine that

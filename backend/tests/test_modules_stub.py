@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from app.models import ModuleTier
 from app.modules import MODULE_REGISTRY
 from app.modules.base import BaseReconModule
-from app.models import ModuleTier
 
 # Note: we use @pytest.mark.asyncio per-test instead of pytestmark, because
 # pytest-asyncio in "auto" mode already detects async functions, and
@@ -121,11 +121,11 @@ async def test_all_modules_run_returns_module_output(monkeypatch: pytest.MonkeyP
     (see fix/test-suite-hang-post-merge).
     """
     import asyncio
-    import respx
     from unittest.mock import AsyncMock, MagicMock
 
-    from app.modules.base import ModuleInput
-    from app.modules.base import ModuleOutput
+    import respx
+
+    from app.modules.base import ModuleInput, ModuleOutput
 
     # Methods on each module that would otherwise hit live services
     network_methods = (
@@ -187,8 +187,9 @@ async def test_stub_modules_have_not_implemented_error(monkeypatch: pytest.Monke
     on live network calls (the post-merge hang root cause).
     """
     import asyncio
-    import respx
     from unittest.mock import AsyncMock, MagicMock
+
+    import respx
 
     from app.modules.base import ModuleInput
 

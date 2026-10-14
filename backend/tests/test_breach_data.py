@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest
 import respx
 
 from app.modules.base import ModuleInput
-from app.modules.breach_data import HIBP_API_URL, BreachDataModule
+from app.modules.breach_data import BreachDataModule
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ async def test_hibp_no_breach_match(
     email = "test@example.com"
     sha1 = hashlib.sha1(email.lower().encode()).hexdigest()
     prefix = sha1[:5]
-    suffix = sha1[5:].upper()
+    sha1[5:].upper()
 
     # Mock returns response that does NOT include our suffix
     response_text = f"0018A45C4F5C8B2E0F1A:5\n{prefix}NONO:1\n"
@@ -95,7 +95,7 @@ async def test_hibp_privacy_padding_header(
     """HIBP request includes the Add-Padding header for privacy."""
     email = "test@example.com"
     sha1 = hashlib.sha1(email.lower().encode()).hexdigest()
-    prefix = sha1[:5]
+    sha1[:5]
 
     with respx.mock(base_url="https://api.pwnedpasswords.com", assert_all_called=False) as mock:
         mock.get(url__regex=r".*/range/.*").mock(return_value=httpx.Response(200, text=""))

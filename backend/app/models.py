@@ -8,10 +8,20 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -29,12 +39,12 @@ def _now() -> datetime:
     timezone-aware `datetime.now(timezone.utc)` but strip tzinfo for
     SQLite storage (SQLite DateTime columns don't preserve tzinfo).
     """
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 # ---- Enums ----
 
-class JobStatus(str, enum.Enum):
+class JobStatus(enum.StrEnum):
     """Lifecycle states for a recon job."""
 
     PENDING = "pending"
@@ -45,7 +55,7 @@ class JobStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
-class ModuleStatus(str, enum.Enum):
+class ModuleStatus(enum.StrEnum):
     """Lifecycle states for a single module execution within a job."""
 
     PENDING = "pending"
@@ -55,7 +65,7 @@ class ModuleStatus(str, enum.Enum):
     SKIPPED = "skipped"
 
 
-class ModuleTier(str, enum.Enum):
+class ModuleTier(enum.StrEnum):
     """Module authorization tier. Determines when it can run."""
 
     TIER_1 = "tier_1"  # Always-on, fully passive
@@ -63,7 +73,7 @@ class ModuleTier(str, enum.Enum):
     TIER_3 = "tier_3"  # White-hat gated, may be active
 
 
-class FindingType(str, enum.Enum):
+class FindingType(enum.StrEnum):
     """Type of a recon finding."""
 
     SUBDOMAIN = "subdomain"
@@ -84,7 +94,7 @@ class FindingType(str, enum.Enum):
     DOSSIER = "dossier"  # PR 4 — cross-module person dossier aggregator
 
 
-class HandoffStatus(str, enum.Enum):
+class HandoffStatus(enum.StrEnum):
     """Tracks handoff packet generation status independently of the job status.
 
     Previously `error_message` was overloaded to carry both module errors AND
@@ -389,7 +399,7 @@ class IdentityMap(Base):
 # The validator (see `app.orchestrator.roe`) is the single source of truth
 # for "may we run a job on this target right now?".
 
-class RoEStatus(str, enum.Enum):
+class RoEStatus(enum.StrEnum):
     """Lifecycle of an RoE.
 
     - DRAFT: operator is preparing the engagement; not yet enforceable.
@@ -404,7 +414,7 @@ class RoEStatus(str, enum.Enum):
     REVOKED = "revoked"
 
 
-class ScopeType(str, enum.Enum):
+class ScopeType(enum.StrEnum):
     """How the RoE's `scope_value` should be interpreted when matching a target.
 
     - DOMAIN: bare apex or subdomain (exact string match, case-insensitive).

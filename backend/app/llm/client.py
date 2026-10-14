@@ -196,7 +196,7 @@ class LLMClient:
                     await asyncio.sleep(wait)
                     continue
                 raise LLMError(f"LLM request failed: {e}") from e
-            except (httpx.RequestError, asyncio.TimeoutError) as e:
+            except (TimeoutError, httpx.RequestError) as e:
                 last_error = e
                 if attempt < self.max_retries:
                     wait = 2**attempt

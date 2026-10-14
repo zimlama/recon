@@ -21,7 +21,6 @@ from app.utils.encryption import (
     hash_email,
 )
 
-
 # ---- hash_email() — deterministic SHA-256 hex ----
 
 
@@ -54,7 +53,7 @@ def test_hash_email_deterministic_fixed_vector() -> None:
     """
     # hashlib is the ground truth — if our implementation differs, something
     # is wrong with lower/strip semantics or the encoding.
-    expected = hashlib.sha256("a@b.c".encode("utf-8")).hexdigest()
+    expected = hashlib.sha256(b"a@b.c").hexdigest()
     assert hash_email("a@b.c") == expected
     assert hash_email("A@B.C") == expected
 

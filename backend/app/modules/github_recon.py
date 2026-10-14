@@ -14,14 +14,10 @@ MITRE ATT&CK: T1593.003, T1552.001
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import re
-import shlex
 import shutil
 import time
-from typing import Any
 
 import httpx
 
@@ -86,7 +82,7 @@ class GitHubReconModule(BaseReconModule):
             findings.extend(code_findings)
             if code_findings:
                 sources_used.append("github_code_search")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"GitHub code search failed: {e!s}")
 
         # 2. Search commits for the domain
@@ -95,7 +91,7 @@ class GitHubReconModule(BaseReconModule):
             findings.extend(commit_findings)
             if commit_findings:
                 sources_used.append("github_commit_search")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"GitHub commit search failed: {e!s}")
 
         # 3. Check if gitleaks is available (does NOT actually run it — see docstring)
@@ -139,7 +135,7 @@ Watch for:
 SECRET HANDLING: NEVER transmit, log, or share actual secrets. Truncate to
 first 4 + last 4 chars. Flag the secret TYPE only.
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 

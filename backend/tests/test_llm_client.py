@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.llm.client import LLMClient, LLMError
-from app.llm.schemas import LDMValidationResult, VerdictType, Priority
+from app.llm.schemas import LDMValidationResult, Priority, VerdictType
 
 
 def _text_block(text: str) -> dict:

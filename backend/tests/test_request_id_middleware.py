@@ -17,7 +17,6 @@ from httpx import ASGITransport, AsyncClient
 
 from app.middleware import RequestIdMiddleware
 
-
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
@@ -28,9 +27,8 @@ async def client():
 
     @app.get("/echo")
     async def echo() -> dict[str, str]:
-        from fastapi import Request  # local import to avoid anyio issues
 
-        # noqa: D401 — middleware puts request_id on request.state
+
         return {}
 
     app.add_middleware(RequestIdMiddleware)
@@ -80,7 +78,6 @@ async def test_request_id_middleware_is_attached_to_state(client) -> None:
 
     @app.get("/capture")
     async def capture_rid(request: Request) -> dict[str, str]:
-        from fastapi import Request
         captured["rid"] = getattr(request.state, "request_id", "")
         return {"rid": captured["rid"]}
 

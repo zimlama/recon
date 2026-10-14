@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -267,8 +266,8 @@ async def test_subprocess_timeout(
 
 def test_dedupe_prefers_higher_confidence(module: WaybackMachineModule) -> None:
     """When same URL from multiple sources, higher-confidence wins."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     findings = [
         Finding(

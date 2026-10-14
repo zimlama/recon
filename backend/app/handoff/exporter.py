@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -96,10 +97,8 @@ async def export_handoff(job_id: str) -> HandoffPacket:
                 f.write(json_data)
             os.replace(tmp_path, file_path)
         except Exception:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             raise
 
         # Persist DB row. If the DB write fails, the JSON file is already
@@ -128,7 +127,7 @@ async def export_handoff(job_id: str) -> HandoffPacket:
     return packet
 
 
-def _build_packet(db: Session, job: Job) -> HandoffPacket:  # noqa: C901 — orchestrator function
+def _build_packet(db: Session, job: Job) -> HandoffPacket:
     """Build a HandoffPacket from a Job and its ModuleRuns."""
     module_runs = db.query(ModuleRun).filter(ModuleRun.job_id == job.id).all()
 

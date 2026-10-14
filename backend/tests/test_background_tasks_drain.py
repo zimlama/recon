@@ -1,4 +1,4 @@
-"""Tests for graceful shutdown of in-flight background job tasks.
+r"""Tests for graceful shutdown of in-flight background job tasks.
 
 Audit finding R4-H3: POST /api/v1/jobs used to use FastAPI's
 BackgroundTasks, which drains on response but NOT on process shutdown.
@@ -16,7 +16,7 @@ both complete.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import contextlib
 
 import pytest
 
@@ -83,10 +83,8 @@ async def test_drain_does_not_hang_on_unresponsive_task() -> None:
 
     # Cancel the stuck task so the test cleans up.
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
     assert cancelled == [True]
 
 

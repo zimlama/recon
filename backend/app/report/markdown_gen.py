@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from app.models import _now
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AIValidation, Job, ModuleRun
-from app.modules.base import Finding
+from app.models import Job, ModuleRun, _now
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -99,12 +96,12 @@ generator: "zimlama/recon v0.1.0"
 
     def _cover(self) -> list[str]:
         return [
-            f"# Reconocimiento Pasivo — Fase 1",
+            "# Reconocimiento Pasivo — Fase 1",
             "",
             f"**Target:** `{self.job.target}`  ",
             f"**Job ID:** `{self.job.id}`  ",
             f"**Fecha:** {_now().strftime('%Y-%m-%d %H:%M UTC')}  ",
-            f"**Phase:** 01-recon-osint (passive)  ",
+            "**Phase:** 01-recon-osint (passive)  ",
             "",
             "---",
             "",
@@ -234,7 +231,7 @@ generator: "zimlama/recon v0.1.0"
             "",
             "### C. Handoff packet",
             "",
-            f"Un handoff packet vendor-neutral ha sido generado para este job y está disponible vía:",
+            "Un handoff packet vendor-neutral ha sido generado para este job y está disponible vía:",
             "",
             f"- REST: `GET /api/v1/jobs/{self.job.id}/handoff`",
             f"- Download: `GET /api/v1/jobs/{self.job.id}/handoff/download`",

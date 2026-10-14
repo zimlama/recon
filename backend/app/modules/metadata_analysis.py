@@ -13,6 +13,7 @@ MITRE ATT&CK: T1593
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -97,7 +98,7 @@ class MetadataAnalysisModule(BaseReconModule):
                 metadata = await self._extract_metadata(url)
                 if metadata:
                     findings.extend(self._metadata_to_findings(target, url, metadata))
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"Failed to extract metadata from {url}: {e!s}")
 
         return ModuleOutput(
@@ -133,7 +134,7 @@ Watch for:
 
 PII HANDLING: GPS coordinates are sensitive. Only note country/region unless authorized.
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 
@@ -242,10 +243,8 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
             return None
         finally:
             import os
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
 
         try:
             data = json.loads(stdout.decode("utf-8", errors="replace"))
@@ -273,7 +272,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
             if response is None or response.status_code != 200:
                 return None
             doc = docx.Document(io.BytesIO(response.content))
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
         cp = doc.core_properties
@@ -310,7 +309,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
             if not meta:
                 return None
             return {k: str(v) for k, v in meta.items() if v}
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     def _metadata_to_findings(
@@ -322,7 +321,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         # Author / creator / username fields
         username = None
         for key in ("Author", "Creator", "LastModifiedBy", "Owner", "User"):
-            if key in metadata and metadata[key]:
+            if metadata.get(key):
                 username = str(metadata[key])
                 break
 
@@ -344,7 +343,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         # Software fields
         software = None
         for key in ("Software", "Producer", "Creator", "Application"):
-            if key in metadata and metadata[key]:
+            if metadata.get(key):
                 software = str(metadata[key])
                 break
         if software and any(c.isdigit() for c in software):

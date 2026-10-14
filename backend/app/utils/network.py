@@ -12,8 +12,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from typing import Iterable
-
+from collections.abc import Iterable
 
 # Private / reserved / non-routable ranges (matches handoff schema)
 PRIVATE_RANGES = [
@@ -60,11 +59,7 @@ def is_public_ip(ip_str: str) -> bool:
         return False
 
     # Defense in depth: explicit check against known private ranges
-    for net in _PRIVATE_NETS:
-        if ip in net:
-            return False
-
-    return True
+    return all(ip not in net for net in _PRIVATE_NETS)
 
 
 def filter_public_ips(ip_strings: Iterable[str]) -> list[str]:

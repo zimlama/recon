@@ -17,9 +17,8 @@ from pathlib import Path
 
 import typer
 
-from app.config import get_settings
 from app.database import SessionLocal, init_db
-from app.models import Finding, Handoff, Job, ModuleRun
+from app.models import Handoff, Job
 from app.modules import MODULE_REGISTRY
 
 cli = typer.Typer(
@@ -58,7 +57,6 @@ def run(
             raise typer.Exit(1)
 
     # Create job
-    from datetime import datetime
     from app.models import _now
     with SessionLocal() as db:
         job = Job(

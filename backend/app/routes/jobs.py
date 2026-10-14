@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
-from app.models import _now
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
@@ -12,7 +10,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.models import Job, JobStatus, ModuleRun
+from app.models import Job, JobStatus, ModuleRun, _now
 from app.modules import MODULE_REGISTRY
 from app.schemas import (
     JobCreate,
@@ -139,7 +137,7 @@ async def _await_task(task: asyncio.Task) -> None:  # type: ignore[type-arg]
     """
     try:
         await task
-    except Exception:  # noqa: BLE001
+    except Exception:
         # The task already has its own error handling — silence the
         # BackgroundTasks's "exception in background task" warning.
         pass
@@ -147,9 +145,9 @@ async def _await_task(task: asyncio.Task) -> None:  # type: ignore[type-arg]
 
 async def _run_job_background(job_id: str) -> None:
     """Background task: execute the job."""
-    from app.orchestrator.job_runner import JobRunner
     from app.llm.client import LLMClient
     from app.orchestrator.ai_validator import AIValidator
+    from app.orchestrator.job_runner import JobRunner
 
     llm_client = LLMClient()
     try:

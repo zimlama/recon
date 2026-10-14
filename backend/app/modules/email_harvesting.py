@@ -14,7 +14,6 @@ MITRE ATT&CK: T1589.002
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import re
@@ -22,7 +21,6 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
 
 import httpx
 
@@ -148,7 +146,7 @@ class EmailHarvestingModule(BaseReconModule):
             pgp_emails = await self._query_pgp_servers(target)
             for email in pgp_emails:
                 findings.append(self._email_to_finding(email, "pgp_keyserver"))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"PGP keyserver query failed: {e!s}")
 
         # 2. Email pattern inference (generate candidates, don't actually verify)
@@ -210,7 +208,7 @@ Watch for:
 PII HANDLING: Only validate. Never suggest using these emails for unauthorized
 outreach. Authorized phishing scope must be explicit and consent-based.
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 
@@ -224,7 +222,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
             try:
                 server_emails = await self._query_single_pgp_server(server, domain)
                 emails.update(server_emails)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.debug(
                     "pgp_server_failed", server=server, error=str(e), domain=domain
                 )
@@ -283,7 +281,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+            _stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
         except (TimeoutError, OSError) as e:
             logger.debug("theharvester_failed", error=str(e))
             return set()
@@ -301,7 +299,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                 email = match.group(0).lower()
                 if email.endswith(f"@{target.lower()}"):
                     emails.add(email)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.debug("theharvester_parse_failed", error=str(e))
         finally:
             try:
@@ -339,9 +337,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
             if TEST_PATTERNS.search(value):
                 continue
             # Dedupe (prefer higher confidence)
-            if value not in by_value:
-                by_value[value] = f
-            elif f.confidence > by_value[value].confidence:
+            if value not in by_value or f.confidence > by_value[value].confidence:
                 by_value[value] = f
         return list(by_value.values())
 

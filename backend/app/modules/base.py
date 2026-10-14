@@ -189,7 +189,7 @@ class BaseReconModule(abc.ABC):
                 temperature=0.1,
             )
             return LDMValidationResult.model_validate(response)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return LDMValidationResult(
                 verdicts=[],
                 summary=f"AI validation failed: {e!s}",

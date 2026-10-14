@@ -9,6 +9,7 @@ the orchestrator's job-launch path.
 """
 from __future__ import annotations
 
+import contextlib
 from datetime import timedelta
 
 import pytest
@@ -59,10 +60,8 @@ def session(tmp_path) -> Session:
         SignOff.__table__.drop(bind=eng, checkfirst=True)
         RoE.__table__.drop(bind=eng, checkfirst=True)
         eng.dispose()
-        try:
+        with contextlib.suppress(FileNotFoundError):
             db_path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 @pytest.fixture
@@ -488,7 +487,7 @@ def test_is_authorized_no_roe_returns_empty_signoffs(
 ) -> None:
     """With no RoE at all, signoffs is exactly `[]` (not None, not NoneType)."""
     # Empty DB.
-    authorized, reason, signoffs = validator.is_authorized(
+    authorized, _reason, signoffs = validator.is_authorized(
         target="nothing.example",
         scope_type=ScopeType.DOMAIN,
     )

@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from app.models import FindingType
 from app.modules.base import Finding
 from app.modules.person_dossier import (
     PersonDossier,
@@ -28,7 +29,6 @@ from app.modules.person_dossier import (
     _resolve_plaintext_email,
 )
 from app.modules.person_dossier import hash_email as _hash_email  # noqa: F401
-from app.models import FindingType
 
 
 def _valid_payload() -> dict:
@@ -289,7 +289,7 @@ def test_extract_email_hash_from_email_finding_lowercases() -> None:
     """
     import hashlib
 
-    expected = hashlib.sha256("jane@example.com".encode("utf-8")).hexdigest()
+    expected = hashlib.sha256(b"jane@example.com").hexdigest()
     assert _extract_email_hash(_email_finding("Jane@Example.com")) == expected
 
 
@@ -409,7 +409,7 @@ def test_group_by_email_hash_groups_same_email() -> None:
     """Multiple findings for the same email land in one bucket."""
     import hashlib
 
-    expected = hashlib.sha256("jane@example.com".encode("utf-8")).hexdigest()
+    expected = hashlib.sha256(b"jane@example.com").hexdigest()
     f1 = _email_finding("jane@example.com")
     f2 = _username_finding(email_hash=expected)
     bucket = _group_by_email_hash([("email_harvesting", f1), ("employee_osint", f2)], set())
@@ -437,7 +437,7 @@ def test_group_by_email_hash_skips_already_dossiered() -> None:
     """email_hashes already in `already_dossiered` are dropped (idempotency)."""
     import hashlib
 
-    h = hashlib.sha256("jane@example.com".encode("utf-8")).hexdigest()
+    h = hashlib.sha256(b"jane@example.com").hexdigest()
     f = _email_finding("jane@example.com")
     bucket = _group_by_email_hash([("email_harvesting", f)], {h})
     assert bucket == {}
@@ -550,6 +550,8 @@ import pytest
 from app.database import Base, SessionLocal, engine
 from app.models import (
     Finding as FindingModel,
+)
+from app.models import (
     IdentityMap,
     Job,
     JobStatus,
@@ -771,7 +773,7 @@ async def test_run_no_email_in_bucket_emits_no_pii_persona(fresh_db, mock_llm) -
     module = PersonDossierModule()
     import hashlib
 
-    h = hashlib.sha256("jane@example.com".encode("utf-8")).hexdigest()
+    h = hashlib.sha256(b"jane@example.com").hexdigest()
     with SessionLocal() as db:
         _seed_job_with_module_runs(
             db,
@@ -1237,7 +1239,6 @@ async def test_run_encryption_key_invalid_logs_warning(fresh_db, mock_llm) -> No
     from cryptography.fernet import Fernet
 
     bogus_key = Fernet.generate_key().decode()[:-4] + "AAAA"  # truncated → invalid
-    import os
     os.environ["PERSON_DOSSIER_ENCRYPTION_KEY"] = bogus_key
     from app.config import get_settings
     get_settings.cache_clear()
@@ -1277,7 +1278,6 @@ async def test_run_idempotent_repeated_run_no_duplicate(fresh_db, mock_llm) -> N
     branch in `_store_identity_map` (lines 738-740).
     """
     from cryptography.fernet import Fernet
-    import os
 
     fernet_key = Fernet.generate_key().decode()
     os.environ["PERSON_DOSSIER_ENCRYPTION_KEY"] = fernet_key
@@ -1367,8 +1367,9 @@ async def test_run_coherence_assigned_when_llm_returns_valid_verdict(
     fresh_db, monkeypatch
 ) -> None:
     """End-to-end: when LLM returns HIGH, dossier.coherence = 'HIGH' (lines 514-516)."""
-    from app.modules.person_dossier import PersonDossierModule
     from unittest.mock import AsyncMock
+
+    from app.modules.person_dossier import PersonDossierModule
 
     coherence_mock = AsyncMock()
     coherence_mock.chat_completion = AsyncMock(
@@ -1403,9 +1404,10 @@ async def test_run_coherence_assigned_when_llm_returns_valid_verdict(
 
 def test_store_identity_map_handles_integrity_error(fresh_db, monkeypatch) -> None:
     """`_store_identity_map` catches UNIQUE violation silently (lines 740-742)."""
+    from cryptography.fernet import Fernet
+
     from app.modules.person_dossier import PersonDossierModule
     from app.utils.encryption import hash_email
-    from cryptography.fernet import Fernet
 
     fernet_key = Fernet.generate_key()
     monkeypatch.setenv("PERSON_DOSSIER_ENCRYPTION_KEY", fernet_key.decode())

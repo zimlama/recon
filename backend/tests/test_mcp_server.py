@@ -17,7 +17,7 @@ import pytest
 class _ExplodingTool:
     """Stand-in for a registered MCP tool that always raises."""
 
-    async def __call__(self, *args: Any, **kwargs: Any) -> dict[str, Any]:  # noqa: D401
+    async def __call__(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("SECRET INTERNAL DETAIL: SELECT * FROM users")
 
 

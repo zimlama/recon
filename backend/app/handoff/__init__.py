@@ -15,15 +15,15 @@ from app.handoff.schema import (
 )
 
 __all__ = [
+    "HandoffCertificate",
+    "HandoffConfirmedTarget",
+    "HandoffCredentialsExposure",
     "HandoffPacket",
+    "HandoffRecommendedModule",
     "HandoffSource",
     "HandoffTarget",
-    "HandoffConfirmedTarget",
     "HandoffTechStack",
-    "HandoffCredentialsExposure",
-    "HandoffRecommendedModule",
-    "HandoffCertificate",
     "export_handoff",
-    "import_handoff",
     "generate_handoff_for_job",
+    "import_handoff",
 ]

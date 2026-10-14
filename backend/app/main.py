@@ -5,9 +5,8 @@ Boots the app, registers routes, configures middleware, manages lifespan.
 
 from __future__ import annotations
 
-import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import structlog
 from fastapi import Depends, FastAPI, Header, HTTPException, status
@@ -92,7 +91,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         swept = await app.state.job_runner.sweep_stuck_jobs(max_age_minutes=30)
         logger.info("startup_sweep_complete", swept_jobs=swept)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("startup_sweep_failed", error=str(e))
 
     logger.info("app_ready")
@@ -237,7 +236,7 @@ def create_app() -> FastAPI:
         # usually means MINIMAX_API_KEY is missing/malformed.
         try:
             LLMClient()
-        except Exception as exc:  # noqa: BLE001 — readiness wants to flag all
+        except Exception as exc:
             logger.error("ready_check_llm_failed error=%s", exc)
             return JSONResponse(
                 status_code=503,

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 import respx
 
 from app.modules.base import ModuleInput
-from app.modules.subdomain_enum import CRTSH_URL, SubdomainEnumModule
+from app.modules.subdomain_enum import SubdomainEnumModule
 
 
 @pytest.fixture
@@ -269,8 +269,8 @@ async def test_subfinder_timeout_handled(
 
 def test_dedupe_prefers_higher_confidence(module: SubdomainEnumModule) -> None:
     """When same subdomain is found by multiple sources, the higher-confidence one wins."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     findings = [
         Finding(
@@ -293,8 +293,8 @@ def test_dedupe_prefers_higher_confidence(module: SubdomainEnumModule) -> None:
 
 def test_dedupe_filters_non_matching_subdomains(module: SubdomainEnumModule) -> None:
     """Subdomains not ending with the target are filtered out."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     findings = [
         Finding(
@@ -315,8 +315,8 @@ def test_dedupe_filters_non_matching_subdomains(module: SubdomainEnumModule) -> 
 
 def test_dedupe_case_insensitive(module: SubdomainEnumModule) -> None:
     """Dedup is case-insensitive."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     findings = [
         Finding(

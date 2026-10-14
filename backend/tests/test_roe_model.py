@@ -9,6 +9,7 @@ Models live in `app.models`:
 """
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime, timedelta
 
 import pytest
@@ -71,10 +72,8 @@ def roe_db(tmp_path):
         SignOff.__table__.drop(bind=eng, checkfirst=True)
         RoE.__table__.drop(bind=eng, checkfirst=True)
         eng.dispose()
-        try:
+        with contextlib.suppress(FileNotFoundError):
             db_path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def _make_roe(**overrides) -> RoE:

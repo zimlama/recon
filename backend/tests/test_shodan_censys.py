@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import dns.rdatatype
-import dns.resolver
 import httpx
 import pytest
 import respx
 
 from app.modules.base import ModuleInput
 from app.modules.shodan_censys import (
-    SHODAN_INTERNETDB_URL,
     ShodanCensysModule,
 )
 
@@ -262,8 +258,8 @@ async def test_censys_query_with_keys(
 
 def test_dedupe_by_value_and_source(module: ShodanCensysModule) -> None:
     """Same (value, source) is deduped."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     f1 = Finding(type=FindingType.IP_ADDRESS, value="1.2.3.4:80", source="x", confidence=0.9)
     f2 = Finding(type=FindingType.IP_ADDRESS, value="1.2.3.4:80", source="x", confidence=0.9)

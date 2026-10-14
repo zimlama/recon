@@ -8,7 +8,8 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import contextlib
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import create_engine
@@ -24,7 +25,6 @@ from app.models import (
     ModuleRun,
     _now,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers — the Job table has a duplicate-index bug in the Finding model
@@ -70,10 +70,8 @@ def jobs_only_db(tmp_path):
         app_db.SessionLocal = original_app_session
         jr_module.SessionLocal = original_jr_session
         eng.dispose()
-        try:
+        with contextlib.suppress(FileNotFoundError):
             db_path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -386,10 +384,8 @@ def identity_map_db(tmp_path):
         ModuleRun.__table__.drop(bind=eng, checkfirst=True)
         Job.__table__.drop(bind=eng, checkfirst=True)
         eng.dispose()
-        try:
+        with contextlib.suppress(FileNotFoundError):
             db_path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def test_identity_map_creates_with_required_fields(identity_map_db) -> None:

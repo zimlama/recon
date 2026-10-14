@@ -12,8 +12,8 @@ import respx
 
 from app.modules.base import ModuleInput
 from app.modules.metadata_analysis import (
-    MetadataAnalysisModule,
     WAYBACK_CDX_URL,
+    MetadataAnalysisModule,
 )
 
 

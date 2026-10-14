@@ -92,7 +92,7 @@ class JobResponse(BaseModel):
     handoff_status: HandoffStatus = HandoffStatus.NOT_GENERATED
     report_md_path: str | None
     report_pdf_path: str | None
-    module_runs: list["ModuleRunResponse"] = []
+    module_runs: list[ModuleRunResponse] = []
 
 
 class JobListResponse(BaseModel):
@@ -125,7 +125,7 @@ class ModuleRunResponse(BaseModel):
     duration_seconds: float | None
     findings_count: int
     errors: list[str]
-    findings: list["FindingResponse"] = []
+    findings: list[FindingResponse] = []
 
 
 # ---- Finding ----

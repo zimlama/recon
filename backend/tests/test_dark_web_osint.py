@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest
 import respx
 
 from app.modules.base import ModuleInput
-from app.modules.dark_web_osint import AHMIA_API_URL, DarkWebOSINTModule, TOR_SOCKS5
+from app.modules.dark_web_osint import AHMIA_API_URL, TOR_SOCKS5, DarkWebOSINTModule
 
 
 @pytest.fixture
