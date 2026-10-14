@@ -545,6 +545,15 @@ if ! docker compose build 2>&1 | tee /tmp/recon-install-build.log; then
 fi
 ok "Images built"
 
+# 7.1.5 Fix data-dir permissions so the bind mount is writable by the
+# 'recon' user inside the container (UID 999). The bind mount preserves
+# host-side ownership, so if ./data is owned by root:root (mode 755)
+# the SQLite database open fails with 'unable to open database file'
+# on startup. chmod 777 is overkill but it's the only safe mode that
+# works across all host UIDs (some hosts run docker with user namespace
+# remapping, some don't).
+chmod 777 ./data 2>/dev/null || warn "Could not chmod 777 ./data (non-fatal — runtime will surface the error if it matters)"
+
 # 7.2 Start
 log "Starting services (prod profile)..."
 if ! docker compose --profile prod up -d 2>&1 | tee /tmp/recon-install-up.log; then
