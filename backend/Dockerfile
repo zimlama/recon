@@ -90,25 +90,24 @@ WORKDIR /app
 # Copy Python deps from builder
 COPY --from=builder /root/.local /home/recon/.local
 
-# Install Go-based recon tools as recon user.
-# BuildKit tmpfs mounts make GOCACHE and TMPDIR RAM-only so the huge
-# subfinder+katana+httpx+waybackurls build artifacts don't get written
-# to a persistent image layer (which was filling up 5 GB-class hosts
-# with "no space left on device" mid-compile).
-#
-# NOTE: We deliberately omit --mount=type=cache for GOMODCACHE.
-# BuildKit's default cache mount is root-owned; running 'go install'
-# as USER recon then fails with 'mkdir .../pkg/mod/cache: permission
-# denied'. Without the cache mount, modules download directly into
-# the recon user's home on each build. For a one-shot install this
-# costs ~600 MB of network bandwidth but is robust.
+# Install Go-based recon tools.
+# Run as USER recon; GOCACHE and TMPDIR from earlier ENV block stay
+# in /home/recon (size ~600 MB during the longest compile of subfinder,
+# but never grows the persistent image layer beyond its final state
+# because once 'go install' succeeds the build cache is fully populated
+# in GOCACHE). Do NOT --mount=type=tmpfs here — BuildKit mounts are
+# root-owned, which conflicts with USER recon and triggers
+# 'permission denied' on /home/recon/.cache.
 USER recon
-RUN --mount=type=tmpfs,target=/home/recon/.cache \
-    --mount=type=tmpfs,target=/home/recon/tmp \
-    go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.6.3 \
+RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.6.3 \
     && go install -v github.com/projectdiscovery/httpx/cmd/httpx@v1.3.7 \
     && go install github.com/tomnomnom/waybackurls@v0.1.0 \
-    && go install -v github.com/projectdiscovery/katana/cmd/katana@latest
+    && go install -v github.com/projectdiscovery/katana/cmd/katana@latest \
+    # Clean Go build cache and downloaded modules so the persistent
+    # image layer stays slim (~600 MB saved on a one-shot install).
+    # Binaries remain in /home/recon/go/bin because that path is NOT
+    # in the cleanup list.
+    && rm -rf /home/recon/.cache/go-build /home/recon/tmp /home/recon/go/pkg/mod
 USER root
 
 # Copy application code
