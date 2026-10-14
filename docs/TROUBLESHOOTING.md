@@ -715,6 +715,256 @@ git commit -m "chore(frontend): add pnpm-lock.yaml"
 
 ---
 
+## 10. PR-G2 gate-flip lessons (Issue #30 Phase 1.5A2)
+
+This section collects the cross-cutting lessons from flipping the `npm audit` and `trivy fs` gates from advisory (`|| true` / `exit-code: 0`) to **blocking** in `main`. The follow-up chain (PR #51 → PR #52 → PR #54) uncovered five distinct root causes; each is below in the standard 4-part format. The verbatim error strings are what to grep for in CI logs.
+
+### 10.1 `pnpm overrides` in `package.json` is silently ignored by pnpm ≥ 11
+
+**Symptom** — `pnpm install` does not apply the `overrides` field declared at the root of `frontend/package.json`; the lockfile shows the old (vulnerable) version. pnpm prints no warning.
+
+```
+"overrides": {
+  "postcss-selector-parser": "^7.1.0"  // declared in package.json
+}
+// pnpm-lock.yaml still pins postcss-selector-parser@6.1.4 — no error
+```
+
+**Diagnosis** —
+```bash
+grep "postcss-selector-parser@" frontend/pnpm-lock.yaml   # → 6.1.4
+pnpm --version                                            # → 12.11.2
+```
+
+The `overrides` field is documented in `pnpm` docs as a **legacy** location. Since pnpm v11 it is no longer read; pnpm reads overrides only from `pnpm-workspace.yaml` (and the deprecated `"pnpm": { "overrides": ... }` in `package.json`).
+
+**Root cause** — the v0.2.0 release was set up with pnpm 9 and the legacy `overrides` field worked. We then upgraded pnpm locally to 12, but nobody re-read the docs. The lockfile kept the old (vulnerable) resolutions because the override was effectively a no-op.
+
+**Fix** — move the field to `frontend/pnpm-workspace.yaml`:
+```yaml
+# /frontend/pnpm-workspace.yaml
+packages:
+  - '.'
+
+overrides:
+  postcss-selector-parser: ^7.1.0
+  glob: '>=10.5.0'
+  postcss: '>=8.5.18'
+```
+
+After `pnpm install`, the lockfile pins `postcss-selector-parser@7.1.6`, `glob@13.0.6`, `postcss@8.5.30` (verified by `pnpm why <pkg>` and `grep`).
+
+### 10.2 pnpm 9 vs pnpm 12 lockfile format incompatibility
+
+**Symptom** — CI's `Frontend install` job fails with:
+```
+ERROR  packages field missing or empty
+##[error]Process completed with exit code 1.
+```
+even though `pnpm install --frozen-lockfile` works fine locally.
+
+**Diagnosis** —
+```bash
+# CI:
+gh api .../jobs/<id>/logs | grep -A 1 "Setup Pnpm"
+# → pnpm 9.15.4 (via pnpm/action-setup@<sha> with version: 9)
+# Local:
+which pnpm   # → 12.11.2
+```
+
+**Root cause** — the lockfile was generated locally with pnpm 12 which writes a v9-format lockfile that pnpm 9's reader rejects. The lockfile IS valid v9 (it has `lockfileVersion: '9.0'` and a `packages:` block), but pnpm 9's stricter reader complains "packages field missing or empty" when the workspace file lacks an explicit `packages:` declaration.
+
+**Fix** —
+1. Add `packages: - '.'` to `frontend/pnpm-workspace.yaml` (declares the single-package workspace, pnpm 9's reader now happy).
+2. Regenerate `frontend/pnpm-lock.yaml` with the same pnpm version CI uses:
+   ```bash
+   # Local-only, NOT in package.json:
+   /Users/leonardomejia/Library/pnpm/pnpm install --no-frozen-lockfile
+   ```
+
+Long-term: pin pnpm in `package.json#packageManager` so local and CI always agree.
+
+### 10.3 `trivy-action` v0.36.0: use `trivyignores`, not `ignorefile`
+
+**Symptom** — CI fails on the `trivy fs` step with:
+```
+Unexpected input(s) 'ignorefile', valid inputs are
+['scan-type', 'image-ref', 'input', 'scan-ref', 'exit-code', ...]
+```
+
+**Diagnosis** —
+```bash
+gh api .../jobs/<id>/logs | grep -i "ignorefile"
+# → "Unexpected input(s) 'ignorefile'..."
+# But locally:
+trivy fs --ignorefile .trivyignore --exit-code 1 .   # → exit 0 (CLI works)
+```
+
+**Root cause** — the `aquasecurity/trivy-action` Action wraps the `trivy` CLI but uses its own input vocabulary. The CLI's `--ignorefile` flag is exposed in the Action as **`trivyignores`** (plural, comma-separated). Plain `ignorefile` is not a valid Action input, even though it sounds like the CLI flag.
+
+**Fix** — rename in the workflow `with:` block:
+```yaml
+- name: Run trivy filesystem scan
+  uses: aquasecurity/trivy-action@v0.36.0
+  with:
+    scan-type: "fs"
+    scan-ref: "."
+    trivyignores: ".trivyignore"   # ← correct input name
+    exit-code: "1"
+```
+
+### 10.4 SARIF mode in `trivy-action` silently unsets the severity filter
+
+**Symptom** — `trivy fs` exits 1 in CI after `.trivyignore` is in place, even though the same command exits 0 locally. CI duration: 161 ms (way too short for an actual scan — the action returned 1 without doing a real scan).
+
+```
+Found ignorefile '.trivyignore':   ← file IS being read
+# ... file contents echoed ...
+Building SARIF report with all severities
+Running Trivy with options: trivy fs .
+##[error]Process completed with exit code 1.
+```
+
+**Diagnosis** — read the `entrypoint.sh` of `trivy-action` v0.36.0 (the wrapper script that runs the action):
+```bash
+if [ "${TRIVY_FORMAT:-}" = "sarif" ]; then
+  if [ "${INPUT_LIMIT_SEVERITIES_FOR_SARIF:-false,,}" != "true" ]; then
+    echo "Building SARIF report with all severities"
+    unset TRIVY_SEVERITY            # ← HERE
+  fi
+fi
+```
+
+**Root cause** — the SARIF spec wants all severities in the report, so the Action **unsets** `TRIVY_SEVERITY` before invoking `trivy` when `format=sarif` and `limit-severities-for-sarif != true`. Combined with `exit-code: "1"`, ANY non-ignored CVE of ANY severity (including moderate/low) blocks the build. The `.trivyignore` covers CRITICAL+HIGH, but the next 14.x advisories also include 11 MODERATE + 2 LOW that aren't allowlisted.
+
+**Fix** — set the explicit severity-cap in the Action:
+```yaml
+- name: Run trivy filesystem scan
+  uses: aquasecurity/trivy-action@v0.36.0
+  with:
+    scan-type: "fs"
+    scan-ref: "."
+    format: "sarif"
+    severity: "HIGH,CRITICAL"
+    limit-severities-for-sarif: "true"   # ← preserve the filter
+    trivyignores: ".trivyignore"
+    exit-code: "1"
+```
+
+`limit-severities-for-sarif: "true"` keeps `TRIVY_SEVERITY=HIGH,CRITICAL` in the env, so the SARIF report only contains HIGH+CRITICAL findings, and `exit-code: 1` only blocks on those.
+
+### 10.5 `pnpm dlx` in `security.yml` needs `corepack enable`
+
+**Symptom** — the `npm audit` job in `security.yml` fails immediately:
+```
+/usr/bin/bash: line 1: pnpm: command not found
+##[error]Process completed with exit code 127.
+```
+
+**Diagnosis** —
+```bash
+gh api .../jobs/<id>/logs | grep -B 1 "pnpm dlx"
+# → "pnpm: command not found" before any pnpm command runs
+# Compare with the frontend CI workflow (ci.yml) which has:
+#   - uses: pnpm/action-setup@v4
+#   - run: pnpm install --frozen-lockfile
+# The security workflow only had actions/setup-node@v4 — installs node + npm, NOT pnpm.
+```
+
+**Root cause** — `actions/setup-node` installs node + npm but not pnpm. The original `npm audit ... || true` didn't need pnpm, so the security workflow was written without it. Switching to `pnpm dlx audit-ci@^7` requires pnpm on `PATH`.
+
+**Fix** — add `corepack enable` after `Setup Node`:
+```yaml
+- name: Setup Node
+  uses: actions/setup-node@v4
+  with:
+    node-version: "20"
+
+- name: Enable corepack (pnpm shim)
+  run: corepack enable
+```
+
+`corepack` (bundled with node ≥ 16.9) shims `pnpm` (and `yarn`) to the version declared in `package.json#packageManager`. If that's not set, install pnpm via `pnpm/action-setup` like the frontend CI workflow does.
+
+### 10.6 Audit-ci vs npm audit: per-advisory allowlist
+
+**Symptom** — `npm audit --audit-level=high` blocks merges on the 13 next 14.x HIGH advisories (all of which require a MAJOR bump to next 15.5+, deferred to v0.3.0). We want the gate blocking, but we cannot bump next today.
+
+**Diagnosis** — `npm-audit` has no per-advisory allowlist. `--audit-level` only filters by severity. The only way to keep the gate blocking while tolerating known-deferred CVEs is to either:
+- Bump the deps (deferred, see #38)
+- Use a different tool that supports per-advisory allowlist
+
+**Root cause** — `npm audit` is a strict tool. Audit-ci (`IBM/audit-ci`, `pnpm dlx audit-ci@^7`) is a thin wrapper around `npm`/`pnpm`/`yarn` audit that adds per-advisory allowlist, JSON output, and better CI integration. It's the right tool for "block on new CVEs, allow known-deferred ones".
+
+**Fix** — install audit-ci via `pnpm dlx`, declare the allowlist in a JSONC file:
+```jsonc
+// frontend/audit-ci.jsonc
+{
+  "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
+  "critical": true,            // ← only block on CRITICAL
+  "package-manager": "pnpm",
+  "report-type": "full",
+  "output-format": "json",
+  "allowlist": [
+    // 2 next.js 14.x CRITICAL — fix in next 15.5.24+ (MAJOR, #38)
+    "GHSA-p293-qw3h-jr36",
+    "GHSA-2xp9-vwfh-vxw4",
+    // 1 vitest 1.6.1 CRITICAL — fix in vitest 3.2.6+ (MAJOR, #38)
+    "GHSA-5xrq-8626-4rwp",
+    // 2 tinypool 0.8.4 FALSE POSITIVES — vitest 1.x requires tinypool@^0.8.3
+    "GHSA-5gmw-xhrv-c9v3",
+    "GHSA-85c8-ppgw-ccpr"
+  ]
+}
+```
+
+```yaml
+# .github/workflows/security.yml (npm-audit step)
+- name: npm audit (blocking — gate flipped in PR-G2 via audit-ci)
+  working-directory: frontend
+  run: |
+    mkdir -p ../reports
+    pnpm dlx audit-ci@^7 --config ./audit-ci.jsonc --output-format json \
+      > ../reports/npm-audit.json
+```
+
+> [!info] Why a JSONC file and not `.npmrc` or `package.json`?
+> audit-ci is config-format-agnostic and the JSONC schema is editor-friendly (hover-completion, validation, inline comments with rationale). Each allowlist entry has a comment explaining *why* it's allowlisted, with a `Refs #<issue>` pointing at the deferred-bump issue. New engineers reviewing the file can see the plan without leaving the editor.
+
+### 10.7 Tinypool / vite / next false-positive triage pattern
+
+**Symptom** — pnpm audit reports `tinypool@0.8.4` as vulnerable to `GHSA-5gmw-xhrv-c9v3` (Prototype Pollution → RCE in 2.x), and `vite@5.4.21` as vulnerable to GHSAs that apply to vite ≤ 6.4.2.
+
+**Diagnosis** —
+```bash
+# tinypool:
+pnpm why tinypool
+# → tinypool@0.8.4 └─┬ vitest@1.6.1 (transitive)
+#    vitest 1.x's package.json: "tinypool": "^0.8.3"
+#    Tinypool 0.x and 2.x are DIFFERENT APIs. The 2.x RCE code path
+#    doesn't exist in 0.x.
+# But the advisory's vulnerable_versions is "<=2.1.0", which technically
+# includes 0.8.4 (semver-wise 0.8.4 < 2.1.0).
+
+# vite:
+pnpm why vite
+# → vite@5.4.21
+#    vite 5.4.21 is < the vuln range floor 6.4.x. The advisory
+#    doesn't actually apply to vite 5.x.
+```
+
+**Root cause** — pnpm-audit (like npm-audit) flags any package whose name matches, even when the installed version is older than the vulnerable code path. For tinypool, the vuln was introduced in 2.x; for vite, the vuln is in 6.4.0–6.4.2. Both advisories are over-broad.
+
+**Fix** — add to the audit-ci allowlist (see 10.6) with comments explaining "vitest 1.x requires tinypool@^0.8.3; bumping tinypool to 2.x would BREAK vitest (different API)". Then add a CI-side assertion that the vitest 1.x constraint is still in effect:
+```bash
+# local sanity:
+grep '"tinypool":' frontend/node_modules/vitest/package.json   # → "^0.8.3"
+```
+
+If vitest 3.x is ever adopted (deferred to #38), revisit the allowlist and remove the tinypool entries.
+
+---
+
 ## 9. Where to get more help
 
 For the **v0.2.1 install-failure series in detail** (timeline + commit messages + verbatim shell transcripts), see [postmortems/v0.2.1-release.md](postmortems/v0.2.1-release.md).
