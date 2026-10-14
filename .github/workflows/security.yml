@@ -55,23 +55,21 @@ jobs:
       - name: Install bandit
         run: pip install bandit==1.7.10
 
-      - name: Run bandit (SARIF)
+      - name: Run bandit (JSON → SARIF)
         run: |
           mkdir -p reports
           bandit -r backend/app/ \
-                    -f sarif \
-                    -o reports/bandit.sarif \
+                    -f json \
+                    -o reports/bandit.json \
                     --severity-level medium \
                     --confidence-level medium \
                     --exit-zero || true
-          if [ ! -s reports/bandit.sarif ]; then
-            # bandit exits non-zero even with --exit-zero on no findings in some configs
-            echo '{"runs":[{"tool":{"driver":{"name":"bandit","version":"1.7.10"},"results":[]}}],"version":"2.1.0"}' > reports/bandit.sarif
-          fi
+          # Convert bandit JSON to SARIF for GitHub Code Scanning
+          python3 .github/scripts/bandit_to_sarif.py reports/bandit.json reports/bandit.sarif
 
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: reports/bandit.sarif
           category: bandit
@@ -146,7 +144,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "fs"
           scan-ref: "."
@@ -159,13 +157,13 @@ jobs:
 
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: reports/trivy-fs.sarif
           category: trivy-fs
 
       - name: Run trivy rootfs scan on backend Dockerfile
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "image"
           image-ref: "backend/Dockerfile"
@@ -178,13 +176,13 @@ jobs:
 
       - name: Upload SARIF backend image
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: reports/trivy-backend.sarif
           category: trivy-backend-image
 
       - name: Run trivy rootfs scan on frontend Dockerfile
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "image"
           image-ref: "frontend/Dockerfile"
@@ -197,7 +195,7 @@ jobs:
 
       - name: Upload SARIF frontend image
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: reports/trivy-frontend.sarif
           category: trivy-frontend-image
