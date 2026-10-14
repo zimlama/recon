@@ -462,6 +462,259 @@ This is a GitHub Actions infrastructure issue, not a code issue. v0.2.1 was ship
 
 ---
 
+## 10. Development lessons from Issue #24 baseline repair
+
+> **Added in v0.3.0-pre** (Issue #24 baseline-repair: PR-A ruff, PR-B mypy, PR-C coverage, PR-D pnpm-lock).
+> **Format**: each lesson follows the operator's opencode `lessons-doc rule` (mandatory 4-part format) — **Symptom → Diagnosis → Root cause → Fix**. Paste the verbatim Symptom into `grep` / `Ctrl+F` to find the fix again in 6 months.
+> **Audience**: contributors working on `backend/app/`, the test suite, or the CI workflow files.
+
+These six lessons cost real time during the Issue #24 baseline repair across four PRs. They are recorded here so the next contributor doesn't repeat the same archaeology.
+
+### Lesson index
+
+| # | Symptom (grep-able) | Trigger context |
+|---|---|---|
+| 1 | `No such command 'init-db'. Did you mean 'init-db-cmd'?` | Typer CLI test (`tests/test_cli.py`) |
+| 2 | `AttributeError: <module 'app.cli'> does not have the attribute 'LLMClient'` | pytest mock on a CLI command |
+| 3 | typer exits with code 2 → `assert result.exit_code == 0` fails | Calling `app.cli.main()` directly from tests |
+| 4 | Test passes in isolation, fails in full suite: `assert 0 == 1` (file not at expected path) | `@lru_cache` `Settings` + monkeypatch in `tests/test_handoff_exporter.py` |
+| 5 | `ruff check .` in CI fails with 397 errors on files NOT touched in the PR | ruff version mismatch between CI (0.4.0) and local (0.15.x) |
+| 6 | `ERR_PNPM_NO_LOCKFILE  No lockfile found in /home/runner/work/recon/recon/frontend` | First run on `frontend/` after `pnpm install` locally without committing the lockfile |
+
+---
+
+### 1. Typer command name auto-derivation
+
+```
+No such command 'init-db'. Did you mean 'init-db-cmd'?
+```
+
+**Diagnosis** — confirm the Typer-derived command name:
+
+```bash
+python3 -c "from app.cli import cli; [print(c.name) for c in cli.registered_commands]"
+```
+
+You will see `init-db-cmd` (not `init-db`).
+
+**Root cause**: Typer auto-derives the command name from the function name by replacing underscores with hyphens. `init_db_cmd` → `init-db-cmd`, NOT `init-db`. The `Did you mean` hint is Typer's edit-distance suggestion — the test is calling the *human-plausible* name, not the *Typer-derived* one.
+
+**Fix** — either match the derived name in the test, or rename the function:
+
+```python
+# Option A: use the Typer-derived name
+def test_init_db():
+    result = runner.invoke(cli, ["init-db-cmd"])
+    assert result.exit_code == 0
+
+# Option B: rename the function so Typer derives the command you wanted
+@app.command()
+def init_db() -> None:     # underscore + cmd suffix dropped
+    ...
+    # runner.invoke(cli, ["init-db"]) now works
+```
+
+> [!info] Verify-by-grep pattern
+> When a Typer test fails with a "No such command" line that contains `Did you mean`, the answer is one `python3 -c` away — list the registered commands.
+
+---
+
+### 2. Local function-level imports break naive patching
+
+```python
+AttributeError: <module 'app.cli'> does not have the attribute 'LLMClient'
+```
+
+**Diagnosis** — prove the import lives inside the function, not at the module top:
+
+```bash
+# Confirms the name is NOT in the module namespace:
+python3 -c "import app.cli; print(hasattr(app.cli, 'LLMClient'))"    # → False
+
+# Now open app/cli.py and grep for the import:
+grep -n "from app.llm.client" app/cli.py
+# Hits inside a `def ...():` block, not at column 0.
+```
+
+**Root cause**: when a command does `from app.llm.client import LLMClient` *inside* the function body (not at module top-level), the name is bound in the function's **local** namespace only, never in `app.cli`'s module namespace. `patch("app.cli.LLMClient", ...)` therefore fails with `AttributeError` — pytest's `mock.patch` resolves the dotted path against the **module's** globals, not the function's locals.
+
+**Fix** — patch at the import source, not at the consumer:
+
+```python
+# ❌ Doesn't work — LLMClient was never bound on app.cli
+with patch("app.cli.LLMClient") as mock_llm:
+    ...
+
+# ✅ Works — patch where the name actually lives
+with patch("app.llm.client.LLMClient") as mock_llm:
+    ...
+```
+
+> [!warning] Anti-pattern
+> Reach for `from x import y` at module top-level when the imported symbol is also used by tests that `patch()` it. Function-local imports are fine for cold-path dependencies but invisible to mock-patchers.
+
+---
+
+### 3. `main()` reads `sys.argv` when called from tests
+
+```
+Usage: cli [OPTIONS] COMMAND [ARGS]...
+Try 'cli --help' for help.
+
+Error: No such command 'tests/test_cli.py'.
+```
+
+(Reported by pytest as `SystemExit: 2` → `assert result.exit_code == 0` fails.)
+
+**Diagnosis** — narrow the failure to `argv` contamination:
+
+```bash
+# Outside pytest — works fine:
+python3 -c "from app.cli import main; main()"                  # exit 0
+
+# Inside pytest — fails with the "No such command 'tests/test_cli.py'" error:
+pytest tests/test_cli.py::test_main_default -x
+
+# Confirm the implementation reads argv indirectly:
+grep -n "def main" app/cli.py
+# Likely hits:  def main() -> None: cli()    # no args forwarded
+```
+
+**Root cause**: Click/Typer's `cli()` invocation without explicit args falls back to reading `sys.argv`. Pytest populates `sys.argv` with its own args (`['tests/test_cli.py', '-v', ...]`), which typer then interprets as command names. Outside pytest, `sys.argv` is `['']` and `cli()` is a no-op. Inside pytest it's the dotted test path.
+
+**Fix** — patch the `cli` symbol that `main()` would call before invoking it:
+
+```python
+from unittest.mock import patch
+from app.cli import main
+
+def test_main_default():
+    with patch("app.cli.cli") as mock_cli:      # prevents the real CLI from reading argv
+        rc = main()
+    assert rc == 0
+    mock_cli.assert_called_once_with()
+```
+
+> [!tip] Cleaner alternative
+> If you can change `main()`, give `cli` an explicit `args=None` so it falls back to `sys.argv[1:]` only when no args were passed. Tests can then pass a real `["init-db-cmd"]` list and avoid `sys.argv` mocking entirely.
+
+---
+
+### 4. `Settings` cached via `@lru_cache` needs module-level binding patch
+
+```python
+AssertionError: assert 0 == 1     # file not created where the test expected
+```
+
+**Diagnosis** — confirm two different `Settings` instances are in play:
+
+```bash
+# The exporter's cached binding:
+python3 -c "from app.handoff.exporter import settings; print(id(settings))"
+
+# The cached getter's instance (may differ if another test rebuilt Settings):
+python3 -c "from app.config import get_settings; print(id(get_settings()))"
+
+# If the two IDs differ → the bug. Also check:
+grep -n "Settings(" app/handoff/exporter.py
+grep -n "@lru_cache" app/config.py
+```
+
+**Root cause**: `get_settings()` is decorated with `@lru_cache`, and `app/handoff/exporter.py` does `from app.config import get_settings; settings = get_settings()` at **module load time**. If another test (running earlier in the suite) calls `Settings(...)` directly, that fresh instance is *not* the cached one — `monkeypatch.setattr(get_settings(), "HANDOFFS_DIR", str(tmp))` mutates a different object from the one `exporter.settings` already cached. Both instances have a `HANDOFFS_DIR` attribute, but pointing at different directories.
+
+**Fix** — patch the **module-level binding** the consumer actually reads, not the getter's return value:
+
+```python
+# tests/test_handoff_exporter.py
+from app.handoff import exporter as exporter_mod    # gives access to the cached binding
+
+def test_handoff_export_writes_to_tmp(monkeypatch, tmp_path):
+    target = tmp_path / "handoffs"
+    monkeypatch.setattr(exporter_mod.settings, "HANDOFFS_DIR", str(target))
+    # ... exporter will write to target, not to the cached Settings.HANDOFFS_DIR
+```
+
+> [!warning] Why `monkeypatch.setenv("HANDOFFS_DIR", ...)` is not enough
+> The cached `Settings` instance was constructed at import time from the *initial* environment. `setenv` after import does not refresh the cached object — it would require calling `_reset_settings_cache()` (already exposed by the autouse fixture in `tests/conftest.py` if you need it; use it sparingly because it invalidates the cache for the rest of the suite).
+
+---
+
+### 5. CI ruff 0.4.0 vs local 0.15.x rule mismatch on pre-existing files
+
+```
+ruff check .
+app/cli.py:1:1: I001 Import block is un-sorted or un-formatted
+app/cli.py:3:1: F401 'os' imported but unused
+...  (397 errors total, all on files NOT touched in the current PR)
+```
+
+**Diagnosis** — confirm the version delta between CI and local, and confirm the failing files pre-date the PR:
+
+```bash
+# In CI:
+pip show ruff | grep Version                     # → 0.4.0
+
+# Locally:
+ruff --version                                  # → 0.15.x
+
+# Confirm the failing files are not part of the current PR:
+gh api repos/zimlama/recon/actions/runs/<id>/logs | grep '\.py:[0-9]+:' | awk -F: '{print $1}' | sort -u
+git diff --name-only origin/developer HEAD      # current PR's touched files
+# Intersection = 0 → failures are pre-existing, not regressions.
+```
+
+**Root cause**: CI pins `ruff==0.4.0` (older version with narrower rule coverage), but local development uses `ruff==0.15.x` (newer, stricter). The repo's `pyproject.toml` does not override every rule, so the version delta surfaces as new errors. These are **NOT regressions introduced by the PR** — they are pre-existing bugs that the newer ruff is now flagging.
+
+**Fix** — pick one of the two paths and document the choice:
+
+```bash
+# Path A — match local to CI (cheap, may hide newer rules):
+pip install "ruff==0.4.0"
+
+# Path B — admin-merge per the documented #24 pattern:
+# The only CI failures are pre-existing bugs, not regressions. Either:
+#   (i) ship the PR with the older ruff temporarily, fix the ruff-cosmetic
+#       warnings in a follow-up PR; OR
+#  (ii) bump CI to ruff==0.15.x and absorb the 397 fixes in this PR.
+```
+
+> [!info] Pin decision
+> The v0.3.0-pre plan is Path B(ii): bump CI's ruff pin to match local, and absorb the 397 fixes into PR-A. Don't take Path A — you'd be debugging two rule sets in your head for the lifetime of the project.
+
+---
+
+### 6. Missing `pnpm-lock.yaml` causes `--frozen-lockfile` CI failures
+
+```
+ERR_PNPM_NO_LOCKFILE  No lockfile found in /home/runner/work/recon/recon/frontend
+```
+
+**Diagnosis** — confirm the file is missing and CI expects it:
+
+```bash
+ls frontend/pnpm-lock.yaml                       # → "No such file or directory"
+cat .github/workflows/ci.yml | grep -A 2 "pnpm install"
+# Expect:  pnpm install --frozen-lockfile
+```
+
+**Root cause**: developers ran `pnpm install` locally to install dependencies but never committed the resulting `pnpm-lock.yaml`. CI's `--frozen-lockfile` mode then fails because no lockfile exists to freeze against. **Two side effects** beyond the failed build:
+
+1. Every CI run regenerates the dependency tree from scratch — non-reproducible builds and ~30 s added latency per frontend job.
+2. A class of supply-chain attacks: a transitive dep can swap between runs because there's no signed, version-pinned lockfile to gate against. `--frozen-lockfile` is the defense.
+
+**Fix** — commit the lockfile that `pnpm install` already produced locally:
+
+```bash
+cd frontend && pnpm install                       # regenerates pnpm-lock.yaml if missing
+git add pnpm-lock.yaml
+git commit -m "chore(frontend): add pnpm-lock.yaml"
+```
+
+> [!warning] Don't re-generate the lockfile after fixing real bugs
+> If you ever see "lockfile out of sync" errors after a real bug fix, **re-run** `pnpm install`, **inspect** `git diff pnpm-lock.yaml` for unexpected version bumps, **then commit**. A 1 000-line lockfile diff with mysterious bumps is a supply-chain indicator, not a routine update.
+
+---
+
 ## 9. Where to get more help
 
 For the **v0.2.1 install-failure series in detail** (timeline + commit messages + verbatim shell transcripts), see [postmortems/v0.2.1-release.md](postmortems/v0.2.1-release.md).
