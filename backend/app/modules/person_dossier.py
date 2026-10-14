@@ -23,6 +23,8 @@ already-gathered data, no new network IO).
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import contextlib
 import logging
@@ -57,7 +59,7 @@ from app.utils.encryption import (
     hash_email,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # Closed list of sibling modules whose findings this aggregator reads.
@@ -459,7 +461,7 @@ class PersonDossierModule(BaseReconModule):
                 raise ValueError(f"job not found: {input.job_id}")
 
             skipped = self._load_sibling_state(db, job.id)
-            if skipped is not None:
+            if isinstance(skipped, _SkipSignal):
                 return skipped.as_module_output(self.name, start)
 
             sibling_rows = self._load_source_findings(db, job.id)

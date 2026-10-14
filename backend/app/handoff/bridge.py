@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import logging
 
 from app.handoff.exporter import export_handoff
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def generate_handoff_for_job(job_id: str) -> None:

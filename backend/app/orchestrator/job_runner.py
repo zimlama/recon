@@ -13,6 +13,8 @@ Per module:
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import logging
 import time
@@ -36,7 +38,7 @@ from app.modules.base import BaseReconModule, Finding, ModuleInput, ModuleOutput
 from app.orchestrator.ai_validator import AIValidator
 from app.orchestrator.rate_limiter import RateLimiter
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 settings = get_settings()
 
@@ -234,14 +236,14 @@ class JobRunner:
 
         # Persist findings
         with SessionLocal() as db:
-            module_run = db.get(ModuleRun, module_run_id)
-            if module_run:
-                module_run.status = ModuleStatus.FAILED if output.errors else ModuleStatus.COMPLETED
-                module_run.completed_at = _now()
-                module_run.duration_seconds = duration
-                module_run.findings_count = len(output.findings)
-                module_run.errors = output.errors
-                module_run.raw_output_path = output.raw_output_path
+            db_module_run: ModuleRun | None = db.get(ModuleRun, module_run_id)
+            if db_module_run:
+                db_module_run.status = ModuleStatus.FAILED if output.errors else ModuleStatus.COMPLETED
+                db_module_run.completed_at = _now()
+                db_module_run.duration_seconds = duration
+                db_module_run.findings_count = len(output.findings)
+                db_module_run.errors = output.errors
+                db_module_run.raw_output_path = output.raw_output_path
 
                 for f in output.findings:
                     db.add(

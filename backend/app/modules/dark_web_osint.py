@@ -14,6 +14,8 @@ MITRE ATT&CK: T1589.001, T1593.001
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import logging
 import shutil
 import time
@@ -30,7 +32,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ahmia.fi is a clearnet Tor hidden service search engine (no Tor required)
 AHMIA_API_URL = "https://ahmia.fi/search/"

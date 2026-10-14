@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import contextlib
 import logging
@@ -13,7 +15,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.report.css_style import load_css
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 settings = get_settings()
 
 

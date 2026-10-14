@@ -14,9 +14,11 @@ MITRE ATT&CK: T1596.003
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -30,7 +32,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 CRTSH_URL = "https://crt.sh/"
 CRTSH_TIMEOUT = 45  # crt.sh can be slow
@@ -176,7 +178,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                     logger.debug("crtsh_non_200", status=response.status_code, domain=domain)
                     return None
                 try:
-                    return response.json()
+                    return cast(list[dict[str, Any]], response.json())
                 except Exception as e:
                     logger.debug("crtsh_invalid_json", error=str(e))
                     return None

@@ -11,6 +11,8 @@ MITRE ATT&CK: T1593
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import json
 import logging
@@ -30,7 +32,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # CDX API endpoint (Internet Archive)
 CDX_API_URL = "https://web.archive.org/cdx/search/cdx"

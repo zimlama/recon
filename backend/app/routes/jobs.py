@@ -27,7 +27,7 @@ router = APIRouter()
 # mid-`asyncio.gather` jobs. The set is intentionally module-level
 # (not on app.state) so unit tests that bypass the lifespan can
 # still drive the same drain logic.
-_background_job_tasks: set[asyncio.Task] = set()
+_background_job_tasks: set[asyncio.Task[Any]] = set()
 
 
 def drain_background_job_tasks(timeout: float = 30.0) -> tuple[int, int]:
@@ -61,7 +61,7 @@ async def _drain_async(timeout: float) -> tuple[int, int]:
     return (len(done), len(pending))
 
 
-def get_background_job_tasks() -> set[asyncio.Task]:
+def get_background_job_tasks() -> set[asyncio.Task[Any]]:
     """Public read-only access for tests and the lifespan manager."""
     return _background_job_tasks
 

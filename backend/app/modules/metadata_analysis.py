@@ -12,6 +12,8 @@ MITRE ATT&CK: T1593
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import contextlib
 import json
@@ -19,7 +21,7 @@ import logging
 import re
 import shutil
 import time
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode
 
 from app.models import ModuleTier
@@ -32,7 +34,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 EXIFTOOL_TIMEOUT = 30
 HTTP_TIMEOUT = 15
@@ -247,7 +249,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         try:
             data = json.loads(stdout.decode("utf-8", errors="replace"))
             if isinstance(data, list) and data:
-                return data[0]  # exiftool returns a list with one element
+                return cast(dict[str, Any], data[0])  # exiftool returns a list with one element
         except json.JSONDecodeError:
             return None
         return None
@@ -261,7 +263,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         try:
             import io
 
-            import docx
+            import docx  # type: ignore[import-not-found]
         except ImportError:
             return None
 

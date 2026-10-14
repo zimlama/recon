@@ -32,7 +32,7 @@ _engine_kwargs: dict[str, object] = {
 if settings.DATABASE_URL.startswith("sqlite"):
     _engine_kwargs["connect_args"] = {"check_same_thread": False}
 
-engine: Engine = create_engine(settings.DATABASE_URL, **_engine_kwargs)  # type: ignore[arg-type]
+engine: Engine = create_engine(settings.DATABASE_URL, **_engine_kwargs)
 
 # Enable FK enforcement + WAL + busy_timeout on SQLite
 if settings.DATABASE_URL.startswith("sqlite"):

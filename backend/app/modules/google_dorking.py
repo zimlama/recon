@@ -9,9 +9,11 @@ MITRE ATT&CK: T1593.002
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -26,7 +28,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SERPAPI_URL = "https://serpapi.com/search"
 SERPAPI_TIMEOUT = 15
@@ -257,7 +259,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
 
     async def _serpapi_query(self, query: str, api_key: str) -> list[dict[str, Any]]:
         """Run a single SerpAPI Google query."""
-        params = {
+        params: dict[str, str | int] = {
             "q": query,
             "api_key": api_key,
             "engine": "google",
@@ -271,7 +273,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                 data = response.json()
         except httpx.HTTPError:
             return []
-        return data.get("organic_results", [])
+        return cast(list[dict[str, Any]], data.get("organic_results", []))
 
 
 __all__ = ["GoogleDorkingModule"]

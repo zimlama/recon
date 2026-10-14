@@ -19,6 +19,7 @@ import typer
 
 from app.database import SessionLocal, init_db
 from app.models import Handoff, Job
+from app.handoff.schema import HandoffPacket
 from app.modules import MODULE_REGISTRY
 
 cli = typer.Typer(
@@ -94,11 +95,13 @@ def run(
 
     # Print results
     with SessionLocal() as db:
-        job = db.get(Job, job_id)
-        if job:
-            typer.echo(f"\n✅ Job completed in {job.duration_seconds:.0f}s")
-            typer.echo(f"   Status: {job.status.value}")
-            typer.echo(f"   Report: {job.report_pdf_path or job.report_md_path or 'not generated'}")
+        db_job: Job | None = db.get(Job, job_id)
+        if db_job is None:
+            typer.echo(f"\n❌ Job {job_id} not found in DB")
+        else:
+            typer.echo(f"\n✅ Job completed in {db_job.duration_seconds:.0f}s")
+            typer.echo(f"   Status: {db_job.status.value}")
+            typer.echo(f"   Report: {db_job.report_pdf_path or db_job.report_md_path or 'not generated'}")
 
 
 @cli.command()
@@ -111,9 +114,8 @@ def handoff(
     """Export a handoff packet for a job."""
     from app.handoff.exporter import export_handoff
 
-    async def _export() -> None:
-        packet = await export_handoff(job_id)
-        return packet
+    async def _export() -> HandoffPacket:
+        return await export_handoff(job_id)
 
     packet = asyncio.run(_export())
     json_data = json.dumps(packet.model_dump(mode="json"), indent=2, ensure_ascii=False)
@@ -178,10 +180,11 @@ def list_modules_cmd() -> None:
         )
 
 
-def main() -> None:
+def main() -> int:
     """CLI entry point (called by `recon` command)."""
     cli()
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main() or 0)
+    sys.exit(main())
