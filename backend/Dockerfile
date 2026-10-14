@@ -90,9 +90,17 @@ WORKDIR /app
 # Copy Python deps from builder
 COPY --from=builder /root/.local /home/recon/.local
 
-# Install Go-based recon tools as recon user
+# Install Go-based recon tools as recon user.
+# BuildKit tmpfs mounts make GOCACHE and TMPDIR RAM-only so the huge
+# subfinder+katana+httpx+waybackurls build artifacts don't get written
+# to a persistent image layer (which was filling up 5 GB-class hosts
+# with "no space left on device" mid-compile). Module cache is mounted
+# as a build cache so re-builds reuse downloaded .zip files.
 USER recon
-RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.6.3 \
+RUN --mount=type=tmpfs,target=/home/recon/.cache \
+    --mount=type=tmpfs,target=/home/recon/tmp \
+    --mount=type=cache,target=/home/recon/go/pkg/mod,sharing=shared \
+    go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.6.3 \
     && go install -v github.com/projectdiscovery/httpx/cmd/httpx@v1.3.7 \
     && go install github.com/tomnomnom/waybackurls@v0.1.0 \
     && go install -v github.com/projectdiscovery/katana/cmd/katana@latest

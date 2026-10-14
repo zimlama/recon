@@ -10,9 +10,12 @@ COPY package.json pnpm-lock.yaml* ./
 # Use plain `pnpm install` (no --frozen-lockfile) so the build works even
 # when pnpm-lock.yaml is absent from the repo. The first build generates
 # the lockfile inside the container; subsequent builds reuse it via
-# Docker's layer cache. Once pnpm-lock.yaml is committed to the repo,
-# switch back to `--frozen-lockfile` for reproducible builds.
-RUN pnpm install
+# a BuildKit cache mount on /root/.local/share/pnpm. tmpfs at /tmp
+# prevents pnpm's transient metadata and artifact downloads from being
+# persisted to the image layer (which exhausts space on small hosts).
+RUN --mount=type=tmpfs,target=/tmp \
+    --mount=type=cache,target=/root/.local/share/pnpm,sharing=shared \
+    pnpm install
 
 # ---- Builder ----
 FROM base AS builder
@@ -20,7 +23,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm build
+RUN --mount=type=tmpfs,target=/tmp \
+    pnpm build
 
 # ---- Production runner (nginx) ----
 FROM nginx:1.25-alpine AS runner
