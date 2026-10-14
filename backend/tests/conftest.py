@@ -37,7 +37,11 @@ async def db() -> AsyncIterator:
     Note: we drop_all BEFORE create_all to ensure a clean slate even if
     the engine was previously populated by another test.
     """
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: F401
+    from sqlalchemy.ext.asyncio import (  # noqa: F401
+        AsyncSession,
+        async_sessionmaker,
+        create_async_engine,
+    )
 
     # Use sync engine for tests (simpler)
     Base.metadata.drop_all(bind=engine)

@@ -10,7 +10,6 @@ MITRE ATT&CK: T1596.002 (WHOIS), T1590.001 (IP WHOIS)
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import time
@@ -35,11 +34,19 @@ RDAP_BOOTSTRAP_URL = "https://rdap.org/domain/{domain}"
 # Common WHOIS field patterns (for fallback parsing)
 _WHOIS_PATTERNS: dict[str, re.Pattern[str]] = {
     "registrar": re.compile(r"Registrar:\s*(.+?)(?:\r?\n|$)", re.IGNORECASE),
-    "creation_date": re.compile(r"(?:Creation Date|Created On|Registered On):\s*(.+?)(?:\r?\n|$)", re.IGNORECASE),
-    "expiration_date": re.compile(r"(?:Registry Expiry Date|Expiration Date|Expires On):\s*(.+?)(?:\r?\n|$)", re.IGNORECASE),
-    "updated_date": re.compile(r"(?:Updated Date|Last Modified):\s*(.+?)(?:\r?\n|$)", re.IGNORECASE),
+    "creation_date": re.compile(
+        r"(?:Creation Date|Created On|Registered On):\s*(.+?)(?:\r?\n|$)", re.IGNORECASE
+    ),
+    "expiration_date": re.compile(
+        r"(?:Registry Expiry Date|Expiration Date|Expires On):\s*(.+?)(?:\r?\n|$)", re.IGNORECASE
+    ),
+    "updated_date": re.compile(
+        r"(?:Updated Date|Last Modified):\s*(.+?)(?:\r?\n|$)", re.IGNORECASE
+    ),
     "registrant": re.compile(r"Registrant(?: Organization)?:\s*(.+?)(?:\r?\n|$)", re.IGNORECASE),
-    "nameservers_raw": re.compile(r"(?:Name Server|Nameservers?):\s*(.+?)(?:\r?\n|$)", re.IGNORECASE),
+    "nameservers_raw": re.compile(
+        r"(?:Name Server|Nameservers?):\s*(.+?)(?:\r?\n|$)", re.IGNORECASE
+    ),
     "status": re.compile(r"(?:Domain Status|Status):\s*(.+?)(?:\r?\n|$)", re.IGNORECASE),
     "emails": re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"),
 }
@@ -83,7 +90,7 @@ class WhoisRDAPModule(BaseReconModule):
         rdap_data: dict[str, Any] | None = None
         try:
             rdap_data = await self._query_rdap(target)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"RDAP query failed: {e!s}")
 
         # 2. WHOIS fallback (if RDAP failed or returned empty)
@@ -91,7 +98,7 @@ class WhoisRDAPModule(BaseReconModule):
         if not rdap_data:
             try:
                 whois_text = await self._query_whois(target)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"WHOIS query failed: {e!s}")
 
         # 3. Build findings
@@ -126,7 +133,7 @@ Prioritize findings by:
 
 Watch for: very recent creation (potential phishing setup), privacy redaction, nameservers in unexpected jurisdictions.
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 
@@ -251,7 +258,9 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
 
         return findings
 
-    def _extract_from_whois(self, text: str, domain: str) -> list[Finding]:
+    def _extract_from_whois(  # noqa: C901 - complexity 14, refactor tracked in issue #43
+        self, text: str, domain: str
+    ) -> list[Finding]:
         """Build findings from parsed WHOIS text (heuristic)."""
         findings: list[Finding] = []
         metadata: dict[str, Any] = {}
@@ -270,8 +279,11 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         emails = set(_WHOIS_PATTERNS["emails"].findall(text))
         # Filter out privacy/service emails
         real_emails = {
-            e for e in emails
-            if not any(p in e.lower() for p in ["abuse", "privacy", "redact", "proxy", "whoisguard"])
+            e
+            for e in emails
+            if not any(
+                p in e.lower() for p in ["abuse", "privacy", "redact", "proxy", "whoisguard"]
+            )
         }
         metadata["emails"] = list(real_emails)
 

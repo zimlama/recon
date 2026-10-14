@@ -13,6 +13,7 @@ MITRE ATT&CK: T1593
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -97,7 +98,7 @@ class MetadataAnalysisModule(BaseReconModule):
                 metadata = await self._extract_metadata(url)
                 if metadata:
                     findings.extend(self._metadata_to_findings(target, url, metadata))
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"Failed to extract metadata from {url}: {e!s}")
 
         return ModuleOutput(
@@ -133,7 +134,7 @@ Watch for:
 
 PII HANDLING: GPS coordinates are sensitive. Only note country/region unless authorized.
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 
@@ -181,7 +182,6 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
             if url not in urls:
                 urls.append(url)
         return urls
-
 
     async def _extract_metadata(self, url: str) -> dict[str, Any] | None:
         """Extract metadata from a document URL.
@@ -235,17 +235,14 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=EXIFTOOL_TIMEOUT
-            )
+            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=EXIFTOOL_TIMEOUT)
         except (TimeoutError, OSError):
             return None
         finally:
             import os
-            try:
+
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
 
         try:
             data = json.loads(stdout.decode("utf-8", errors="replace"))
@@ -273,7 +270,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
             if response is None or response.status_code != 200:
                 return None
             doc = docx.Document(io.BytesIO(response.content))
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
         cp = doc.core_properties
@@ -310,7 +307,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
             if not meta:
                 return None
             return {k: str(v) for k, v in meta.items() if v}
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     def _metadata_to_findings(
@@ -318,57 +315,67 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
     ) -> list[Finding]:
         """Convert extracted metadata to findings (one per interesting field)."""
         findings: list[Finding] = []
+        findings.extend(self._username_findings(target, url, metadata))
+        findings.extend(self._software_findings(target, url, metadata))
+        findings.extend(self._path_and_ip_findings(url, metadata))
+        return findings
 
-        # Author / creator / username fields
-        username = None
+    def _username_findings(
+        self, target: str, url: str, metadata: dict[str, Any]
+    ) -> list[Finding]:
+        """Author / creator / username fields → username findings."""
         for key in ("Author", "Creator", "LastModifiedBy", "Owner", "User"):
-            if key in metadata and metadata[key]:
+            if metadata.get(key):
                 username = str(metadata[key])
-                break
+                return [
+                    Finding(
+                        type=FindingType.OTHER,
+                        value=username,
+                        source="metadata_analysis",
+                        confidence=0.85,
+                        finding_metadata={
+                            "kind": "username",
+                            "url": url,
+                            "domain": target,
+                        },
+                    )
+                ]
+        return []
 
-        if username:
-            findings.append(
-                Finding(
-                    type=FindingType.OTHER,
-                    value=username,
-                    source="metadata_analysis",
-                    confidence=0.85,
-                    finding_metadata={
-                        "kind": "username",
-                        "url": url,
-                        "domain": target,
-                    },
-                )
-            )
-
-        # Software fields
-        software = None
+    def _software_findings(
+        self, target: str, url: str, metadata: dict[str, Any]
+    ) -> list[Finding]:
+        """Software / producer fields → tech stack findings (only with digit hint)."""
         for key in ("Software", "Producer", "Creator", "Application"):
-            if key in metadata and metadata[key]:
+            if metadata.get(key):
                 software = str(metadata[key])
-                break
-        if software and any(c.isdigit() for c in software):
-            findings.append(
-                Finding(
-                    type=FindingType.TECH_STACK,
-                    value=software,
-                    source="metadata_analysis",
-                    confidence=0.9,
-                    finding_metadata={
-                        "kind": "software",
-                        "url": url,
-                        "domain": target,
-                    },
-                )
-            )
+                if any(c.isdigit() for c in software):
+                    return [
+                        Finding(
+                            type=FindingType.TECH_STACK,
+                            value=software,
+                            source="metadata_analysis",
+                            confidence=0.9,
+                            finding_metadata={
+                                "kind": "software",
+                                "url": url,
+                                "domain": target,
+                            },
+                        )
+                    ]
+                return []
+        return []
 
-        # Path fields (look for internal paths in any metadata value)
+    def _path_and_ip_findings(
+        self, url: str, metadata: dict[str, Any]
+    ) -> list[Finding]:
+        """Scan all metadata values for internal paths and IP addresses."""
+        findings: list[Finding] = []
         for key, value in metadata.items():
             if not value:
                 continue
             value_str = str(value)
-            path_matches = PATH_PATTERNS.findall(value_str)
-            for path in path_matches[:3]:  # limit
+            for path in PATH_PATTERNS.findall(value_str)[:3]:
                 findings.append(
                     Finding(
                         type=FindingType.OTHER,
@@ -382,10 +389,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                         },
                     )
                 )
-
-            # Internal IP detection
-            ip_matches = INTERNAL_IP_PATTERNS.findall(value_str)
-            for ip in ip_matches[:3]:
+            for ip in INTERNAL_IP_PATTERNS.findall(value_str)[:3]:
                 findings.append(
                     Finding(
                         type=FindingType.IP_ADDRESS,
@@ -399,7 +403,6 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                         },
                     )
                 )
-
         return findings
 
     def _ext_from_url(self, url: str) -> str:
@@ -409,6 +412,5 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         if "." in path.split("/")[-1]:
             return "." + path.split(".")[-1].lower()
         return ".bin"
-
 
     __all__ = ["MetadataAnalysisModule"]

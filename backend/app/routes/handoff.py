@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 

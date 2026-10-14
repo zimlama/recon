@@ -7,8 +7,10 @@ environment on construction. When disabled, it is a transparent pass-
 through. When enabled, it gates POST requests to protected URLs on the
 existence of an active RoE for the target declared in the request body.
 """
+
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import timedelta
 from typing import Any
@@ -59,14 +61,12 @@ def session_factory(tmp_path):  # type: ignore[no-untyped-def]
 
     RoE.__table__.create(bind=eng, checkfirst=True)
     SignOff.__table__.create(bind=eng, checkfirst=True)
-    Session_ = sessionmaker(
-        bind=eng, autoflush=False, autocommit=False, expire_on_commit=False
-    )
+    session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
 
-    db = Session_()
+    db = session_()
 
     def factory() -> Session:
-        return Session_()
+        return session_()
 
     try:
         yield db, factory
@@ -75,10 +75,9 @@ def session_factory(tmp_path):  # type: ignore[no-untyped-def]
         SignOff.__table__.drop(bind=eng, checkfirst=True)
         RoE.__table__.drop(bind=eng, checkfirst=True)
         eng.dispose()
-        try:
+        with contextlib.suppress(FileNotFoundError):
             db_path.unlink()
-        except FileNotFoundError:
-            pass
+
 
 def _make_test_app(session_factory):  # type: ignore[no-untyped-def]
     """A tiny FastAPI app with the RoE middleware mounted.
@@ -194,9 +193,7 @@ async def test_middleware_passes_when_disabled(
 
     _db, factory = session_factory
     app = _make_test_app(factory)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/api/v1/jobs",
             json={"target": "example.com"},
@@ -221,9 +218,7 @@ async def test_middleware_blocks_when_enabled_and_no_roe(
 
     _db, factory = session_factory
     app = _make_test_app(factory)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/api/v1/jobs",
             json={"target": "example.com"},
@@ -253,9 +248,7 @@ async def test_middleware_passes_when_enabled_and_valid_roe(
 
     app = _make_test_app(factory)
     payload = {"target": "example.com", "extra": "field"}
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post("/api/v1/jobs", json=payload)
 
     assert resp.status_code == 200
@@ -280,9 +273,7 @@ async def test_middleware_skips_non_protected_endpoints(
 
     _db, factory = session_factory
     app = _make_test_app(factory)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post("/health", json={"any": "body"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
@@ -311,9 +302,7 @@ async def test_middleware_forwards_body_bytes_correctly(
 
     app = _make_test_app(factory)
     payload = {"target": "example.com", "list": [1, 2, 3], "nested": {"a": 1}}
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/api/v1/jobs",
             content=json.dumps(payload),
@@ -346,9 +335,7 @@ async def test_middleware_rejects_malformed_json(
     _db, factory = session_factory
 
     app = _make_test_app(factory)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/api/v1/jobs",
             content=b"{not valid json",
@@ -374,9 +361,7 @@ async def test_middleware_rejects_missing_target(
     _db, factory = session_factory
 
     app = _make_test_app(factory)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post("/api/v1/jobs", json={"other": "field"})
     assert resp.status_code == 400
     assert resp.json()["error"] == "missing_target"
@@ -396,9 +381,7 @@ async def test_middleware_rejects_non_string_target(
     _db, factory = session_factory
 
     app = _make_test_app(factory)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post("/api/v1/jobs", json={"target": 12345})
     assert resp.status_code == 400
     assert resp.json()["error"] == "missing_target"
@@ -418,9 +401,7 @@ async def test_middleware_rejects_non_dict_body(
     _db, factory = session_factory
 
     app = _make_test_app(factory)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/api/v1/jobs",
             content=b'["just", "an", "array"]',
@@ -446,9 +427,7 @@ async def test_middleware_falls_back_to_domain_on_bad_scope_type(
     monkeypatch.setenv("ROE_ENABLED", "true")
 
     app = _make_test_app(factory)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/api/v1/jobs",
             json={"target": "example.com", "scope_type": "not_a_real_scope"},
@@ -475,9 +454,7 @@ async def test_middleware_skips_disabled_path_with_invalid_body(
     _db, factory = session_factory
 
     app = _make_test_app(factory)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/api/v1/jobs",
             content=b"{not valid json",
@@ -505,9 +482,7 @@ async def test_middleware_rejects_empty_body(
     _db, factory = session_factory
 
     app = _make_test_app(factory)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/api/v1/jobs",
             content=b"",
@@ -542,9 +517,7 @@ async def test_middleware_normalizes_target_case_for_lookup(
 
     app = _make_test_app(factory)
     payload = {"target": "  EXAMPLE.com  "}
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post("/api/v1/jobs", json=payload)
     assert resp.status_code == 200
     assert resp.json()["echo"] == payload
@@ -613,9 +586,7 @@ async def test_middleware_does_not_gate_get_requests(
     async def list_jobs() -> dict[str, Any]:
         return {"jobs": []}
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get("/api/v1/jobs")
     assert resp.status_code == 200
     assert resp.json() == {"jobs": []}
@@ -648,9 +619,7 @@ async def test_middleware_gates_delete_requests(
     async def delete_job(job_id: str) -> dict[str, str]:
         return {"deleted": job_id}
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.request(
             "DELETE",
             "/api/v1/jobs/abc-123",
@@ -690,15 +659,9 @@ async def test_middleware_gates_put_and_patch_too(
     async def patch_job(job_id: str) -> dict[str, str]:
         return {"patched": job_id}
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
-        put_resp = await ac.put(
-            "/api/v1/jobs/abc-123", json={"target": "example.com"}
-        )
-        patch_resp = await ac.patch(
-            "/api/v1/jobs/abc-123", json={"target": "example.com"}
-        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        put_resp = await ac.put("/api/v1/jobs/abc-123", json={"target": "example.com"})
+        patch_resp = await ac.patch("/api/v1/jobs/abc-123", json={"target": "example.com"})
 
     assert put_resp.status_code == 403
     assert put_resp.json()["error"] == "roe_not_authorized"
@@ -743,9 +706,7 @@ async def test_middleware_returns_503_on_db_failure(
         raise boom
 
     with patch.object(RoEValidator, "is_authorized", side_effect=_raise):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post(
                 "/api/v1/jobs",
                 json={"target": "example.com"},
@@ -788,9 +749,7 @@ async def test_middleware_503_on_disconnection(
         raise boom
 
     with patch.object(RoEValidator, "is_authorized", side_effect=_raise):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post(
                 "/api/v1/jobs",
                 json={"target": "example.com"},

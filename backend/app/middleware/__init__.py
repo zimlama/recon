@@ -16,4 +16,3 @@ from app.middleware.request_id import RequestIdMiddleware
 from app.middleware.roe import RoEMiddleware
 
 __all__ = ["RequestIdMiddleware", "RoEMiddleware"]
-

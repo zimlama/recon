@@ -14,19 +14,17 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
-from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.handoff.exporter import export_handoff
-from app.llm.schemas import Priority, RecommendedAction, VerdictType
-from app.modules import MODULE_REGISTRY
+from app.llm.schemas import RecommendedAction, VerdictType
 from app.models import FindingType
+from app.modules import MODULE_REGISTRY
 from app.modules.base import Finding, ModuleInput, ModuleOutput
 
 
@@ -35,6 +33,7 @@ def temp_db():
     """Per-test file-based SQLite engine that becomes the app's GLOBAL engine."""
     fd, path = tempfile.mkstemp(suffix=".db")
     import os
+
     os.close(fd)
     Path(path).unlink(missing_ok=True)
 
@@ -47,17 +46,18 @@ def temp_db():
     # Base.metadata has internal state from a previous test
     Base.metadata.create_all(bind=eng, checkfirst=True)
 
-    Session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
+    session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
 
     # Patch the GLOBAL app.database.engine + SessionLocal so export_handoff
     # uses our test engine (without these tables, we get "no such table" error)
     import app.database as app_db
+
     original_engine = app_db.engine
     original_session = app_db.SessionLocal
     app_db.engine = eng
-    app_db.SessionLocal = Session_
+    app_db.SessionLocal = session_
 
-    yield eng, Session_
+    yield eng, session_
 
     # Restore
     Base.metadata.drop_all(bind=eng, checkfirst=True)
@@ -69,18 +69,29 @@ def temp_db():
 
 # ---- Helper: all 14 modules can be instantiated and have metadata ----
 
+
 def test_all_14_modules_registered() -> None:
     """All 15 modules are registered in the MODULE_REGISTRY (PR 4 added person_dossier)."""
     assert len(MODULE_REGISTRY) == 15
 
     expected = {
         # Tier 1
-        "whois_rdap", "dns_enum", "subdomain_enum",
-        "certificate_transparency", "wayback_machine", "email_harvesting",
+        "whois_rdap",
+        "dns_enum",
+        "subdomain_enum",
+        "certificate_transparency",
+        "wayback_machine",
+        "email_harvesting",
         # Tier 2
-        "shodan_censys", "github_recon", "metadata_analysis", "google_dorking",
+        "shodan_censys",
+        "github_recon",
+        "metadata_analysis",
+        "google_dorking",
         # Tier 3
-        "breach_data", "socmint", "employee_osint", "dark_web_osint",
+        "breach_data",
+        "socmint",
+        "employee_osint",
+        "dark_web_osint",
         # PR 4 (Tier 3 aggregator)
         "person_dossier",
     }
@@ -115,6 +126,7 @@ def test_tier_distribution() -> None:
 
 
 # ---- AI validation integration ----
+
 
 @pytest.mark.asyncio
 async def test_ai_validator_with_mock_llm() -> None:
@@ -241,30 +253,42 @@ async def test_ai_validator_handles_malformed_llm_response() -> None:
 # verify the asyncio.gather exception-handling path that JobRunner uses).
 network_methods = (
     # dns_enum
-    "_query_records", "_attempt_axfr", "_resolve_to_ips",
+    "_query_records",
+    "_attempt_axfr",
+    "_resolve_to_ips",
     # certificate_transparency / subdomain_enum
     "_query_crtsh",
     # wayback_machine
     "_query_cdx",
     # metadata_analysis
-    "_find_documents_via_wayback", "_extract_metadata",
-    "_extract_with_exiftool", "_extract_from_docx", "_extract_from_pdf",
+    "_find_documents_via_wayback",
+    "_extract_metadata",
+    "_extract_with_exiftool",
+    "_extract_from_docx",
+    "_extract_from_pdf",
     # email_harvesting
-    "_query_pgp_servers", "_query_single_pgp_server",
+    "_query_pgp_servers",
+    "_query_single_pgp_server",
     # employee_osint
     "_run_sherlock",
     # github_recon
-    "_search_code", "_search_commits", "_run_gitleaks",
+    "_search_code",
+    "_search_commits",
+    "_run_gitleaks",
     # shodan_censys
-    "_query_shodan_internetdb", "_query_censys",
+    "_query_shodan_internetdb",
+    "_query_censys",
     # google_dorking
-    "_search_serpapi", "_serpapi_query",
+    "_search_serpapi",
+    "_serpapi_query",
     # whois_rdap
-    "_query_rdap", "_query_whois",
+    "_query_rdap",
+    "_query_whois",
     # socmint
     "_check_platform",
     # dark_web_osint
-    "_search_ahmia", "_search_via_tor",
+    "_search_ahmia",
+    "_search_via_tor",
     # breach_data
     "_check_hibp",
 )
@@ -273,8 +297,12 @@ network_methods = (
 # We mock the asyncio function itself as a safety net in case the binary
 # IS installed on the test machine.
 subprocess_modules = {
-    "wayback_machine", "whois_rdap", "metadata_analysis",
-    "email_harvesting", "employee_osint", "subdomain_enum",
+    "wayback_machine",
+    "whois_rdap",
+    "metadata_analysis",
+    "email_harvesting",
+    "employee_osint",
+    "subdomain_enum",
 }
 
 
@@ -321,14 +349,13 @@ async def test_all_14_modules_can_run_in_parallel_with_mocks() -> None:
         # CRITICAL: Use asyncio.gather (NOT a for loop) — this is what
         # JobRunner.run_job does in production (job_runner.py:84).
         tasks = [
-            module.run(ModuleInput(target="example.com"))
-            for module in MODULE_REGISTRY.values()
+            module.run(ModuleInput(target="example.com")) for module in MODULE_REGISTRY.values()
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Verify all results are ModuleOutput (no exceptions escaped)
         assert len(results) == len(MODULE_REGISTRY) == 15
-        for name, result in zip(MODULE_REGISTRY.keys(), results):
+        for name, result in zip(MODULE_REGISTRY.keys(), results, strict=False):
             assert not isinstance(result, Exception), f"{name} raised: {result}"
             assert isinstance(result, ModuleOutput), f"{name} did not return ModuleOutput"
     finally:
@@ -355,7 +382,7 @@ async def test_all_14_modules_can_run_serially_with_mocks() -> None:
 
 def test_module_consistency() -> None:
     """Every module's name matches its class attribute."""
-    for name, module in MODULE_REGISTRY.items():
+    for _name, module in MODULE_REGISTRY.items():
         instance = module
         assert isinstance(instance.name, str)
         assert len(instance.name) > 0

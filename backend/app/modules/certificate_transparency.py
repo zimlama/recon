@@ -63,7 +63,7 @@ class CertificateTransparencyModule(BaseReconModule):
 
         try:
             crtsh_data = await self._query_crtsh(target)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"crt.sh query failed: {e!s}")
             return ModuleOutput(
                 module=self.name,
@@ -173,13 +173,11 @@ Respond with structured JSON matching the LDMValidationResult schema."""
             async with httpx.AsyncClient(timeout=CRTSH_TIMEOUT) as client:
                 response = await client.get(CRTSH_URL, params=params)
                 if response.status_code != 200:
-                    logger.debug(
-                        "crtsh_non_200", status=response.status_code, domain=domain
-                    )
+                    logger.debug("crtsh_non_200", status=response.status_code, domain=domain)
                     return None
                 try:
                     return response.json()
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     logger.debug("crtsh_invalid_json", error=str(e))
                     return None
         except httpx.HTTPError as e:
@@ -213,10 +211,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         """Dedupe by value, preserving the first-seen (likely most complete) entry."""
         by_value: dict[str, Finding] = {}
         for f in findings:
-            if f.value not in by_value:
-                by_value[f.value] = f
-            # Prefer higher confidence
-            elif f.confidence > by_value[f.value].confidence:
+            if f.value not in by_value or f.confidence > by_value[f.value].confidence:
                 by_value[f.value] = f
         return list(by_value.values())
 

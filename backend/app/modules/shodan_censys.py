@@ -83,9 +83,12 @@ class ShodanCensysModule(BaseReconModule):
 
         # 2. SSRF defense: only query public IPs
         from app.utils.network import filter_public_ips
+
         public_ips = filter_public_ips(ips)
         if not public_ips:
-            errors.append(f"No public IPs found for {target} (all resolved IPs are private/reserved)")
+            errors.append(
+                f"No public IPs found for {target} (all resolved IPs are private/reserved)"
+            )
             return ModuleOutput(
                 module=self.name,
                 findings=findings,
@@ -99,7 +102,7 @@ class ShodanCensysModule(BaseReconModule):
                 shodan_data = await self._query_shodan_internetdb(ip)
                 if shodan_data:
                     findings.extend(self._shodan_to_findings(ip, shodan_data))
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"Shodan InternetDB query for {ip} failed: {e!s}")
 
         # 4. Query Censys if keys are set (also only public IPs)
@@ -107,10 +110,12 @@ class ShodanCensysModule(BaseReconModule):
         if settings.CENSYS_API_ID and settings.CENSYS_API_SECRET:
             for ip in public_ips:
                 try:
-                    censys_data = await self._query_censys(ip, settings.CENSYS_API_ID, settings.CENSYS_API_SECRET)
+                    censys_data = await self._query_censys(
+                        ip, settings.CENSYS_API_ID, settings.CENSYS_API_SECRET
+                    )
                     if censys_data:
                         findings.extend(self._censys_to_findings(ip, censys_data))
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     errors.append(f"Censys query for {ip} failed: {e!s}")
         else:
             # Not an error — just inform
@@ -162,7 +167,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         try:
             answers = dns.resolver.resolve(domain, "A", raise_on_no_answer=False)
             return [str(rdata.address) for rdata in answers]
-        except Exception:  # noqa: BLE001
+        except Exception:
             return []
 
     async def _query_shodan_internetdb(self, ip: str) -> dict[str, Any] | None:
@@ -182,9 +187,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
             logger.debug("shodan_internetdb_http_error", error=str(e), ip=ip)
             return None
 
-    async def _query_censys(
-        self, ip: str, api_id: str, api_secret: str
-    ) -> dict[str, Any] | None:
+    async def _query_censys(self, ip: str, api_id: str, api_secret: str) -> dict[str, Any] | None:
         """Query Censys Search API for an IP. Free tier with API ID + Secret."""
         url = CENSYS_SEARCH_URL.format(ip=ip)
         try:

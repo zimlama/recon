@@ -46,6 +46,7 @@ def sample_crtsh_response() -> list[dict]:
 
 # ---- Happy paths ----
 
+
 @pytest.mark.asyncio
 async def test_crtsh_query_success(
     module: CertificateTransparencyModule,
@@ -53,9 +54,7 @@ async def test_crtsh_query_success(
 ) -> None:
     """crt.sh returns subdomains with cert metadata."""
     with respx.mock(base_url=CRTSH_URL) as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=sample_crtsh_response)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=sample_crtsh_response))
 
         result = await module.run(ModuleInput(target="example.com"))
 
@@ -84,9 +83,7 @@ async def test_crtsh_metadata_includes_cert_info(
         }
     ]
     with respx.mock(base_url=CRTSH_URL) as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=crt_data)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=crt_data))
 
         result = await module.run(ModuleInput(target="example.com"))
 
@@ -110,9 +107,7 @@ async def test_crtsh_strips_wildcard_prefix(
         },
     ]
     with respx.mock(base_url=CRTSH_URL) as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=crt_data)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=crt_data))
 
         result = await module.run(ModuleInput(target="example.com"))
 
@@ -135,12 +130,14 @@ async def test_crtsh_filters_names_not_matching_target(
 ) -> None:
     """Names not ending with the target domain are filtered out."""
     crt_data = [
-        {"id": 1, "issuer_name": "Test", "name_value": "api.example.com\nnotrelated.com\nexample.io"},
+        {
+            "id": 1,
+            "issuer_name": "Test",
+            "name_value": "api.example.com\nnotrelated.com\nexample.io",
+        },
     ]
     with respx.mock(base_url=CRTSH_URL) as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=crt_data)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=crt_data))
 
         result = await module.run(ModuleInput(target="example.com"))
 
@@ -162,9 +159,7 @@ async def test_crtsh_dedupes_by_value(
         {"id": 2, "issuer_name": "DigiCert", "name_value": "api.example.com"},
     ]
     with respx.mock(base_url=CRTSH_URL) as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=crt_data)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=crt_data))
 
         result = await module.run(ModuleInput(target="example.com"))
 
@@ -193,9 +188,7 @@ async def test_crtsh_dedup_prefers_higher_confidence(
         },
     ]
     with respx.mock(base_url=CRTSH_URL) as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=crt_data)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=crt_data))
 
         result = await module.run(ModuleInput(target="example.com"))
 
@@ -206,6 +199,7 @@ async def test_crtsh_dedup_prefers_higher_confidence(
 
 
 # ---- Error handling ----
+
 
 @pytest.mark.asyncio
 async def test_crtsh_http_error_logged(
@@ -267,6 +261,7 @@ async def test_crtsh_empty_response(
 
 # ---- _normalize_name ----
 
+
 def test_normalize_name_strips_wildcard(module: CertificateTransparencyModule) -> None:
     """Wildcard prefix is stripped, but bare target is filtered out (it's not a subdomain)."""
     # *.example.com → "example.com" after stripping, but "example.com" == target → filtered
@@ -315,6 +310,7 @@ def test_normalize_name_empty(module: CertificateTransparencyModule) -> None:
 
 
 # ---- Metadata ----
+
 
 def test_module_metadata(module: CertificateTransparencyModule) -> None:
     """Module has the right Tier 1 metadata."""

@@ -14,11 +14,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from typing import Any
 
 import httpx
 
-from app.config import get_settings
 from app.models import ModuleTier
 from app.modules.base import (
     BaseReconModule,
@@ -76,7 +74,9 @@ class BreachDataModule(BaseReconModule):
                 module=self.name,
                 findings=findings,
                 duration_seconds=time.time() - start,
-                errors=["No role-based patterns to check (configure emails via BREACH_EMAILS env var or run email_harvesting first)"],
+                errors=[
+                    "No role-based patterns to check (configure emails via BREACH_EMAILS env var or run email_harvesting first)"
+                ],
             )
 
         # 2. Check each email via HIBP k-anonymity
@@ -95,12 +95,16 @@ class BreachDataModule(BaseReconModule):
                             finding_metadata={
                                 "email_hash_prefix": email_hash,
                                 "breach_count": count,
-                                "severity": "HIGH" if count > 5 else "MEDIUM" if count > 1 else "LOW",
+                                "severity": "HIGH"
+                                if count > 5
+                                else "MEDIUM"
+                                if count > 1
+                                else "LOW",
                                 # CRITICAL: do NOT include "email" key with plaintext
                             },
                         )
                     )
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"HIBP check failed: {e!s}")
 
         return ModuleOutput(
@@ -127,7 +131,7 @@ Enrich each with:
 
 PRIVACY: NEVER transmit, log, or share actual emails or credentials. Only count breach exposure.
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 
@@ -139,8 +143,14 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         """
         # Common role-based patterns to check
         common_patterns = [
-            "admin", "info", "support", "noreply", "contact",
-            "security", "abuse", "postmaster",
+            "admin",
+            "info",
+            "support",
+            "noreply",
+            "contact",
+            "security",
+            "abuse",
+            "postmaster",
         ]
         return [f"{p}@{domain}" for p in common_patterns]
 

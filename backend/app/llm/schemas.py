@@ -7,12 +7,11 @@ validate responses from the AI before persisting to the database.
 from __future__ import annotations
 
 import enum
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class VerdictType(str, enum.Enum):
+class VerdictType(enum.StrEnum):
     """How confident we are that a finding is real + valuable."""
 
     CONFIRMED = "CONFIRMED"  # High confidence, in scope, actionable
@@ -21,7 +20,7 @@ class VerdictType(str, enum.Enum):
     FALSE_POSITIVE = "FALSE_POSITIVE"  # Not a real finding
 
 
-class Priority(str, enum.Enum):
+class Priority(enum.StrEnum):
     """How important a finding is for the next phase."""
 
     HIGH = "HIGH"
@@ -29,7 +28,7 @@ class Priority(str, enum.Enum):
     LOW = "LOW"
 
 
-class RecommendedAction(str, enum.Enum):
+class RecommendedAction(enum.StrEnum):
     """What the orchestrator should do next."""
 
     CONTINUE = "CONTINUE"  # Run more modules

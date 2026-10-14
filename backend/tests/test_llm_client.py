@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.llm.client import LLMClient, LLMError
-from app.llm.schemas import LDMValidationResult, VerdictType, Priority
+from app.llm.schemas import LDMValidationResult, Priority, VerdictType
 
 
 def _text_block(text: str) -> dict:
@@ -49,9 +49,7 @@ def _anthropic_429() -> dict:
 async def test_stub_response_when_no_api_key() -> None:
     """When API key is not configured, return stub response."""
     client = LLMClient(api_key="sk-minimax-replace-with-real-key")
-    response = await client.chat_completion(
-        messages=[{"role": "user", "content": "test"}]
-    )
+    response = await client.chat_completion(messages=[{"role": "user", "content": "test"}])
     assert "summary" in response
     assert "AI validation skipped" in response["summary"]
 
@@ -61,12 +59,14 @@ async def test_chat_completion_success() -> None:
     """chat_completion returns parsed JSON content (Anthropic format)."""
     client = LLMClient(api_key="sk-real-key", base_url="http://localhost:9999/v1")
 
-    valid_json = json.dumps({
-        "verdicts": [],
-        "summary": "Test summary that satisfies the 20-character minimum.",
-        "recommended_action": "CONTINUE",
-        "recommended_next_module_chain": [],
-    })
+    valid_json = json.dumps(
+        {
+            "verdicts": [],
+            "summary": "Test summary that satisfies the 20-character minimum.",
+            "recommended_action": "CONTINUE",
+            "recommended_next_module_chain": [],
+        }
+    )
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = _anthropic_ok(valid_json)
@@ -111,12 +111,14 @@ async def test_chat_completion_ignores_thinking_blocks() -> None:
     """Thinking blocks (M3.1-Flash-Preview always emits them) must be skipped."""
     client = LLMClient(api_key="sk-real-key", base_url="http://localhost:9999/v1")
 
-    valid_json = json.dumps({
-        "verdicts": [],
-        "summary": "Test summary that satisfies the 20-character minimum.",
-        "recommended_action": "CONTINUE",
-        "recommended_next_module_chain": [],
-    })
+    valid_json = json.dumps(
+        {
+            "verdicts": [],
+            "summary": "Test summary that satisfies the 20-character minimum.",
+            "recommended_action": "CONTINUE",
+            "recommended_next_module_chain": [],
+        }
+    )
     mock_response = MagicMock()
     mock_response.status_code = 200
     # Thinking block first, then text block
@@ -145,12 +147,14 @@ async def test_chat_completion_extracts_system_prompt() -> None:
     """A leading system message must be sent in the top-level ``system`` field."""
     client = LLMClient(api_key="sk-real-key", base_url="http://localhost:9999/v1")
 
-    valid_json = json.dumps({
-        "verdicts": [],
-        "summary": "Test summary that satisfies the 20-character minimum.",
-        "recommended_action": "CONTINUE",
-        "recommended_next_module_chain": [],
-    })
+    valid_json = json.dumps(
+        {
+            "verdicts": [],
+            "summary": "Test summary that satisfies the 20-character minimum.",
+            "recommended_action": "CONTINUE",
+            "recommended_next_module_chain": [],
+        }
+    )
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = _anthropic_ok(valid_json)
@@ -168,7 +172,9 @@ async def test_chat_completion_extracts_system_prompt() -> None:
             ],
         )
 
-    sent_payload = mock_client.post.call_args.kwargs.get("json") or mock_client.post.call_args[1].get("json")
+    sent_payload = mock_client.post.call_args.kwargs.get("json") or mock_client.post.call_args[
+        1
+    ].get("json")
     assert sent_payload["system"] == "You are a recon validator."
     # System message should NOT be in the messages list
     roles = [m["role"] for m in sent_payload["messages"]]
@@ -189,10 +195,14 @@ async def test_chat_completion_malformed_response_surfaces_marker() -> None:
     mock_response = MagicMock()
     mock_response.status_code = 200
     # Wrong shape: missing 'verdicts' key, summary too short, no list
-    mock_response.json.return_value = _anthropic_ok(json.dumps({
-        "summary": "too short",  # < 20 chars → schema invalid
-        "wrong_key": "wrong_value",
-    }))
+    mock_response.json.return_value = _anthropic_ok(
+        json.dumps(
+            {
+                "summary": "too short",  # < 20 chars → schema invalid
+                "wrong_key": "wrong_value",
+            }
+        )
+    )
     mock_response.raise_for_status = MagicMock()
 
     with patch.object(client, "_get_client") as mock_get:
@@ -250,12 +260,14 @@ async def test_chat_completion_429_retries_with_backoff() -> None:
         )
     )
 
-    valid_json = json.dumps({
-        "verdicts": [],
-        "summary": "Test summary that satisfies the 20-character minimum.",
-        "recommended_action": "CONTINUE",
-        "recommended_next_module_chain": [],
-    })
+    valid_json = json.dumps(
+        {
+            "verdicts": [],
+            "summary": "Test summary that satisfies the 20-character minimum.",
+            "recommended_action": "CONTINUE",
+            "recommended_next_module_chain": [],
+        }
+    )
     success_response = MagicMock()
     success_response.status_code = 200
     success_response.json.return_value = _anthropic_ok(valid_json)
@@ -278,9 +290,27 @@ def test_ldm_validation_result_helpers() -> None:
     """LDMValidationResult helper properties work."""
     result = LDMValidationResult(
         verdicts=[
-            {"value": "a", "verdict": VerdictType.CONFIRMED, "priority": Priority.HIGH, "confidence": 0.9, "reasoning": "a is good (10+ chars)"},
-            {"value": "b", "verdict": VerdictType.LIKELY, "priority": Priority.MEDIUM, "confidence": 0.7, "reasoning": "b is ok (10+ chars)"},
-            {"value": "c", "verdict": VerdictType.FALSE_POSITIVE, "priority": Priority.LOW, "confidence": 0.3, "reasoning": "c is bad (10+ chars)"},
+            {
+                "value": "a",
+                "verdict": VerdictType.CONFIRMED,
+                "priority": Priority.HIGH,
+                "confidence": 0.9,
+                "reasoning": "a is good (10+ chars)",
+            },
+            {
+                "value": "b",
+                "verdict": VerdictType.LIKELY,
+                "priority": Priority.MEDIUM,
+                "confidence": 0.7,
+                "reasoning": "b is ok (10+ chars)",
+            },
+            {
+                "value": "c",
+                "verdict": VerdictType.FALSE_POSITIVE,
+                "priority": Priority.LOW,
+                "confidence": 0.3,
+                "reasoning": "c is bad (10+ chars)",
+            },
         ],
         summary="Mixed results across the three verdicts here",
         recommended_action="CONTINUE",

@@ -22,6 +22,7 @@ SCHEMA_VERSION = "1.0.0"
 
 # ---- Sub-models ----
 
+
 class HandoffSource(BaseModel):
     """Identifies the producer of the handoff."""
 
@@ -159,6 +160,7 @@ class HandoffPersonDossierSummary(BaseModel):
 
 
 # ---- Top-level packet ----
+
 
 class HandoffPacket(BaseModel):
     """The complete handoff packet (public contract).

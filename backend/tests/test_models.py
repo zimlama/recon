@@ -8,7 +8,8 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import contextlib
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import create_engine
@@ -24,7 +25,6 @@ from app.models import (
     ModuleRun,
     _now,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers — the Job table has a duplicate-index bug in the Finding model
@@ -47,9 +47,7 @@ def jobs_only_db(tmp_path):
     )
     Job.__table__.create(bind=eng, checkfirst=True)
     ModuleRun.__table__.create(bind=eng, checkfirst=True)
-    Session_ = sessionmaker(
-        bind=eng, autoflush=False, autocommit=False, expire_on_commit=False
-    )
+    session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
 
     # Patch SessionLocal in both modules so JobRunner + helpers see this DB.
     import app.database as app_db
@@ -57,10 +55,10 @@ def jobs_only_db(tmp_path):
 
     original_app_session = app_db.SessionLocal
     original_jr_session = jr_module.SessionLocal
-    app_db.SessionLocal = Session_
-    jr_module.SessionLocal = Session_
+    app_db.SessionLocal = session_
+    jr_module.SessionLocal = session_
 
-    db = Session_()
+    db = session_()
     try:
         yield db
     finally:
@@ -70,10 +68,8 @@ def jobs_only_db(tmp_path):
         app_db.SessionLocal = original_app_session
         jr_module.SessionLocal = original_jr_session
         eng.dispose()
-        try:
+        with contextlib.suppress(FileNotFoundError):
             db_path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -373,23 +369,19 @@ def identity_map_db(tmp_path):
     Job.__table__.create(bind=eng, checkfirst=True)
     ModuleRun.__table__.create(bind=eng, checkfirst=True)
     IdentityMap.__table__.create(bind=eng, checkfirst=True)
-    Session_ = sessionmaker(
-        bind=eng, autoflush=False, autocommit=False, expire_on_commit=False
-    )
+    session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
 
-    db = Session_()
+    db = session_()
     try:
-        yield db, Session_
+        yield db, session_
     finally:
         db.close()
         IdentityMap.__table__.drop(bind=eng, checkfirst=True)
         ModuleRun.__table__.drop(bind=eng, checkfirst=True)
         Job.__table__.drop(bind=eng, checkfirst=True)
         eng.dispose()
-        try:
+        with contextlib.suppress(FileNotFoundError):
             db_path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def test_identity_map_creates_with_required_fields(identity_map_db) -> None:

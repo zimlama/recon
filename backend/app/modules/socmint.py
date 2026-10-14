@@ -13,10 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shlex
-import shutil
 import time
-from typing import Any
 
 from app.models import ModuleTier
 from app.modules.base import (
@@ -74,7 +71,9 @@ class SOCMINTModule(BaseReconModule):
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for (platform_name, url_template, _), result in zip(SOCIAL_PLATFORMS, results):
+        for (platform_name, url_template, _), result in zip(
+            SOCIAL_PLATFORMS, results, strict=False
+        ):
             if isinstance(result, Exception):
                 errors.append(f"{platform_name} check failed: {result!s}")
                 continue
@@ -122,7 +121,7 @@ ETHICS:
 - Respect platform ToS
 - Note OPSEC risks: posting patterns reveal location/timezone
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 

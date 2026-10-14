@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import httpx
 from pydantic import ValidationError
@@ -95,7 +94,7 @@ class AIValidator:
                     recommended_action="REQUEST_USER_DECISION",
                     recommended_next_module_chain=[],
                 )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             # Safety net: unexpected exception (e.g. module crashed, generic
             # RuntimeError from a stub client). Treat as API failure rather
             # than letting it bubble up and crash the job.

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -68,6 +67,7 @@ def sample_cdx_response() -> list:
 
 # ---- CDX API path ----
 
+
 @pytest.mark.asyncio
 async def test_cdx_query_success(
     module: WaybackMachineModule,
@@ -75,9 +75,7 @@ async def test_cdx_query_success(
 ) -> None:
     """CDX API returns URLs with metadata."""
     with respx.mock(base_url=CDX_API_URL) as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=sample_cdx_response)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=sample_cdx_response))
 
         with patch("shutil.which", return_value=None):  # no gau/waybackurls
             result = await module.run(ModuleInput(target="example.com"))
@@ -101,9 +99,7 @@ async def test_cdx_metadata_includes_timestamp_and_status(
 ) -> None:
     """CDX findings include timestamp, status code, mimetype."""
     with respx.mock(base_url=CDX_API_URL) as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=sample_cdx_response)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=sample_cdx_response))
 
         with patch("shutil.which", return_value=None):
             result = await module.run(ModuleInput(target="example.com"))
@@ -180,6 +176,7 @@ async def test_cdx_uses_url_wildcard(
 
 # ---- gau/waybackurls subprocess path ----
 
+
 @pytest.mark.asyncio
 async def test_gau_subprocess_success(
     module: WaybackMachineModule,
@@ -193,12 +190,10 @@ async def test_gau_subprocess_success(
         # Only gau installed, not waybackurls
         return "/usr/bin/gau" if tool == "gau" else None
 
-    with patch("shutil.which", side_effect=which_side_effect):
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            with respx.mock(base_url=CDX_API_URL) as mock_router:
-                # CDX fails but gau succeeded
-                mock_router.get("/").mock(side_effect=httpx.ConnectError("fail"))
-                result = await module.run(ModuleInput(target="example.com"))
+    with patch("shutil.which", side_effect=which_side_effect), patch("asyncio.create_subprocess_exec", return_value=mock_proc), respx.mock(base_url=CDX_API_URL) as mock_router:
+        # CDX fails but gau succeeded
+        mock_router.get("/").mock(side_effect=httpx.ConnectError("fail"))
+        result = await module.run(ModuleInput(target="example.com"))
 
     assert any(f.source == "gau" for f in result.findings)
     urls = {f.value for f in result.findings}
@@ -219,9 +214,7 @@ async def test_waybackurls_subprocess_success(
         b"http://example.com/old-page2\n"
     )
     mock_proc_gau = AsyncMock()
-    mock_proc_gau.communicate = AsyncMock(
-        return_value=(b"http://example.com/shared\n", b"")
-    )
+    mock_proc_gau.communicate = AsyncMock(return_value=(b"http://example.com/shared\n", b""))
     mock_proc_wburls = AsyncMock()
     mock_proc_wburls.communicate = AsyncMock(return_value=(stdout_data, b""))
 
@@ -234,11 +227,9 @@ async def test_waybackurls_subprocess_success(
     def which_side_effect(tool: str) -> str:
         return f"/usr/bin/{tool}"  # report both tools as installed
 
-    with patch("shutil.which", side_effect=which_side_effect):
-        with patch("asyncio.create_subprocess_exec", side_effect=exec_side_effect):
-            with respx.mock(base_url=CDX_API_URL) as mock_router:
-                mock_router.get("/").mock(side_effect=httpx.ConnectError("fail"))
-                result = await module.run(ModuleInput(target="example.com"))
+    with patch("shutil.which", side_effect=which_side_effect), patch("asyncio.create_subprocess_exec", side_effect=exec_side_effect), respx.mock(base_url=CDX_API_URL) as mock_router:
+        mock_router.get("/").mock(side_effect=httpx.ConnectError("fail"))
+        result = await module.run(ModuleInput(target="example.com"))
 
     # Both sources contribute findings
     assert any(f.source == "waybackurls" for f in result.findings)
@@ -253,11 +244,9 @@ async def test_subprocess_timeout(
     mock_proc = AsyncMock()
     mock_proc.communicate = AsyncMock(side_effect=TimeoutError())
 
-    with patch("shutil.which", return_value="/usr/bin/gau"):
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            with respx.mock(base_url=CDX_API_URL) as mock_router:
-                mock_router.get("/").mock(side_effect=httpx.ConnectError("fail"))
-                result = await module.run(ModuleInput(target="example.com"))
+    with patch("shutil.which", return_value="/usr/bin/gau"), patch("asyncio.create_subprocess_exec", return_value=mock_proc), respx.mock(base_url=CDX_API_URL) as mock_router:
+        mock_router.get("/").mock(side_effect=httpx.ConnectError("fail"))
+        result = await module.run(ModuleInput(target="example.com"))
 
     # gau failed but no error reported (just no findings from it)
     assert not any(f.source == "gau" for f in result.findings)
@@ -265,10 +254,11 @@ async def test_subprocess_timeout(
 
 # ---- Dedupe ----
 
+
 def test_dedupe_prefers_higher_confidence(module: WaybackMachineModule) -> None:
     """When same URL from multiple sources, higher-confidence wins."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     findings = [
         Finding(
@@ -290,6 +280,7 @@ def test_dedupe_prefers_higher_confidence(module: WaybackMachineModule) -> None:
 
 
 # ---- Interesting path detection ----
+
 
 def test_interesting_path_admin(module: WaybackMachineModule) -> None:
     """/admin path is interesting."""
@@ -328,6 +319,7 @@ def test_interesting_path_patterns_count() -> None:
 
 
 # ---- Metadata ----
+
 
 def test_module_metadata(module: WaybackMachineModule) -> None:
     """Module has the right Tier 1 metadata."""

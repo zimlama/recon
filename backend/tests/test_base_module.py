@@ -31,6 +31,7 @@ class ConcreteTestModule(BaseReconModule):
 
 class _AbstractAttempt(BaseReconModule):
     """Intentionally missing run() and get_ai_prompt() to test ABC."""
+
     name = "abstract"
     description = "Should not be instantiable"
 
@@ -101,7 +102,7 @@ def test_target_format_validation() -> None:
     """target validation strips and lowercases."""
     m = WhoisRDAPModule()
     assert m.validate_target_format("EXAMPLE.COM") == "example.com"
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="target"):
         m.validate_target_format("")
 
 
@@ -115,6 +116,7 @@ def test_module_repr() -> None:
 
 
 # ---- SSRF defense helpers (safe_http_get / safe_http_get_async) ----
+
 
 class _SSRFProbe(ConcreteTestModule):
     """Concrete subclass exposing the async SSRF helper for tests."""
@@ -143,9 +145,7 @@ def test_safe_http_get_returns_response_on_200() -> None:
 def test_safe_http_get_returns_response_on_404() -> None:
     """safe_http_get returns the response even on 4xx (not None — caller decides)."""
     with respx.mock(assert_all_called=False) as mock_router:
-        mock_router.get("https://example.com/missing").mock(
-            return_value=httpx.Response(404)
-        )
+        mock_router.get("https://example.com/missing").mock(return_value=httpx.Response(404))
         resp = BaseReconModule.safe_http_get("https://example.com/missing")
     assert resp is not None
     assert resp.status_code == 404
@@ -157,9 +157,7 @@ def test_safe_http_get_returns_none_on_timeout() -> None:
         mock_router.get("https://example.com/slow").mock(
             side_effect=httpx.ConnectTimeout("timed out")
         )
-        resp = BaseReconModule.safe_http_get(
-            "https://example.com/slow", timeout=1.0
-        )
+        resp = BaseReconModule.safe_http_get("https://example.com/slow", timeout=1.0)
     assert resp is None
 
 
@@ -201,9 +199,7 @@ def test_safe_http_get_does_not_follow_redirects() -> None:
     with respx.mock(assert_all_called=False) as mock_router:
         # Server returns a redirect to localhost (RFC 1918 / loopback).
         mock_router.get("https://example.com/redirect").mock(
-            return_value=httpx.Response(
-                302, headers={"Location": "http://127.0.0.1:8080/admin"}
-            )
+            return_value=httpx.Response(302, headers={"Location": "http://127.0.0.1:8080/admin"})
         )
         resp = BaseReconModule.safe_http_get("https://example.com/redirect")
     assert resp is not None
@@ -247,9 +243,7 @@ async def test_safe_http_get_async_does_not_follow_redirects(
     """safe_http_get_async does NOT follow redirects (SSRF pivot defense)."""
     with respx.mock(assert_all_called=False) as mock_router:
         mock_router.get("https://example.com/redir").mock(
-            return_value=httpx.Response(
-                301, headers={"Location": "http://10.0.0.1/internal"}
-            )
+            return_value=httpx.Response(301, headers={"Location": "http://10.0.0.1/internal"})
         )
         resp = await ssrf_probe.probe("https://example.com/redir")
     assert resp is not None
@@ -260,9 +254,7 @@ async def test_safe_http_get_async_does_not_follow_redirects(
 def test_safe_http_get_is_static() -> None:
     """safe_http_get is a @staticmethod — callable on the class itself."""
     # If it weren't static, this would require an instance.
-    assert isinstance(
-        BaseReconModule.__dict__["safe_http_get"], staticmethod
-    )
+    assert isinstance(BaseReconModule.__dict__["safe_http_get"], staticmethod)
 
 
 def test_safe_http_get_async_is_instance_method() -> None:

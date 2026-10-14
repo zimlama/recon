@@ -28,7 +28,7 @@ async def generate_handoff_for_job(job_id: str) -> None:
     try:
         await export_handoff(job_id)
         logger.info("handoff_generated job_id=%s", job_id)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("handoff_generation_failed job_id=%s error=%s", job_id, e)
         try:
             from app.database import SessionLocal
@@ -41,7 +41,7 @@ async def generate_handoff_for_job(job_id: str) -> None:
                     note = f"\nHandoff generation failed: {e!s}"
                     job.error_message = (job.error_message or "") + note
                     db.commit()
-        except Exception:  # noqa: BLE001
+        except Exception:
             # Swallowing here is intentional — we already have the original
             # handoff failure logged. Don't let a secondary DB error mask it.
             logger.exception("handoff_failure_persist_failed job_id=%s", job_id)

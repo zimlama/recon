@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -72,6 +71,7 @@ DNSSEC: signedDelegation
 
 # ---- RDAP path ----
 
+
 @pytest.mark.asyncio
 async def test_rdap_success(
     module: WhoisRDAPModule,
@@ -92,8 +92,7 @@ async def test_rdap_success(
 
     # The consolidated finding
     consolidated = next(
-        f for f in result.findings
-        if f.value == "example.com" and f.source == "rdap"
+        f for f in result.findings if f.value == "example.com" and f.source == "rdap"
     )
     assert consolidated.confidence == 0.95
     assert consolidated.finding_metadata["handle"] == "EXAMPLE-COM"
@@ -125,15 +124,16 @@ async def test_rdap_404_falls_back_to_whois(
 
         # Mock the WHOIS subprocess call
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            return_value=(sample_whois_text.encode(), b"")
-        )
+        mock_proc.communicate = AsyncMock(return_value=(sample_whois_text.encode(), b""))
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             result = await module.run(ModuleInput(target="example.com"))
 
     assert result.module == "whois_rdap"
-    assert any("RDAP" in e or "404" in e or "WHOIS" in e for e in result.errors) or len(result.errors) == 0
+    assert (
+        any("RDAP" in e or "404" in e or "WHOIS" in e for e in result.errors)
+        or len(result.errors) == 0
+    )
     # Should have findings from WHOIS
     assert len(result.findings) >= 1
     consolidated = next(f for f in result.findings if f.value == "example.com")
@@ -152,9 +152,7 @@ async def test_rdap_http_error_falls_back_to_whois(
         )
 
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            return_value=(sample_whois_text.encode(), b"")
-        )
+        mock_proc.communicate = AsyncMock(return_value=(sample_whois_text.encode(), b""))
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             result = await module.run(ModuleInput(target="example.com"))
@@ -185,6 +183,7 @@ async def test_both_sources_fail(module: WhoisRDAPModule) -> None:
 
 # ---- WHOIS parsing ----
 
+
 @pytest.mark.asyncio
 async def test_whois_parsing_extracts_fields(
     module: WhoisRDAPModule,
@@ -193,15 +192,11 @@ async def test_whois_parsing_extracts_fields(
     """WHOIS parsing extracts registrar, dates, nameservers."""
     # RDAP fails
     with respx.mock(base_url="https://rdap.org") as mock_router:
-        mock_router.get("/domain/example.com").mock(
-            return_value=httpx.Response(404)
-        )
+        mock_router.get("/domain/example.com").mock(return_value=httpx.Response(404))
 
         # WHOIS succeeds
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            return_value=(sample_whois_text.encode(), b"")
-        )
+        mock_proc.communicate = AsyncMock(return_value=(sample_whois_text.encode(), b""))
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             result = await module.run(ModuleInput(target="example.com"))
@@ -234,14 +229,10 @@ Email: privacy@withheld-for-privacy.com
 """
 
     with respx.mock(base_url="https://rdap.org") as mock_router:
-        mock_router.get("/domain/example.com").mock(
-            return_value=httpx.Response(404)
-        )
+        mock_router.get("/domain/example.com").mock(return_value=httpx.Response(404))
 
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            return_value=(whois_text.encode(), b"")
-        )
+        mock_proc.communicate = AsyncMock(return_value=(whois_text.encode(), b""))
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             result = await module.run(ModuleInput(target="example.com"))
@@ -255,6 +246,7 @@ Email: privacy@withheld-for-privacy.com
 
 
 # ---- Target validation ----
+
 
 @pytest.mark.asyncio
 async def test_target_is_normalized(
@@ -273,17 +265,21 @@ async def test_target_is_normalized(
 
 # ---- AI prompt ----
 
+
 def test_ai_prompt_is_substantive(module: WhoisRDAPModule) -> None:
     """AI prompt has the required structure."""
     prompt = module.get_ai_prompt()
     assert "WHOIS" in prompt or "RDAP" in prompt
     assert "CONFIRMED" in prompt
     assert "FALSE_POSITIVE" in prompt
-    assert "HIGH" in prompt and "MEDIUM" in prompt and "LOW" in prompt
+    assert "HIGH" in prompt
+    assert "MEDIUM" in prompt
+    assert "LOW" in prompt
     assert len(prompt) > 200
 
 
 # ---- Metadata ----
+
 
 def test_module_metadata(module: WhoisRDAPModule) -> None:
     """Module has the right Tier 1 metadata."""
@@ -296,6 +292,7 @@ def test_module_metadata(module: WhoisRDAPModule) -> None:
 
 
 # ---- SSRF defense: adopt BaseReconModule.safe_http_get_async ----
+
 
 @pytest.mark.asyncio
 async def test_query_rdap_uses_safe_http_get_async(
@@ -329,6 +326,7 @@ async def test_query_rdap_uses_safe_http_get_async(
 @pytest.mark.asyncio
 async def test_query_rdap_safe_http_get_returns_none(module: WhoisRDAPModule) -> None:
     """When safe_http_get_async returns None (e.g., SSRF blocked), RDAP returns None."""
+
     async def fake_safe(url: str, **kwargs: object) -> None:
         return None
 
@@ -341,6 +339,7 @@ async def test_query_rdap_safe_http_get_returns_none(module: WhoisRDAPModule) ->
 @pytest.mark.asyncio
 async def test_query_rdap_non_200_returns_none(module: WhoisRDAPModule) -> None:
     """When RDAP returns non-200, the function returns None."""
+
     async def fake_safe(url: str, **kwargs: object) -> httpx.Response:
         return httpx.Response(404, text="Not Found")
 

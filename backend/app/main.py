@@ -5,9 +5,8 @@ Boots the app, registers routes, configures middleware, manages lifespan.
 
 from __future__ import annotations
 
-import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import structlog
 from fastapi import Depends, FastAPI, Header, HTTPException, status
@@ -37,6 +36,7 @@ settings = get_settings()
 # business route requires 'Authorization: Bearer <RECON_API_KEY>'.
 # Health and docs routes stay open by NOT attaching this dependency to them.
 
+
 async def verify_api_key(
     authorization: str | None = Header(default=None),
 ) -> None:
@@ -55,7 +55,7 @@ async def verify_api_key(
             detail="Missing or invalid Authorization header",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token = authorization[len("Bearer "):]
+    token = authorization[len("Bearer ") :]
     if token != settings.RECON_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         swept = await app.state.job_runner.sweep_stuck_jobs(max_age_minutes=30)
         logger.info("startup_sweep_complete", swept_jobs=swept)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("startup_sweep_failed", error=str(e))
 
     logger.info("app_ready")
@@ -112,9 +112,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     in_flight = get_background_job_tasks()
     if in_flight:
-        logger.info(
-            "draining_background_tasks", count=len(in_flight)
-        )
+        logger.info("draining_background_tasks", count=len(in_flight))
         done, pending = await drain_background_job_tasks_async(timeout=30.0)
         logger.info(
             "background_tasks_drained",
@@ -180,7 +178,9 @@ def create_app() -> FastAPI:
     # NOT included here, so they remain public.
     _auth = [Depends(verify_api_key)]
     app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["jobs"], dependencies=_auth)
-    app.include_router(modules.router, prefix="/api/v1/modules", tags=["modules"], dependencies=_auth)
+    app.include_router(
+        modules.router, prefix="/api/v1/modules", tags=["modules"], dependencies=_auth
+    )
     app.include_router(findings.router, prefix="/api/v1", tags=["findings"], dependencies=_auth)
     app.include_router(reports.router, prefix="/api/v1", tags=["reports"], dependencies=_auth)
     app.include_router(handoff.router, prefix="/api/v1", tags=["handoff"], dependencies=_auth)
@@ -237,7 +237,7 @@ def create_app() -> FastAPI:
         # usually means MINIMAX_API_KEY is missing/malformed.
         try:
             LLMClient()
-        except Exception as exc:  # noqa: BLE001 — readiness wants to flag all
+        except Exception as exc:
             logger.error("ready_check_llm_failed error=%s", exc)
             return JSONResponse(
                 status_code=503,
