@@ -143,6 +143,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Create reports directory
+        run: mkdir -p reports
+
       - name: Run trivy filesystem scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -153,7 +156,7 @@ jobs:
           severity: "HIGH,CRITICAL"
           ignore-unfixed: true
           exit-code: "1"
-          quiet: "true"
+          hide-progress: true
 
       - name: Upload SARIF to Security tab
         if: always()
@@ -172,7 +175,7 @@ jobs:
           severity: "HIGH,CRITICAL"
           ignore-unfixed: true
           exit-code: "1"
-          quiet: "true"
+          hide-progress: true
 
       - name: Upload SARIF backend image
         if: always()
@@ -191,7 +194,7 @@ jobs:
           severity: "HIGH,CRITICAL"
           ignore-unfixed: true
           exit-code: "1"
-          quiet: "true"
+          hide-progress: true
 
       - name: Upload SARIF frontend image
         if: always()
