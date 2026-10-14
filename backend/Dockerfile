@@ -56,7 +56,8 @@ RUN set -eux; \
         armv7l|armv6l) go_arch=armv6l ;; \
         *) echo "Unsupported architecture: $arch"; exit 1 ;; \
     esac; \
-    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" -o go.tar.gz \
+    curl -fsSL --connect-timeout 600 --max-time 1800 --retry 5 --retry-delay 10 --retry-all-errors \
+        "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" -o go.tar.gz \
     && tar -C /usr/local -xzf go.tar.gz \
     && rm go.tar.gz
 ENV PATH="/usr/local/go/bin:/home/recon/go/bin:${PATH}" \
