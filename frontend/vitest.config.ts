@@ -8,6 +8,11 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./tests/setup.ts'],
+    // Issue #49: scope vitest to tests/unit/** so it doesn't try to
+    // run Playwright specs in tests/e2e/** (vitest doesn't understand
+    // Playwright's test.describe/test API and crashes on it).
+    include: ['tests/unit/**/*.{test,spec}.{ts,tsx}'],
+    exclude: ['tests/e2e/**', 'node_modules/**', 'dist/**', '.next/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json'],
