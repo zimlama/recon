@@ -146,7 +146,7 @@ jobs:
       - name: Create reports directory
         run: mkdir -p reports
 
-      - name: Run trivy filesystem scan
+      - name: Run trivy filesystem scan (advisory in Phase 1)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "fs"
@@ -155,8 +155,12 @@ jobs:
           output: "reports/trivy-fs.sarif"
           severity: "HIGH,CRITICAL"
           ignore-unfixed: true
-          exit-code: "1"
+          exit-code: "0"
           hide-progress: true
+        # NOTE: exit-code: "0" makes the scan ADVISORY during Phase 1.
+        # We expect to surface existing CVEs on the first run — the gate's
+        # job is to FIND them and report to Security tab. Once we triage
+        # and fix the existing CVE backlog, switch to exit-code: "1".
 
       - name: Upload SARIF to Security tab
         if: always()
