@@ -1,0 +1,38 @@
+# .trivyignore — accepted CVE IDs for the trivy fs scan (PR-G2).
+# Format: one CVE ID per line. Lines starting with `#` are comments.
+# Reference: https://aquasecurity.github.io/trivy/v0.36/docs/suppression/
+#
+# Each entry below is a known-accepted CVE that cannot be fixed today
+# without a MAJOR bump (deferred to Issue #38 v0.3.0). When the bumped
+# deps land and lockfile is regenerated, these entries MUST be removed
+# and the trivy fs gate verified clean.
+#
+# Strategy: accept the next.js 14.x CVEs and the postcss 8.4.31
+# transitive CVEs that are fixed by the postcss override in
+# frontend/pnpm-workspace.yaml (postcss 8.4.31 → 8.5.18+).
+# Everything else (currently 0 CVEs) is unblocked by the override.
+
+# next.js 14.x CRITICAL — fix requires next 15.5.24+ (MAJOR, #38)
+CVE-2026-75604
+GHSA-p293-qw3h-jr36
+GHSA-2xp9-vwfh-vxw4
+
+# next.js 14.x HIGH — fix requires next 15.5.16+ / 15.5.21+ (MAJOR, #38)
+CVE-2026-44573
+CVE-2026-44578
+CVE-2026-64641
+CVE-2026-64645
+CVE-2026-64649
+GHSA-8h8q-6873-q5fj
+GHSA-h25m-26qc-wcjf
+GHSA-q4gf-8mx6-v5v3
+
+# postcss 8.4.31 transitive HIGH — fix is in postcss 8.5.12+ / 8.5.18+
+# which IS installed via the pnpm-workspace.yaml override (postcss 8.5.30).
+# Trivy fs still flags these because the stale frontend/package-lock.json
+# (npm format, kept for fallback) pins the vulnerable 8.4.31 transitive
+# via next. The override does not retroactively update package-lock.json
+# since it's npm-format. When the deprecated package-lock.json is removed
+# (separate PR), these entries MUST be removed from this file.
+CVE-2026-45623
+CVE-2026-73646

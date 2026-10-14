@@ -1,0 +1,41 @@
+{
+  // audit-ci config for npm-audit gate (PR-G2, blocking mode).
+  // Tool: https://github.com/IBM/audit-ci (v7+, used via `pnpm dlx audit-ci@^7`)
+  //
+  // Threshold: critical-only. Anything >= critical fails the CI job.
+  // Moderate / high CVEs are surfaced in the audit output (and the
+  // JSON artifact) but do NOT block — gradual hardening strategy.
+  //
+  // Allowlist: the 5 critical CVEs that remain after every possible
+  // override / minor bump. Each has a rationale + expiry date tied to
+  // the v0.3.0 release plan in Issue #38.
+  //
+  "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
+  "critical": true,
+  "package-manager": "pnpm",
+  "report-type": "full",
+  "output-format": "json",
+  "allowlist": [
+    // next.js 14.x criticals — fix requires next 15.5.24+ (MAJOR bump,
+    // deferred to v0.3.0 Issue #38 because next 15 changes App Router
+    // behavior + requires React 19 alignment).
+    "GHSA-p293-qw3h-jr36",
+    "GHSA-2xp9-vwfh-vxw4",
+
+    // vitest 1.6.1 < 3.2.6 — fix requires vitest 3.2.6+ (MAJOR bump,
+    // deferred to v0.3.0 Issue #38 because vitest 3+ drops node 18,
+    // changes Vite 5+ peer, and shifts default pool API).
+    "GHSA-5xrq-8626-4rwp",
+
+    // tinypool 0.8.4 — FALSE POSITIVE. The advisories GHSA-5gmw-xhrv-c9v3
+    // and GHSA-85c8-ppgw-ccpr describe a Prototype Pollution gadget in
+    // tinypool's run() options that exists in tinypool 2.x. Our installed
+    // tinypool@0.8.4 predates the 2.x API entirely (vitest 1.x pins
+    // tinypool@^0.8.3). pnpm audit still flags it because the advisory's
+    // vulnerable_versions range is "<=2.1.0" / "<2.1.2", which technically
+    // includes 0.8.4 (any version < 2.1.2 is "vulnerable" by the
+    // advisory's literal range). Filed upstream-style note in TROUBLESHOOTING.
+    "GHSA-5gmw-xhrv-c9v3",
+    "GHSA-85c8-ppgw-ccpr"
+  ]
+}
