@@ -105,9 +105,12 @@ RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.6.3 
     && go install -v github.com/projectdiscovery/katana/cmd/katana@latest \
     # Clean Go build cache and downloaded modules so the persistent
     # image layer stays slim (~600 MB saved on a one-shot install).
-    # Binaries remain in /home/recon/go/bin because that path is NOT
-    # in the cleanup list.
-    && rm -rf /home/recon/.cache/go-build /home/recon/tmp /home/recon/go/pkg/mod
+    # Use 'go clean' instead of raw 'rm -rf' because some downloaded
+    # module files have read-only bits set; Go's own clean handles
+    # permission tweaks before removal. Binaries remain in
+    # /home/recon/go/bin because go clean -cache/-modcache does not
+    # touch GOBIN.
+    && go clean -cache && go clean -modcache
 USER root
 
 # Copy application code
