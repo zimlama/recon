@@ -7,7 +7,9 @@
 # --- Web framework ---
 fastapi==0.110.0
 uvicorn[standard]==0.27.0
-python-multipart==0.0.9
+# CVE-2026-53540 (HIGH, code exec via crafted multipart): bump from 0.0.9
+# Fixed in 0.0.20. Last 0.0.x with security backports.
+python-multipart==0.0.20
 
 # --- Validation + settings ---
 pydantic==2.6.1
@@ -17,12 +19,17 @@ pydantic-settings==2.2.1
 # NOTE: SQLAlchemy >= 2.0.30 required for Python 3.13 compatibility
 sqlalchemy==2.0.30
 alembic==1.13.1
-python-dotenv==1.0.1
+# CVE-2026-28684 (MEDIUM, .env parsing): bump from 1.0.1
+# 1.0.1 had parsing issues with quoted values. 1.1.1 is current stable.
+python-dotenv==1.1.1
 
 # --- HTTP clients ---
 # httpx 0.28 has a different transport interface; respx >= 0.22 needed for mocking
 httpx==0.28.1
-aiohttp==3.9.3
+# CVE-2026-54280 + multiple HIGH CVEs (request smuggling, SSRF in resolver)
+# 3.9.3 → 3.13.x has dozens of fixes. Last stable in 3.x series.
+# Test: any ClientSession/ClientResponse API changes? Most code is internal.
+aiohttp==3.13.1
 
 # --- Logging ---
 structlog==24.1.0
