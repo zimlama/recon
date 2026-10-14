@@ -338,7 +338,93 @@ The pre-v0.2.0 disaster case. Fixed by `JobRunner.sweep_stuck_jobs(max_age_minut
 
 ---
 
+## 7. Install failures on small VMs behind firewalls (added v0.2.1)
+
+These six failures each blocked `./install.sh` end-to-end on a 5 GB-class VM behind a MikroTik firewall. The v0.2.1 release fixes them in code (`backend/Dockerfile`, `install.sh`); this section exists so an operator hitting one of them knows what happened and what to do.
+
+> **Walk-down order**: when an install fails with several stacked errors, fix them in this order: network → curl → disk → permissions → runtime. Each row below has the verbatim error message and the fix.
+
+### `lookup proxy.golang.org: no such host` (in `go install` step)
+
+Go 1.20+ uses a pure-Go resolver. It falls back to TCP when UDP DNS answers are too small. Some firewalls (notably MikroTik) accept UDP DNS queries but reject TCP DNS — the resolver then fails with `no such host` even though `nslookup proxy.golang.org` works from the host shell.
+
+**Fix (one-time, on the VM host — requires `sudo`):**
+
+```bash
+sudo tee /etc/docker/daemon.json > /dev/null <<'JSON'
+{ "dns": ["1.1.1.1", "8.8.8.8"] }
+JSON
+sudo systemctl restart docker
+```
+
+Verify:
+```bash
+docker run --rm alpine sh -c "nslookup proxy.golang.org 2>&1 | tail -4"
+# Should return Cloudflare/Google IPs, not the local router's.
+```
+
+> **Why this lives on the host, not in the build**: `RUN echo nameserver ... > /etc/resolv.conf` in the Dockerfile fails (BuildKit marks `/etc/resolv.conf` read-only), and `docker buildx create --driver-opt dns=...` is rejected by the `docker-container` driver. The daemon-level `dns` directive is the only knob that propagates to every container.
+
+### `curl: (28) Connection timed out after 300354 milliseconds` (downloading `go.dev/dl/go*.tar.gz`)
+
+`curl`'s default `--connect-timeout` is **300 seconds**. Some CDN frontends (incl. `go.dev` on first SYN) take longer, especially through firewalls that inspect stateful connections. `wget` retries until `--timeout=600` and usually succeeds.
+
+**Fix in v0.2.1**: `backend/Dockerfile:59` passes `--connect-timeout 600 --max-time 1800 --retry 5 --retry-all-errors` to the curl that pulls the Go toolchain.
+
+**Workaround if you must modify the Dockerfile yourself**: same flags on any other `RUN curl -fsSL https://...` step. Cheap insurance against timeout variance.
+
+### `./install.sh: line 54: NC: unbound variable`
+
+Only triggered when running `install.sh` non-interactively (`nohup ./install.sh </dev/null &`, or in a CI runner without a PTY). `install.sh:47` non-TTY else-branch forgot to set `NC='\033[0m'`, but every log helper (`log`, `ok`, `warn`, `err`, `section`) uses `${NC}`. `set -u` then aborts.
+
+**Fix in v0.2.1**: `514ad72` adds `NC=''` to the else-branch.
+
+**To confirm you're hitting this, not a different issue**:
+
+```bash
+./install.sh </dev/null
+# If this crashes immediately at "─── Prerequisites ───" or similar,
+# it's the NC issue (or a sibling color var).
+```
+
+### `mkdir /home/recon/tmp/go-build*: no space left on device`
+
+On hosts with ≤5 GB free disk, two parallel Docker image builds (`backend` + `frontend`) exhaust space before `go install subfinder` finishes. Both `GOCACHE` and `TMPDIR` were already moved out of `/tmp` (a336b27), but intermediate build artifacts still got committed to the layer if not cleaned in the same `RUN`.
+
+**Fix in v0.2.1**: `6a4b64d` keeps `GOCACHE` / `TMPDIR` on real disk but adds `go clean -cache && go clean -modcache` at the end of the `go install` `RUN` so the committed layer state contains only `/home/recon/go/bin/{subfinder,httpx,waybackurls,katana}`.
+
+**Workaround before running `install.sh`**:
+
+```bash
+docker system prune -af --volumes
+docker builder prune -af
+df -h /    # confirm at least 4 GB free
+```
+
+### `mkdir /home/recon/.cache/go-build: permission denied`
+
+This was a regression introduced by an earlier attempt (`63ca603`) that used BuildKit `--mount=type=tmpfs` and `--mount=type=cache`. BuildKit's mounts are `root:root mode 0755` by default — running `USER recon` immediately afterwards fails on the first write.
+
+**Fix in v0.2.1**: `6a4b64d` drops the `--mount` directives entirely. If you see this on a custom Dockerfile, drop the mounts and use `go clean` at end of `RUN`.
+
+### `sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) unable to open database file` (after install builds, container Restarting loop)
+
+`docker-compose.yml` bind-mounts `./data:/app/data`. Bind mounts preserve *host* ownership. On a fresh VM, `./data` was created by an earlier failed run as `root:root mode 0755`. The container's `recon` user (UID 999) can't open `/app/data/recon.db` for writing.
+
+**Fix in v0.2.1**: `bb82934` adds `chmod 777 ./data` in `install.sh:547` immediately before `docker compose up`.
+
+**Workaround if you can't re-run install.sh**:
+
+```bash
+chmod 777 ./data    # or: sudo chown 999:999 ./data
+docker compose --profile prod up -d
+```
+
+---
+
 ## 8. Where to get more help
+
+For the **v0.2.1 install-failure series in detail** (timeline + commit messages + verbatim shell transcripts), see [postmortems/v0.2.1-release.md](postmortems/v0.2.1-release.md).
 
 | Where | Use it for |
 |-------|------------|
