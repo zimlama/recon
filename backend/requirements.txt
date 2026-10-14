@@ -28,7 +28,7 @@ aiohttp==3.9.3
 structlog==24.1.0
 
 # --- CLI ---
-typer==0.12.1
+typer==0.27.3
 
 # --- Recon module dependencies ---
 # dnspython is used by the dns_enum module (sync API, run in thread executor)
