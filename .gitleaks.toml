@@ -1,0 +1,40 @@
+# gitleaks configuration for zimlama/recon
+# Allowlist for test fixtures and documentation examples that look like secrets
+# but are intentionally non-secret.
+
+title = "zimlama/recon gitleaks config"
+
+[extend]
+# Use the default ruleset as the base
+useDefault = true
+
+[allowlist]
+description = "Allowlist for test fixtures and example placeholders"
+paths = [
+  '''backend/.env\.test''',
+  '''.*\.example$''',
+  '''.*/tests/fixtures/.*''',
+  '''.*/test_.*\.py$''',
+  '''frontend/__tests__/.*'''
+]
+
+# Specific allowlist rules for known non-secret values
+regexes = [
+  '''test-dummy-key-not-real''',
+  '''your-api-key-here''',
+  '''xxx+xxx''',
+  '''<.+>''',
+  '''\$\{.+\}'''
+]
+
+stopwords = [
+  "example",
+  "placeholder",
+  "your-",
+  "changeme",
+  "TODO",
+  "FIXME",
+  "dummy",
+  "fake",
+  "sample"
+]
