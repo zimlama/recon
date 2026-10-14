@@ -84,19 +84,6 @@ RUN groupadd -r recon && useradd -r -g recon -m -d /home/recon recon \
     && mkdir -p /home/recon/.cache/go-build /home/recon/go/pkg/mod /home/recon/tmp \
     && chown -R recon:recon /home/recon
 
-# Override DNS to use reliable public resolvers. Local resolvers (e.g.
-# MikroTik 192.168.88.2) often return FORMERR on EDNS0 queries — which Go
-# 1.20+ sends by default in its pure-Go resolver — or DNSSEC responses that
-# fail strict validation, causing `go install` to die with
-# "lookup goproxy.io on 192.168.88.2:53: no such host" even when `nslookup`
-# from the same host succeeds (glibc vs Go pure-Go resolver divergence).
-# Cloudflare + Google handle EDNS0/DNSSEC correctly and are good fallbacks.
-# Persisted in this layer, so subsequent RUNs in this stage inherit it.
-RUN { \
-    echo 'nameserver 1.1.1.1'; \
-    echo 'nameserver 8.8.8.8'; \
-} > /etc/resolv.conf
-
 WORKDIR /app
 
 # Copy Python deps from builder
