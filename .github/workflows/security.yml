@@ -90,14 +90,14 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit==2.7.3
 
-      - name: Run pip-audit (advisory — relax in Phase 2)
+      - name: Run pip-audit (blocking — fails PR on any known CVE)
         working-directory: backend
         run: |
           pip-audit --strict --disable-pip \
                     --requirement requirements.txt \
                     --format json \
-                    --output ../reports/pip-audit.json || true
-          echo "::notice::pip-audit ran in advisory mode. Findings: see reports/pip-audit.json"
+                    --output ../reports/pip-audit.json
+          # No `|| true` — exit 1 on any finding fails the job and the PR.
 
       - name: Upload artifact
         if: always()
@@ -120,12 +120,13 @@ jobs:
         with:
           node-version: "20"
 
-      - name: npm audit (advisory — relax in Phase 2)
+      - name: npm audit (blocking — fails PR on HIGH+ CVEs)
         working-directory: frontend
         run: |
           mkdir -p ../reports
-          npm audit --json --audit-level=high > ../reports/npm-audit.json 2>&1 || true
-          echo "::notice::npm audit ran in advisory mode. Findings: see reports/npm-audit.json"
+          npm audit --json --audit-level=high > ../reports/npm-audit.json
+          # No `|| true` — exit 1 on HIGH+ findings fails the job and the PR.
+          # Note: --audit-level=high means HIGH and CRITICAL only. MEDIUM/LOW pass.
 
       - name: Upload artifact
         if: always()
@@ -146,7 +147,7 @@ jobs:
       - name: Create reports directory
         run: mkdir -p reports
 
-      - name: Run trivy filesystem scan (advisory in Phase 1)
+      - name: Run trivy filesystem scan (blocking on HIGH+CRITICAL)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "fs"
@@ -155,12 +156,11 @@ jobs:
           output: "reports/trivy-fs.sarif"
           severity: "HIGH,CRITICAL"
           ignore-unfixed: true
-          exit-code: "0"
+          exit-code: "1"
           hide-progress: true
-        # NOTE: exit-code: "0" makes the scan ADVISORY during Phase 1.
-        # We expect to surface existing CVEs on the first run — the gate's
-        # job is to FIND them and report to Security tab. Once we triage
-        # and fix the existing CVE backlog, switch to exit-code: "1".
+        # exit-code: "1" makes the job fail when HIGH+CRITICAL CVEs are
+        # found. After Phase 1.5 (CVE remediation #31/#32) the existing
+        # CVE backlog is fixed, so this becomes an effective gate.
 
       - name: Upload SARIF to Security tab
         if: always()
