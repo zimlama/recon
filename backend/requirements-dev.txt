@@ -12,7 +12,7 @@ pytest-cov==4.1.0
 pytest-mock==3.14.0
 
 # --- Lint + format ---
-ruff==0.4.0
+ruff==0.17.0
 
 # --- Type checking ---
 mypy==1.8.0
