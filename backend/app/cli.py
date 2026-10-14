@@ -59,7 +59,7 @@ def run(
 
     # Create job
     from datetime import datetime
-from app.models import _now
+    from app.models import _now
     with SessionLocal() as db:
         job = Job(
             target=target,
