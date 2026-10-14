@@ -165,7 +165,7 @@ jobs:
           output: "reports/trivy-fs.sarif"
           severity: "HIGH,CRITICAL"
           ignore-unfixed: true
-          ignorefile: ".trivyignore"
+          trivyignores: ".trivyignore"
           exit-code: "1"
           hide-progress: true
         # exit-code: "1" = blocking (PR-G2). The .trivyignore allowlists
