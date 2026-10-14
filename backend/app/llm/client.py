@@ -20,17 +20,19 @@ Notes on the protocol:
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
 from app.config import get_settings
 from app.llm.schemas import LDMValidationResult
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 settings = get_settings()
 
 
@@ -264,7 +266,7 @@ class LLMClient:
 
         # Try to parse as JSON
         try:
-            return json.loads(text)
+            return cast(dict[str, Any], json.loads(text))
         except (json.JSONDecodeError, TypeError):
             # Return as raw text wrapped in dict
             return {"_raw": text}

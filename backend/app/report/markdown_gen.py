@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import logging
 from pathlib import Path
 
@@ -10,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import Job, ModuleRun, _now
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 settings = get_settings()
 
 

@@ -178,7 +178,7 @@ class Job(Base):
     def __repr__(self) -> str:
         return (
             f"<Job id={self.id} target={self.target} "
-            f"status={self.status.value} handoff_status={self.handoff_status.value}>"
+            f"status={self.status.value} handoff_status={self.handoff_status}>"
         )
 
 

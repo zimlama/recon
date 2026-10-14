@@ -11,9 +11,11 @@ MITRE ATT&CK: T1596.005
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -28,7 +30,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Shodan InternetDB — no auth required
 SHODAN_INTERNETDB_URL = "https://internetdb.shodan.io/{ip}"
@@ -182,7 +184,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                 if response.status_code != 200:
                     logger.debug("shodan_internetdb_non_200", status=response.status_code, ip=ip)
                     return None
-                return response.json()
+                return cast(dict[str, Any], response.json())
         except httpx.HTTPError as e:
             logger.debug("shodan_internetdb_http_error", error=str(e), ip=ip)
             return None
@@ -196,7 +198,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                 if response.status_code != 200:
                     logger.debug("censys_non_200", status=response.status_code, ip=ip)
                     return None
-                return response.json()
+                return cast(dict[str, Any], response.json())
         except httpx.HTTPError as e:
             logger.debug("censys_http_error", error=str(e), ip=ip)
             return None

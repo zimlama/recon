@@ -11,6 +11,8 @@ MITRE ATT&CK: T1593.001
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import logging
 import time
@@ -25,7 +27,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SOCIAL_PLATFORMS = [
     # (platform_name, url_template, requires_auth)

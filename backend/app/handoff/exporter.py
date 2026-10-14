@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import contextlib
 import json
 import logging
@@ -29,15 +31,15 @@ from app.handoff.schema import (
 )
 from app.models import (
     AIValidation,
+    Finding,
     FindingType,
     Handoff,
     HandoffStatus,
     Job,
     ModuleRun,
 )
-from app.modules.base import Finding
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 settings = get_settings()
 
 
@@ -165,8 +167,8 @@ def _build_packet(db: Session, job: Job) -> HandoffPacket:
                 validation=validation,
                 confirmed_targets=confirmed_targets,
                 tech_stack=tech_stack,
-                emails_found=emails_found,  # type: ignore[arg-type]
-                breach_count=breach_count,  # type: ignore[arg-type]
+                emails_found=emails_found,
+                breach_count=breach_count,
                 person_dossiers=person_dossiers,
             )
             if finding.type == FindingType.EMAIL:

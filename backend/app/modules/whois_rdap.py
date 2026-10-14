@@ -9,11 +9,13 @@ MITRE ATT&CK: T1596.002 (WHOIS), T1590.001 (IP WHOIS)
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import logging
 import re
 import time
-from typing import Any
+from typing import Any, cast
 
 from app.models import ModuleTier
 from app.modules.base import (
@@ -25,7 +27,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # RDAP bootstrap endpoint
@@ -155,7 +157,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
             return None
         if response.status_code == 200:
             try:
-                return response.json()
+                return cast(dict[str, Any], response.json())
             except (ValueError, TypeError) as e:
                 logger.debug("rdap_json_decode_error", error=str(e), domain=domain)
                 return None
@@ -344,7 +346,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
 
         return findings
 
-    def _extract_vcard_name(self, vcard: list) -> str | None:
+    def _extract_vcard_name(self, vcard: list[Any]) -> str | None:
         """Extract the FN field from a vCard array.
 
         vCard format (RFC 7095):

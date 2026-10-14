@@ -10,6 +10,8 @@ Single source of truth for which modules are available. Adding a new module:
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import logging
 
 from app.modules.base import BaseReconModule
@@ -29,7 +31,7 @@ from app.modules.subdomain_enum import SubdomainEnumModule
 from app.modules.wayback_machine import WaybackMachineModule
 from app.modules.whois_rdap import WhoisRDAPModule
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 __all__ = [
     "MODULE_REGISTRY",

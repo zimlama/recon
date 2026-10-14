@@ -11,6 +11,8 @@ MITRE ATT&CK: T1589.001
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import hashlib
 import logging
 import time
@@ -27,7 +29,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 HIBP_API_URL = "https://api.pwnedpasswords.com/range/{prefix}"
 HIBP_TIMEOUT = 15

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import logging
 
 import httpx
@@ -12,7 +14,7 @@ from app.llm.prompts import get_prompt
 from app.llm.schemas import LDMValidationResult
 from app.modules.base import BaseReconModule, Finding
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AIValidator:

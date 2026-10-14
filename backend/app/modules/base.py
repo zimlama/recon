@@ -12,6 +12,8 @@ Each module is a SUBAGENT in the recon pipeline:
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import abc
 import logging
 from datetime import datetime
@@ -25,7 +27,17 @@ from app.llm.schemas import LDMValidationResult
 from app.models import FindingType, ModuleTier
 from app.utils.network import filter_public_ips  # noqa: F401 — SSRF contract anchor
 
-logger = logging.getLogger(__name__)
+__all__ = [
+    "BaseReconModule",
+    "Finding",
+    "FindingType",
+    "ModuleTier",
+    "TouchClass",
+    "LDMValidationResult",
+    "filter_public_ips",
+]
+
+logger = get_logger(__name__)
 
 
 class TouchClass(StrEnum):
@@ -212,7 +224,7 @@ class BaseReconModule(abc.ABC):
         url: str,
         *,
         timeout: float = 15.0,
-        headers: dict | None = None,
+        headers: dict[str, str] | None = None,
     ) -> httpx.Response | None:
         """SSRF-safe HTTP GET.
 
@@ -243,7 +255,7 @@ class BaseReconModule(abc.ABC):
         url: str,
         *,
         timeout: float = 15.0,
-        headers: dict | None = None,
+        headers: dict[str, str] | None = None,
     ) -> httpx.Response | None:
         """Async SSRF-safe HTTP GET.
 

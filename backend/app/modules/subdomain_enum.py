@@ -8,6 +8,8 @@ MITRE ATT&CK: T1596.002, T1596.003, T1589.001
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import asyncio
 import json
 import logging
@@ -25,7 +27,7 @@ from app.modules.base import (
     TouchClass,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 CRTSH_URL = "https://crt.sh/?q={domain}&output=json"
 SUBFINDER_TIMEOUT = 90  # seconds (subfinder can be slow for big domains)

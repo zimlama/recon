@@ -35,6 +35,8 @@ Design notes:
 
 from __future__ import annotations
 
+from app.logging import get_logger
+
 import json
 import logging
 import os
@@ -50,7 +52,7 @@ from starlette.types import ASGIApp
 from app.models import ScopeType
 from app.orchestrator.roe import RoEValidator
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (
     "/api/v1/jobs",  # POST
