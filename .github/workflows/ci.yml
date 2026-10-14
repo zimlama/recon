@@ -28,8 +28,9 @@ jobs:
         uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: backend/requirements-dev.txt
+          # cache disabled: GitHub Actions Cache Service intermittently returns HTTP 400
+          # when restoring pip cache, which makes backend jobs die in setup (7-9s).
+          # See docs/TROUBLESHOOTING.md §8. Re-enable when GitHub stabilizes cache service.
 
       - name: Install dependencies
         working-directory: backend
@@ -103,8 +104,7 @@ jobs:
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          # pnpm cache disabled: see backend cache comment above
       - name: Install
         working-directory: frontend
         run: pnpm install --frozen-lockfile
@@ -122,8 +122,7 @@ jobs:
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          # pnpm cache disabled: see backend cache comment above
       - name: Install
         working-directory: frontend
         run: pnpm install --frozen-lockfile
@@ -149,8 +148,7 @@ jobs:
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          # pnpm cache disabled: see backend cache comment above
       - name: Install
         working-directory: frontend
         run: pnpm install --frozen-lockfile
