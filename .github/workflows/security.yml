@@ -166,6 +166,7 @@ jobs:
           severity: "HIGH,CRITICAL"
           ignore-unfixed: true
           trivyignores: ".trivyignore"
+          limit-severities-for-sarif: "true"
           exit-code: "1"
           hide-progress: true
         # exit-code: "1" = blocking (PR-G2). The .trivyignore allowlists
