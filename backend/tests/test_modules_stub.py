@@ -87,6 +87,7 @@ def test_all_modules_are_basereconmodule_subclasses() -> None:
 def test_get_module_works() -> None:
     """get_module() returns the correct module."""
     from app.modules import get_module
+
     m = get_module("subdomain_enum")
     assert m.name == "subdomain_enum"
 
@@ -94,11 +95,13 @@ def test_get_module_works() -> None:
 def test_get_module_unknown_raises() -> None:
     """get_module() raises KeyError for unknown modules."""
     from app.modules import get_module
+
     with pytest.raises(KeyError):
         get_module("nonexistent")
 
 
 # ---- run() stub tests ----
+
 
 @pytest.mark.asyncio
 async def test_all_modules_run_returns_module_output(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,7 +161,7 @@ async def test_all_modules_run_returns_module_output(monkeypatch: pytest.MonkeyP
 
     # Patch all the per-module network methods. monkeypatch.setattr restores
     # each one automatically at teardown.
-    for name, module in MODULE_REGISTRY.items():
+    for _name, module in MODULE_REGISTRY.items():
         for method_name in network_methods:
             if hasattr(module, method_name):
                 monkeypatch.setattr(module, method_name, AsyncMock(return_value=[]))
@@ -242,8 +245,13 @@ def test_all_modules_have_non_empty_ai_prompts() -> None:
 def test_tier1_modules_have_all_passive_metadata() -> None:
     """Tier 1 modules: no API keys (except optional), always-on, mostly no consent."""
     # email_harvesting DOES require consent (PII handling)
-    pure_tier1_no_consent = {"whois_rdap", "dns_enum", "subdomain_enum",
-                              "certificate_transparency", "wayback_machine"}
+    pure_tier1_no_consent = {
+        "whois_rdap",
+        "dns_enum",
+        "subdomain_enum",
+        "certificate_transparency",
+        "wayback_machine",
+    }
     for name in pure_tier1_no_consent:
         m = MODULE_REGISTRY[name]
         assert m.requires_api_keys == [], f"{name} should not require API keys"

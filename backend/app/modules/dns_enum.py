@@ -180,9 +180,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
             except dns.resolver.NXDOMAIN:
                 raise  # propagate to caller
             except (dns.resolver.NoNameservers, dns.exception.Timeout) as e:
-                logger.debug(
-                    "dns_query_terminated", rdatatype=rdatatype, error=str(e)
-                )
+                logger.debug("dns_query_terminated", rdatatype=rdatatype, error=str(e))
                 raise  # propagate so run() can break early
 
             for rdata in answers:
@@ -200,7 +198,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         except (TimeoutError, dns.exception.Timeout):
             raise
 
-    def _format_rdata(
+    def _format_rdata(  # noqa: C901 - complexity 14, refactor tracked in issue #43
         self,
         rdata: dns.rdata.Rdata,
         rdatatype: int,
@@ -277,7 +275,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
             try:
                 loop = asyncio.get_event_loop()
 
-                def _do_axfr() -> dns.zone.Zone | None:
+                def _do_axfr(ns_host: str = ns_host) -> dns.zone.Zone | None:
                     try:
                         return dns.zone.from_xfr(
                             dns.query.xfr(

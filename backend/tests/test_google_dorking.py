@@ -19,12 +19,14 @@ def module() -> GoogleDorkingModule:
 
 # ---- Template generation (always runs) ----
 
+
 @pytest.mark.asyncio
 async def test_dork_templates_generated_without_api_key(
     module: GoogleDorkingModule,
 ) -> None:
     """Dork templates are always returned, even without SERP_API_KEY."""
     import app.config
+
     with patch.object(app.config, "get_settings") as mock_settings:
         settings = MagicMock()
         settings.SERP_API_KEY = None
@@ -44,6 +46,7 @@ async def test_dork_templates_target_substitution(
 ) -> None:
     """{target} placeholder is replaced with the actual target domain."""
     import app.config
+
     with patch.object(app.config, "get_settings") as mock_settings:
         settings = MagicMock()
         settings.SERP_API_KEY = None
@@ -59,44 +62,45 @@ async def test_dork_templates_target_substitution(
 
 def test_categorize_dork_credential(module: GoogleDorkingModule) -> None:
     """Dorks looking for credentials are categorized correctly."""
-    assert module._categorize_dork('site:target filetype:env') == "credentials"
+    assert module._categorize_dork("site:target filetype:env") == "credentials"
     assert module._categorize_dork('site:target "password"') == "credentials"
     assert module._categorize_dork('site:target "API_KEY"') == "credentials"
 
 
 def test_categorize_dork_backup(module: GoogleDorkingModule) -> None:
     """Dorks looking for backups are categorized correctly."""
-    assert module._categorize_dork('site:target filetype:sql') == "backup"
-    assert module._categorize_dork('site:target filetype:bak') == "backup"
+    assert module._categorize_dork("site:target filetype:sql") == "backup"
+    assert module._categorize_dork("site:target filetype:bak") == "backup"
 
 
 def test_categorize_dork_admin(module: GoogleDorkingModule) -> None:
     """Dorks looking for admin panels are categorized correctly."""
-    assert module._categorize_dork('site:target inurl:admin') == "admin_panel"
-    assert module._categorize_dork('site:target inurl:phpmyadmin') == "admin_panel"
-    assert module._categorize_dork('site:target inurl:jenkins') == "admin_panel"
+    assert module._categorize_dork("site:target inurl:admin") == "admin_panel"
+    assert module._categorize_dork("site:target inurl:phpmyadmin") == "admin_panel"
+    assert module._categorize_dork("site:target inurl:jenkins") == "admin_panel"
 
 
 def test_categorize_dork_config(module: GoogleDorkingModule) -> None:
     """Dorks looking for config files are categorized correctly."""
-    assert module._categorize_dork('site:target inurl:config') == "config"
+    assert module._categorize_dork("site:target inurl:config") == "config"
 
 
 def test_categorize_dork_exposed_file(module: GoogleDorkingModule) -> None:
     """Dorks looking for generic exposed files (no specific keyword) are categorized correctly."""
     # ext:pdf (no specific keyword like 'xml', 'sql') → exposed_file
-    assert module._categorize_dork('site:target ext:pdf') == "exposed_file"
-    assert module._categorize_dork('site:target filetype:doc') == "exposed_file"
+    assert module._categorize_dork("site:target ext:pdf") == "exposed_file"
+    assert module._categorize_dork("site:target filetype:doc") == "exposed_file"
     # ext:xml has 'xml' keyword → config (more specific match)
-    assert module._categorize_dork('site:target ext:xml') == "config"
+    assert module._categorize_dork("site:target ext:xml") == "config"
 
 
 def test_categorize_dork_other(module: GoogleDorkingModule) -> None:
     """Unknown patterns fall back to 'other'."""
-    assert module._categorize_dork('site:target inurl:something_random') == "other"
+    assert module._categorize_dork("site:target inurl:something_random") == "other"
 
 
 # ---- SerpAPI search ----
+
 
 @pytest.mark.asyncio
 async def test_serpapi_search_success(module: GoogleDorkingModule) -> None:
@@ -126,7 +130,7 @@ async def test_serpapi_search_success(module: GoogleDorkingModule) -> None:
             result = await module.run(ModuleInput(target="example.com"))
 
     serp_findings = [f for f in result.findings if f.source == "serpapi"]
-    # 8 priority dorks × 2 mock results = 16 findings (with duplicates)
+    # 8 priority dorks x 2 mock results = 16 findings (with duplicates)
     assert len(serp_findings) >= 2
     assert any("admin/login" in f.value for f in serp_findings)
     assert any(".env" in f.value for f in serp_findings)
@@ -151,6 +155,7 @@ async def test_serpapi_error_silently_continues(module: GoogleDorkingModule) -> 
 
 
 # ---- Metadata ----
+
 
 def test_module_metadata(module: GoogleDorkingModule) -> None:
     assert module.name == "google_dorking"

@@ -19,14 +19,15 @@ def module() -> SOCMINTModule:
 
 # ---- _check_platform ----
 
+
 @pytest.mark.asyncio
 async def test_check_platform_200(module: SOCMINTModule) -> None:
     """HTTP 200 response returns the URL (profile exists)."""
     with respx.mock(assert_all_called=False) as mock_router:
-        mock_router.get(url__regex=r".*linkedin.com/.*").mock(
-            return_value=httpx.Response(200)
+        mock_router.get(url__regex=r".*linkedin.com/.*").mock(return_value=httpx.Response(200))
+        url = await module._check_platform(
+            "linkedin", "https://www.linkedin.com/company/{target}", "acme"
         )
-        url = await module._check_platform("linkedin", "https://www.linkedin.com/company/{target}", "acme")
     assert url == "https://www.linkedin.com/company/acme"
 
 
@@ -34,10 +35,10 @@ async def test_check_platform_200(module: SOCMINTModule) -> None:
 async def test_check_platform_404(module: SOCMINTModule) -> None:
     """HTTP 404 returns None (profile doesn't exist)."""
     with respx.mock(assert_all_called=False) as mock_router:
-        mock_router.get(url__regex=r".*linkedin.com/.*").mock(
-            return_value=httpx.Response(404)
+        mock_router.get(url__regex=r".*linkedin.com/.*").mock(return_value=httpx.Response(404))
+        url = await module._check_platform(
+            "linkedin", "https://www.linkedin.com/company/{target}", "nonexistent"
         )
-        url = await module._check_platform("linkedin", "https://www.linkedin.com/company/{target}", "nonexistent")
     assert url is None
 
 
@@ -57,7 +58,9 @@ async def test_check_platform_405_fallback_to_get(module: SOCMINTModule) -> None
 
     with respx.mock(assert_all_called=False) as mock_router:
         mock_router.get(url__regex=r".*linkedin.com/.*").mock(side_effect=side_effect)
-        url = await module._check_platform("linkedin", "https://www.linkedin.com/company/{target}", "acme")
+        url = await module._check_platform(
+            "linkedin", "https://www.linkedin.com/company/{target}", "acme"
+        )
     assert url == "https://www.linkedin.com/company/acme"
     assert call_count == 2
 
@@ -69,11 +72,14 @@ async def test_check_platform_connection_error(module: SOCMINTModule) -> None:
         mock_router.get(url__regex=r".*linkedin.com/.*").mock(
             side_effect=httpx.ConnectError("down")
         )
-        url = await module._check_platform("linkedin", "https://www.linkedin.com/company/{target}", "acme")
+        url = await module._check_platform(
+            "linkedin", "https://www.linkedin.com/company/{target}", "acme"
+        )
     assert url is None
 
 
 # ---- Run ----
+
 
 @pytest.mark.asyncio
 async def test_run_finds_multiple_profiles(module: SOCMINTModule) -> None:
@@ -93,12 +99,15 @@ async def test_run_finds_multiple_profiles(module: SOCMINTModule) -> None:
 
     assert call_count == len(SOCIAL_PLATFORMS)  # all platforms checked
     assert len(result.findings) == 2  # only first 2 found
-    assert all(f.finding_metadata["platform"] in ("linkedin", "github_org") for f in result.findings)
+    assert all(
+        f.finding_metadata["platform"] in ("linkedin", "github_org") for f in result.findings
+    )
 
 
 @pytest.mark.asyncio
 async def test_run_no_profiles_found(module: SOCMINTModule) -> None:
     """If all platforms return 404, no findings + errors for failures."""
+
     async def fake_check(platform_name: str, url_template: str, target: str) -> str | None:
         return None
 
@@ -111,6 +120,7 @@ async def test_run_no_profiles_found(module: SOCMINTModule) -> None:
 @pytest.mark.asyncio
 async def test_run_handles_exceptions(module: SOCMINTModule) -> None:
     """A platform raising an exception doesn't crash the whole module."""
+
     async def fake_check(platform_name: str, url_template: str, target: str) -> str | None:
         if platform_name == "linkedin":
             raise RuntimeError("linkedin down")
@@ -128,6 +138,7 @@ async def test_run_handles_exceptions(module: SOCMINTModule) -> None:
 
 # ---- Metadata ----
 
+
 def test_module_metadata(module: SOCMINTModule) -> None:
     assert module.name == "socmint"
     assert module.tier.value == "tier_3"
@@ -143,6 +154,7 @@ def test_social_platforms_includes_known(module: SOCMINTModule) -> None:
 
 
 # ---- SSRF defense: adopt BaseReconModule.safe_http_get_async ----
+
 
 @pytest.mark.asyncio
 async def test_check_platform_uses_safe_http_get_async(
@@ -178,6 +190,7 @@ async def test_check_platform_uses_safe_http_get_async(
 @pytest.mark.asyncio
 async def test_check_platform_safe_http_returns_none(module: SOCMINTModule) -> None:
     """When safe_http_get_async returns None (SSRF blocked), returns None."""
+
     async def fake_safe(url: str, **kwargs: object) -> None:
         return None
 

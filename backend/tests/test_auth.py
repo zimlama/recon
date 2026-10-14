@@ -56,7 +56,9 @@ async def test_health_endpoint_doesnt_require_auth(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_docs_endpoint_doesnt_require_auth(monkeypatch: pytest.MonkeyPatch, client: AsyncClient) -> None:
+async def test_docs_endpoint_doesnt_require_auth(
+    monkeypatch: pytest.MonkeyPatch, client: AsyncClient
+) -> None:
     """/docs is NOT registered as a router, so verify_api_key never runs."""
     _enable_auth(monkeypatch)  # turn auth ON
     response = await client.get("/docs")
@@ -103,9 +105,7 @@ async def test_auth_rejects_non_bearer_scheme(
 
 
 @pytest.mark.asyncio
-async def test_auth_with_wrong_key(
-    monkeypatch: pytest.MonkeyPatch, client: AsyncClient
-) -> None:
+async def test_auth_with_wrong_key(monkeypatch: pytest.MonkeyPatch, client: AsyncClient) -> None:
     """Wrong token → 401."""
     _enable_auth(monkeypatch)
     response = await client.get(
@@ -117,9 +117,7 @@ async def test_auth_with_wrong_key(
 
 
 @pytest.mark.asyncio
-async def test_auth_with_correct_key(
-    monkeypatch: pytest.MonkeyPatch, client: AsyncClient
-) -> None:
+async def test_auth_with_correct_key(monkeypatch: pytest.MonkeyPatch, client: AsyncClient) -> None:
     """Correct token → 200."""
     _enable_auth(monkeypatch)
     response = await client.get(
@@ -142,4 +140,6 @@ async def test_auth_protects_all_business_routers(
     ]
     for path in paths:
         response = await client.get(path)
-        assert response.status_code == 401, f"{path} should require auth, got {response.status_code}"
+        assert response.status_code == 401, (
+            f"{path} should require auth, got {response.status_code}"
+        )

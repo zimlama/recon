@@ -43,7 +43,8 @@ RULES:
 """
 
 
-PROMPT_WHOIS_RDAP = """You are validating WHOIS/RDAP registration data for a target domain.
+PROMPT_WHOIS_RDAP = (
+    """You are validating WHOIS/RDAP registration data for a target domain.
 
 For each finding (registrar, dates, nameservers, registrant, statuses), classify as:
 - CONFIRMED: data is consistent across sources and current
@@ -55,10 +56,13 @@ Prioritize findings by:
 - HIGH: registrar history (frequent changes = suspicious), nameserver diversity
 - MEDIUM: creation date, expiration date, status codes
 - LOW: registrant info (often privacy-protected, low signal)
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_DNS_ENUM = """You are validating DNS records for a target domain.
+PROMPT_DNS_ENUM = (
+    """You are validating DNS records for a target domain.
 
 For each record (A, AAAA, NS, MX, TXT, CNAME, SOA, SRV), classify as:
 - CONFIRMED: record resolves, IP/domain is reachable
@@ -72,10 +76,13 @@ Prioritize findings by:
 - LOW: SRV records (often boilerplate)
 
 Watch for: misconfigured SPF (allows +all), no DMARC, NS pointing to compromised nameservers.
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_SUBDOMAIN_ENUM = """You are validating subdomain enumeration results for a target domain.
+PROMPT_SUBDOMAIN_ENUM = (
+    """You are validating subdomain enumeration results for a target domain.
 
 For each subdomain, classify as:
 - CONFIRMED: resolves to a live IP, real, in scope
@@ -87,10 +94,13 @@ Enrich each with:
 - tech_stack_hint: observed from passive sources
 - priority: HIGH (admin, staging, api, internal, vpn), MEDIUM (www, app, blog), LOW (parked, redirects)
 - reasoning: 1 sentence why
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_CERT_TRANSPARENCY = """You are validating Certificate Transparency findings for a target domain.
+PROMPT_CERT_TRANSPARENCY = (
+    """You are validating Certificate Transparency findings for a target domain.
 
 For each certificate (CN, SAN, issuer, validity period), classify as:
 - CONFIRMED: cert is currently valid, CA is trusted
@@ -106,10 +116,13 @@ Watch for:
 - Internal hostnames in SANs (leaked internal naming)
 - Typosquatted look-alikes
 - Recently expired certs (might be replaced)
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_WAYBACK_MACHINE = """You are validating Wayback Machine findings (historical URLs) for a target.
+PROMPT_WAYBACK_MACHINE = (
+    """You are validating Wayback Machine findings (historical URLs) for a target.
 
 For each URL, classify as:
 - CONFIRMED: URL was archived, content is still relevant
@@ -127,10 +140,13 @@ Watch for:
 - Old API endpoints with weaker auth
 - Backup files in URLs (.bak, .sql, .tar.gz)
 - Development URLs that leaked to production
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_EMAIL_HARVESTING = """You are validating email harvesting findings for a target domain.
+PROMPT_EMAIL_HARVESTING = (
+    """You are validating email harvesting findings for a target domain.
 
 For each email address, classify as:
 - CONFIRMED: real, active, deliverable
@@ -145,10 +161,13 @@ Enrich each with:
 - reasoning: 1 sentence
 
 PII HANDLING: Only validate. Never suggest using these emails for unauthorized outreach.
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_SHODAN_CENSYS = """You are validating Shodan/Censys findings for a target domain.
+PROMPT_SHODAN_CENSYS = (
+    """You are validating Shodan/Censys findings for a target domain.
 
 For each service/port/banner finding, classify as:
 - CONFIRMED: service is publicly accessible, banner matches
@@ -167,10 +186,13 @@ Watch for:
 - Outdated software with known CVEs
 - Default credentials
 - C2 framework signatures
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_GITHUB_RECON = """You are validating GitHub recon findings for a target organization.
+PROMPT_GITHUB_RECON = (
+    """You are validating GitHub recon findings for a target organization.
 
 For each finding (secret, hostname, email, file), classify as:
 - CONFIRMED: real, in a current public repo
@@ -184,10 +206,13 @@ Enrich each with:
 - reasoning: 1 sentence
 
 SECRET HANDLING: NEVER transmit, log, or share actual secrets. Flag the TYPE only.
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_METADATA_ANALYSIS = """You are validating document metadata findings for a target organization.
+PROMPT_METADATA_ANALYSIS = (
+    """You are validating document metadata findings for a target organization.
 
 For each metadata field (author, software, path, GPS), classify as:
 - CONFIRMED: real, current, useful
@@ -201,10 +226,13 @@ Enrich each with:
 - reasoning: 1 sentence
 
 PII HANDLING: GPS coordinates are sensitive. Only note country/region unless authorized.
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_GOOGLE_DORKING = """You are validating Google Dorking findings for a target domain.
+PROMPT_GOOGLE_DORKING = (
+    """You are validating Google Dorking findings for a target domain.
 
 For each URL/content found, classify as:
 - CONFIRMED: real, accessible, in scope
@@ -216,10 +244,13 @@ Enrich each with:
 - exposure_type: admin_panel, exposed_file, backup, login, config, error_page
 - severity: CRITICAL (exposed config, secrets), HIGH (admin panel), MEDIUM (login, error), LOW (marketing)
 - reasoning: 1 sentence
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_BREACH_DATA = """You are validating breach exposure findings for a target organization.
+PROMPT_BREACH_DATA = (
+    """You are validating breach exposure findings for a target organization.
 
 For each (email_hash_prefix, breach_count) pair, classify as:
 - CONFIRMED: count is > 0, exposure is real
@@ -233,10 +264,13 @@ Enrich each with:
 - reasoning: 1 sentence
 
 PRINCIPLE: NEVER recommend using found credentials to log in.
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_SOCMINT = """You are validating SOCMINT findings for a target organization.
+PROMPT_SOCMINT = (
+    """You are validating SOCMINT findings for a target organization.
 
 For each profile/connection/post, classify as:
 - CONFIRMED: real, active, relevant
@@ -251,10 +285,13 @@ Enrich each with:
 - reasoning: 1 sentence
 
 ETHICS: No active engagement. Respect platform ToS.
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_EMPLOYEE_OSINT = """You are validating employee OSINT findings for a target organization.
+PROMPT_EMPLOYEE_OSINT = (
+    """You are validating employee OSINT findings for a target organization.
 
 For each employee record, classify as:
 - CONFIRMED: real, current employee, role verified
@@ -269,10 +306,13 @@ Enrich each with:
 - reasoning: 1 sentence
 
 PII HANDLING: Username patterns are useful for authorized password spray only.
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
-PROMPT_DARK_WEB_OSINT = """You are validating dark web OSINT findings for a target organization.
+PROMPT_DARK_WEB_OSINT = (
+    """You are validating dark web OSINT findings for a target organization.
 
 For each mention/credential dump, classify as:
 - CONFIRMED: real, current, active listing
@@ -286,7 +326,9 @@ Enrich each with:
 - reasoning: 1 sentence
 
 SAFETY: Read-only, no engagement, no transactions.
-""" + COMMON_INSTRUCTIONS
+"""
+    + COMMON_INSTRUCTIONS
+)
 
 
 # Registry: module name -> prompt

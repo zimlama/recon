@@ -104,9 +104,7 @@ async def test_rate_limiter_evicts_old_buckets() -> None:
     cap, the oldest (target, action) pair is evicted first.
     """
     cap = 4
-    limiter = RateLimiter(
-        default_rps=10, default_burst=5, max_keys=cap
-    )
+    limiter = RateLimiter(default_rps=10, default_burst=5, max_keys=cap)
 
     # Force 4 distinct keys into the bucket dict.
     for idx in range(cap):
@@ -338,7 +336,7 @@ def jobrunner_db(tmp_path):
     # duplicate-index bug in Finding's source column).
     Job.__table__.create(bind=eng, checkfirst=True)
     ModuleRun.__table__.create(bind=eng, checkfirst=True)
-    Session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
+    session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
 
     # Patch global + the import-bound reference inside job_runner.
     import app.database as app_db
@@ -349,10 +347,10 @@ def jobrunner_db(tmp_path):
     original_jr_session = jr_module.SessionLocal
 
     app_db.engine = eng
-    app_db.SessionLocal = Session_
-    jr_module.SessionLocal = Session_
+    app_db.SessionLocal = session_
+    jr_module.SessionLocal = session_
 
-    db = Session_()
+    db = session_()
     try:
         yield db
     finally:
@@ -484,9 +482,7 @@ async def test_module_execution_respects_concurrency_limit(jobrunner_db) -> None
     completed = sum(1 for t in tasks if t.done())
     # Exactly `cap` tasks should have completed; the remaining `extra`
     # must still be waiting (parity-2 inventory under asyncio).
-    assert completed == cap, (
-        f"semaphore oversubscribed: {completed} > {cap} acquired"
-    )
+    assert completed == cap, f"semaphore oversubscribed: {completed} > {cap} acquired"
 
     # Cancel the parked tasks and release the held slots so the test
     # cleans up.

@@ -21,6 +21,7 @@ from app.modules.whois_rdap import WhoisRDAPModule
 
 # ---- Concrete test module for testing default behavior ----
 
+
 class _ConcreteModule(BaseReconModule):
     name = "concrete"
     description = "Concrete test module"
@@ -36,6 +37,7 @@ class _ConcreteModule(BaseReconModule):
 
 # ---- Test abstract bodies (instantiation contract) ----
 
+
 def test_cannot_instantiate_base_abc() -> None:
     """BaseReconModule is abstract — cannot be instantiated directly."""
     with pytest.raises(TypeError):
@@ -50,6 +52,7 @@ def test_concrete_module_instantiable() -> None:
 
 # ---- Test default validate() with empty findings ----
 
+
 @pytest.mark.asyncio
 async def test_validate_empty_findings_returns_continue() -> None:
     """Empty findings → CONTINUE with no verdicts."""
@@ -63,6 +66,7 @@ async def test_validate_empty_findings_returns_continue() -> None:
 
 
 # ---- Test default validate() with findings + successful LLM call ----
+
 
 @pytest.mark.asyncio
 async def test_validate_calls_llm_and_parses_response() -> None:

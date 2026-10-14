@@ -7,6 +7,7 @@ validity window, with at least one un-revoked SignOff, that authorises this
 target+scope?". It is the single source of truth for the middleware and
 the orchestrator's job-launch path.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -48,11 +49,9 @@ def session(tmp_path) -> Session:
 
     RoE.__table__.create(bind=eng, checkfirst=True)
     SignOff.__table__.create(bind=eng, checkfirst=True)
-    Session_ = sessionmaker(
-        bind=eng, autoflush=False, autocommit=False, expire_on_commit=False
-    )
+    session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
 
-    db = Session_()
+    db = session_()
     try:
         yield db
     finally:
@@ -127,9 +126,7 @@ def _add_signoff(
 # ---------------------------------------------------------------------------
 
 
-def test_active_roe_authorizes_target_in_scope(
-    session: Session, validator: RoEValidator
-) -> None:
+def test_active_roe_authorizes_target_in_scope(session: Session, validator: RoEValidator) -> None:
     """An ACTIVE RoE + active signoff + in-window -> authorized=True."""
     roe = _add_active_roe(session)
     _add_signoff(session, roe)
@@ -145,9 +142,7 @@ def test_active_roe_authorizes_target_in_scope(
     assert signoffs[0].signer_email == "bob@example.com"
 
 
-def test_draft_roe_does_not_authorize(
-    session: Session, validator: RoEValidator
-) -> None:
+def test_draft_roe_does_not_authorize(session: Session, validator: RoEValidator) -> None:
     """A DRAFT RoE is never authorized, regardless of dates or signoffs."""
     roe = _add_active_roe(session, status=RoEStatus.DRAFT)
     _add_signoff(session, roe)
@@ -162,9 +157,7 @@ def test_draft_roe_does_not_authorize(
     assert "draft" in reason.lower() or "not active" in reason.lower()
 
 
-def test_expired_roe_does_not_authorize(
-    session: Session, validator: RoEValidator
-) -> None:
+def test_expired_roe_does_not_authorize(session: Session, validator: RoEValidator) -> None:
     """An RoE whose `valid_until` is in the past does not authorize."""
     roe = _add_active_roe(
         session,
@@ -182,9 +175,7 @@ def test_expired_roe_does_not_authorize(
     assert "expired" in reason.lower() or "valid" in reason.lower()
 
 
-def test_not_yet_valid_roe_does_not_authorize(
-    session: Session, validator: RoEValidator
-) -> None:
+def test_not_yet_valid_roe_does_not_authorize(session: Session, validator: RoEValidator) -> None:
     """An RoE whose `valid_from` is in the future does not authorize.
 
     Symmetric to `test_expired_roe_does_not_authorize`: an RoE with a
@@ -208,9 +199,7 @@ def test_not_yet_valid_roe_does_not_authorize(
     assert "not yet valid" in reason.lower() or "future" in reason.lower()
 
 
-def test_revoked_roe_does_not_authorize(
-    session: Session, validator: RoEValidator
-) -> None:
+def test_revoked_roe_does_not_authorize(session: Session, validator: RoEValidator) -> None:
     """An RoE with status=REVOKED is not authorized."""
     roe = _add_active_roe(session, status=RoEStatus.REVOKED)
     _add_signoff(session, roe)
@@ -224,9 +213,7 @@ def test_revoked_roe_does_not_authorize(
     assert "revoked" in reason.lower() or "active" in reason.lower()
 
 
-def test_roe_without_signoffs_does_not_authorize(
-    session: Session, validator: RoEValidator
-) -> None:
+def test_roe_without_signoffs_does_not_authorize(session: Session, validator: RoEValidator) -> None:
     """An ACTIVE in-window RoE with zero signoffs returns authorized=False."""
     _add_active_roe(session)  # no signoff attached
 
@@ -263,9 +250,7 @@ def test_roe_with_all_signoffs_revoked_does_not_authorize(
 # ---------------------------------------------------------------------------
 
 
-def test_get_active_roes_returns_only_active(
-    session: Session, validator: RoEValidator
-) -> None:
+def test_get_active_roes_returns_only_active(session: Session, validator: RoEValidator) -> None:
     """`get_active_roes` excludes DRAFT / REVOKED / out-of-window RoEs."""
     # Two ACTIVE in-window RoEs.
     active_1 = _add_active_roe(session, target="example.com")
@@ -315,9 +300,7 @@ def test_get_active_roes_filters_by_target_and_scope(
     assert [r.target for r in results] == ["keep.com"]
 
 
-def test_get_active_roes_filters_by_scope_type(
-    session: Session, validator: RoEValidator
-) -> None:
+def test_get_active_roes_filters_by_scope_type(session: Session, validator: RoEValidator) -> None:
     """`scope_type=` narrows the result set to that scope only."""
     domain = _add_active_roe(session, target="example.com", scope_type=ScopeType.DOMAIN)
     _add_signoff(session, domain)
@@ -346,9 +329,7 @@ def test_get_active_roes_filters_by_scope_type(
 # ---------------------------------------------------------------------------
 
 
-def test_is_authorized_with_explicit_at_in_past(
-    session: Session, validator: RoEValidator
-) -> None:
+def test_is_authorized_with_explicit_at_in_past(session: Session, validator: RoEValidator) -> None:
     """`at=` injection into the past makes an otherwise-valid RoE look expired.
 
     The `at` parameter is exposed exactly so callers (audit, replay) can
@@ -446,9 +427,7 @@ def test_is_authorized_target_normalizes_whitespace_and_case(
     assert len(signoffs) == 1
 
 
-def test_is_authorized_is_idempotent(
-    session: Session, validator: RoEValidator
-) -> None:
+def test_is_authorized_is_idempotent(session: Session, validator: RoEValidator) -> None:
     """Re-running `is_authorized` is read-only and produces identical answers.
 
     The validator must not create new SignOffs, mutate the RoE, or shift
@@ -496,9 +475,7 @@ def test_is_authorized_no_roe_returns_empty_signoffs(
     assert isinstance(signoffs, list)
 
 
-def test_get_active_roes_excludes_only_drafts(
-    session: Session, validator: RoEValidator
-) -> None:
+def test_get_active_roes_excludes_only_drafts(session: Session, validator: RoEValidator) -> None:
     """Mixed RoEs: DRAFT and REVOKED are filtered; ACTIVE in-window passes."""
     keep = _add_active_roe(session, target="keep.com")
     _add_signoff(session, keep)

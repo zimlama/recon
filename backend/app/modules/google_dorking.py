@@ -34,33 +34,50 @@ SERPAPI_TIMEOUT = 15
 # Curated dork templates (GHDB-style) — these are query strings to run
 # against Google. Useful when SERP_API_KEY is not set.
 DORK_TEMPLATES = [
-    'site:{target} filetype:env',
-    'site:{target} filetype:sql',
-    'site:{target} filetype:bak',
-    'site:{target} inurl:admin',
-    'site:{target} inurl:login',
-    'site:{target} inurl:config',
+    "site:{target} filetype:env",
+    "site:{target} filetype:sql",
+    "site:{target} filetype:bak",
+    "site:{target} inurl:admin",
+    "site:{target} inurl:login",
+    "site:{target} inurl:config",
     'site:{target} intitle:"index of"',
-    'site:{target} ext:xml | ext:json | ext:yaml',
+    "site:{target} ext:xml | ext:json | ext:yaml",
     'site:{target} "password" | "api_key" | "secret"',
     'site:{target} "DB_USERNAME" | "DB_PASSWORD"',
     'site:{target} "BEGIN RSA PRIVATE KEY"',
     'site:{target} "wp-config.php"',
     'site:{target} ".env"',
-    'site:{target} inurl:phpmyadmin',
-    'site:{target} inurl:jenkins',
-    'site:{target} inurl:grafana',
-    'site:{target} inurl:kibana',
-    'site:{target} inurl:swagger',
+    "site:{target} inurl:phpmyadmin",
+    "site:{target} inurl:jenkins",
+    "site:{target} inurl:grafana",
+    "site:{target} inurl:kibana",
+    "site:{target} inurl:swagger",
     'site:{target} inurl:"/api/v1"',
     'site:{target} "API documentation"',
 ]
 
 # Default file types of interest
 INTERESTING_FILE_TYPES = {
-    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-    "sql", "env", "bak", "old", "config", "xml", "json", "yaml", "yml",
-    "log", "csv", "txt", "md",
+    "pdf",
+    "doc",
+    "docx",
+    "xls",
+    "xlsx",
+    "ppt",
+    "pptx",
+    "sql",
+    "env",
+    "bak",
+    "old",
+    "config",
+    "xml",
+    "json",
+    "yaml",
+    "yml",
+    "log",
+    "csv",
+    "txt",
+    "md",
 }
 
 
@@ -181,7 +198,10 @@ Respond with structured JSON matching the LDMValidationResult schema."""
             return "backup"
 
         # Admin panels
-        if any(x in dork_lower for x in ("admin", "login", "phpmyadmin", "jenkins", "grafana", "kibana")):
+        if any(
+            x in dork_lower
+            for x in ("admin", "login", "phpmyadmin", "jenkins", "grafana", "kibana")
+        ):
             return "admin_panel"
 
         # Config files (xml, json, yaml)

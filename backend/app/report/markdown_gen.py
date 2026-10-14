@@ -86,7 +86,7 @@ class MarkdownReportGenerator:
         return f"""---
 title: "Reconocimiento Pasivo — {self.job.target}"
 target: "{self.job.target}"
-date: "{_now().strftime('%Y-%m-%d')}"
+date: "{_now().strftime("%Y-%m-%d")}"
 job_id: "{self.job.id}"
 phase: "01-recon-osint"
 ai_validated: true
@@ -185,19 +185,13 @@ generator: "zimlama/recon v0.1.0"
                 sections.append(f"**AI Confidence:** {v.confidence:.2f}")
                 sections.append(f"**Recommended Action:** {v.recommended_action}")
                 if v.recommended_next_modules:
-                    sections.append(
-                        f"**Next Modules:** {', '.join(v.recommended_next_modules)}"
-                    )
+                    sections.append(f"**Next Modules:** {', '.join(v.recommended_next_modules)}")
                 sections.append("")
 
         return sections
 
     def _ai_insights(self) -> list[str]:
-        module_runs = (
-            self.db.query(ModuleRun)
-            .filter(ModuleRun.job_id == self.job.id)
-            .all()
-        )
+        module_runs = self.db.query(ModuleRun).filter(ModuleRun.job_id == self.job.id).all()
         sections: list[str] = ["## AI Insights (MiniMax M3)", ""]
 
         any_validations = False

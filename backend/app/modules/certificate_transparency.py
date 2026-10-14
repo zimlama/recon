@@ -173,9 +173,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
             async with httpx.AsyncClient(timeout=CRTSH_TIMEOUT) as client:
                 response = await client.get(CRTSH_URL, params=params)
                 if response.status_code != 200:
-                    logger.debug(
-                        "crtsh_non_200", status=response.status_code, domain=domain
-                    )
+                    logger.debug("crtsh_non_200", status=response.status_code, domain=domain)
                     return None
                 try:
                     return response.json()

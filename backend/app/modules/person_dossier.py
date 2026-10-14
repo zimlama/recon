@@ -119,6 +119,7 @@ class PersonDossier(BaseModel):
         if not isinstance(v, str):
             raise ValueError("email_hash must be a str")
         return v
+
     profiles: list[str] = Field(
         default_factory=list,
         description="SOCIAL_PROFILE URLs (from socmint)",
@@ -298,23 +299,16 @@ def _classify_breaches(
     for module_name, finding in sibling_findings:
         if finding.type != FindingType.CREDENTIAL_EXPOSURE:
             continue
-        meta = (
-            finding.finding_metadata
-            if isinstance(finding.finding_metadata, dict)
-            else {}
-        )
+        meta = finding.finding_metadata if isinstance(finding.finding_metadata, dict) else {}
         breach_domain = (
-            meta.get("domain", "")
-            if isinstance(meta.get("domain", ""), str)
-            else ""
+            meta.get("domain", "") if isinstance(meta.get("domain", ""), str) else ""
         ).lower()
         if breach_domain and hashes_by_domain.get(breach_domain):
             target = hashes_by_domain[breach_domain][0]
             attached.append((module_name, finding, target))
             continue
         orphans.append(
-            f"orphan breach: {meta.get('email_hash_prefix', '?')} "
-            f"for {breach_domain or '?'}"
+            f"orphan breach: {meta.get('email_hash_prefix', '?')} for {breach_domain or '?'}"
         )
 
     return attached, orphans
@@ -477,9 +471,7 @@ class PersonDossierModule(BaseReconModule):
                     errors=["no completed sibling modules"],
                 )
 
-            grouping = self._group_findings_for_processing(
-                db, job.id, sibling_rows
-            )
+            grouping = self._group_findings_for_processing(db, job.id, sibling_rows)
             errors = list(grouping["orphan_breaches"])
 
             dossiers, plaintext_by_hash = self._build_dossiers(
@@ -509,9 +501,7 @@ class PersonDossierModule(BaseReconModule):
     # run() helpers (each ≤50 lines, single responsibility)
     # ----------------------------------------------------------------
 
-    def _load_sibling_state(
-        self, db: Any, job_id: str
-    ) -> ModuleOutput | _SkipSignal | None:
+    def _load_sibling_state(self, db: Any, job_id: str) -> ModuleOutput | _SkipSignal | None:
         """Poll sibling ModuleRun rows.
 
         If any sibling is still RUNNING, signal a skip via the
@@ -520,9 +510,7 @@ class PersonDossierModule(BaseReconModule):
         """
         sibling_states = self._sibling_module_states(db, job_id)
         running = [
-            name
-            for name, status in sibling_states.items()
-            if status == ModuleStatus.RUNNING
+            name for name, status in sibling_states.items() if status == ModuleStatus.RUNNING
         ]
         if running:
             return _SkipSignal(
@@ -530,9 +518,7 @@ class PersonDossierModule(BaseReconModule):
             )
         return None
 
-    def _load_source_findings(
-        self, db: Any, job_id: str
-    ) -> list[tuple[Any, str]]:
+    def _load_source_findings(self, db: Any, job_id: str) -> list[tuple[Any, str]]:
         """Read sibling Finding rows (DB rows, not Pydantic)."""
         return self._query_sibling_finding_rows(db, job_id)
 
@@ -549,8 +535,7 @@ class PersonDossierModule(BaseReconModule):
         sequentially without re-reading the DB.
         """
         sibling_findings: list[tuple[str, Finding]] = [
-            (module_name, self._row_to_finding(row))
-            for row, module_name in sibling_rows
+            (module_name, self._row_to_finding(row)) for row, module_name in sibling_rows
         ]
         already_dossiered = self._already_dossiered_email_hashes(db, job_id)
         bucket = _group_by_email_hash(sibling_findings, already_dossiered)
@@ -586,9 +571,7 @@ class PersonDossierModule(BaseReconModule):
         plaintext_by_hash: dict[str, str | None] = {}
         for email_hash, items in bucket.items():
             dossiers.append(self._build_dossier(email_hash, items))
-            plaintext_by_hash[email_hash] = _resolve_plaintext_email(
-                [f for _m, f in items]
-            )
+            plaintext_by_hash[email_hash] = _resolve_plaintext_email([f for _m, f in items])
 
         for module_name, breach_finding, target_hash in attached_breaches:
             for d in dossiers:
@@ -601,9 +584,7 @@ class PersonDossierModule(BaseReconModule):
 
         return dossiers, plaintext_by_hash
 
-    async def _apply_coherence(
-        self, dossiers: list[PersonDossier]
-    ) -> None:
+    async def _apply_coherence(self, dossiers: list[PersonDossier]) -> None:
         """Run LLM coherence on each dossier (best-effort).
 
         Closes the LLM client when done. Per-dossier failures don't
@@ -615,9 +596,7 @@ class PersonDossierModule(BaseReconModule):
         try:
             for dossier in dossiers:
                 try:
-                    tag = await _assess_coherence(
-                        dossier, llm_client, system_prompt
-                    )
+                    tag = await _assess_coherence(dossier, llm_client, system_prompt)
                     if tag is not None:
                         dossier.coherence = tag
                 except Exception as e:  # pragma: no cover — defensive
@@ -661,9 +640,7 @@ class PersonDossierModule(BaseReconModule):
                 encryption_key=encryption_key,
                 errors=errors,
             )
-            persona_id = (
-                base_persona if row_inserted else f"{base_persona}_no_pii"
-            )
+            persona_id = base_persona if row_inserted else f"{base_persona}_no_pii"
             findings.append(
                 Finding(
                     type=FindingType.DOSSIER,
@@ -763,17 +740,11 @@ class PersonDossierModule(BaseReconModule):
 
         Used for idempotency on re-runs.
         """
-        rows = (
-            db.query(IdentityMap.email_hash)
-            .filter(IdentityMap.job_id == job_id)
-            .all()
-        )
+        rows = db.query(IdentityMap.email_hash).filter(IdentityMap.job_id == job_id).all()
         return {row[0] for row in rows}
 
     @staticmethod
-    def _build_dossier(
-        email_hash: str, items: list[tuple[str, Finding]]
-    ) -> PersonDossier:
+    def _build_dossier(email_hash: str, items: list[tuple[str, Finding]]) -> PersonDossier:
         """Build one PersonDossier from a bucket of (module_name, Finding)."""
         profiles: list[str] = []
         breach_exposures: list[dict[str, Any]] = []

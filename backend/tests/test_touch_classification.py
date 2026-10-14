@@ -395,10 +395,9 @@ def test_base_module_validate_target_format_rejects_short_target() -> None:
             return "x"
 
     instance = _Probe()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="target"):
         instance.validate_target_format("ab")  # len 2 < 3 minimum
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="target"):
         instance.validate_target_format("")
     # And a valid one returns a normalized target
     assert instance.validate_target_format("  Example.COM  ") == "example.com"
-

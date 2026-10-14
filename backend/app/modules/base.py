@@ -55,7 +55,9 @@ class Finding(BaseModel):
 
     type: FindingType
     value: str = Field(..., min_length=1)
-    source: str = Field(..., description="Where this finding came from (e.g., 'subfinder', 'crt.sh')")
+    source: str = Field(
+        ..., description="Where this finding came from (e.g., 'subfinder', 'crt.sh')"
+    )
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     finding_metadata: dict[str, Any] = Field(default_factory=dict)
 

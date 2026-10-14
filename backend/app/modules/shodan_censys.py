@@ -83,9 +83,12 @@ class ShodanCensysModule(BaseReconModule):
 
         # 2. SSRF defense: only query public IPs
         from app.utils.network import filter_public_ips
+
         public_ips = filter_public_ips(ips)
         if not public_ips:
-            errors.append(f"No public IPs found for {target} (all resolved IPs are private/reserved)")
+            errors.append(
+                f"No public IPs found for {target} (all resolved IPs are private/reserved)"
+            )
             return ModuleOutput(
                 module=self.name,
                 findings=findings,
@@ -107,7 +110,9 @@ class ShodanCensysModule(BaseReconModule):
         if settings.CENSYS_API_ID and settings.CENSYS_API_SECRET:
             for ip in public_ips:
                 try:
-                    censys_data = await self._query_censys(ip, settings.CENSYS_API_ID, settings.CENSYS_API_SECRET)
+                    censys_data = await self._query_censys(
+                        ip, settings.CENSYS_API_ID, settings.CENSYS_API_SECRET
+                    )
                     if censys_data:
                         findings.extend(self._censys_to_findings(ip, censys_data))
                 except Exception as e:
@@ -182,9 +187,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
             logger.debug("shodan_internetdb_http_error", error=str(e), ip=ip)
             return None
 
-    async def _query_censys(
-        self, ip: str, api_id: str, api_secret: str
-    ) -> dict[str, Any] | None:
+    async def _query_censys(self, ip: str, api_id: str, api_secret: str) -> dict[str, Any] | None:
         """Query Censys Search API for an IP. Free tier with API ID + Secret."""
         url = CENSYS_SEARCH_URL.format(ip=ip)
         try:

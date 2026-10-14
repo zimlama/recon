@@ -84,19 +84,47 @@ EMAIL_LOCAL_PARTS = [
 ]
 
 # Pattern to extract email addresses from arbitrary text
-EMAIL_REGEX = re.compile(
-    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
-)
+EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 
 # Filter out obvious role-based / no-reply addresses (low signal for recon)
 ROLE_BASED = {
-    "admin", "administrator", "root", "postmaster", "hostmaster",
-    "webmaster", "info", "support", "contact", "sales", "marketing",
-    "noreply", "no-reply", "donotreply", "do-not-reply",
-    "security", "abuse", "legal", "privacy", "compliance",
-    "hr", "jobs", "careers", "billing", "accounts", "help",
-    "hello", "team", "dev", "engineering", "tech", "it", "ops",
-    "noc", "www", "ftp", "mailer-daemon",
+    "admin",
+    "administrator",
+    "root",
+    "postmaster",
+    "hostmaster",
+    "webmaster",
+    "info",
+    "support",
+    "contact",
+    "sales",
+    "marketing",
+    "noreply",
+    "no-reply",
+    "donotreply",
+    "do-not-reply",
+    "security",
+    "abuse",
+    "legal",
+    "privacy",
+    "compliance",
+    "hr",
+    "jobs",
+    "careers",
+    "billing",
+    "accounts",
+    "help",
+    "hello",
+    "team",
+    "dev",
+    "engineering",
+    "tech",
+    "it",
+    "ops",
+    "noc",
+    "www",
+    "ftp",
+    "mailer-daemon",
 }
 
 # Filter out obvious test / placeholder patterns
@@ -106,8 +134,11 @@ TEST_PATTERNS = re.compile(
 
 # Privacy filter: discard emails going to common anti-harvesting providers
 PRIVACY_PROTECTED_DOMAINS = {
-    "example.com", "example.org", "example.net",
-    "yourdomain.com", "mydomain.com",
+    "example.com",
+    "example.org",
+    "example.net",
+    "yourdomain.com",
+    "mydomain.com",
 }
 
 PGP_TIMEOUT = 30
@@ -223,15 +254,11 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                 server_emails = await self._query_single_pgp_server(server, domain)
                 emails.update(server_emails)
             except Exception as e:
-                logger.debug(
-                    "pgp_server_failed", server=server, error=str(e), domain=domain
-                )
+                logger.debug("pgp_server_failed", server=server, error=str(e), domain=domain)
                 continue
         return emails
 
-    async def _query_single_pgp_server(
-        self, server: str, domain: str
-    ) -> set[str]:
+    async def _query_single_pgp_server(self, server: str, domain: str) -> set[str]:
         """Query a single PGP key server.
 
         Uses the HKP (HTTP Keyserver Protocol) index endpoint:
@@ -275,9 +302,12 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 "theHarvester",
-                "-d", target,
-                "-b", "all",
-                "-f", output_path.stem,  # without extension
+                "-d",
+                target,
+                "-b",
+                "all",
+                "-f",
+                output_path.stem,  # without extension
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

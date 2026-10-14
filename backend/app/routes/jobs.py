@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
@@ -135,12 +136,10 @@ async def _await_task(task: asyncio.Task) -> None:  # type: ignore[type-arg]
     mechanism sees it complete. The actual work is already running
     inside ``task``; this is just a sync point for FastAPI.
     """
-    try:
+    # The task already has its own error handling — silence the
+    # BackgroundTasks's "exception in background task" warning.
+    with contextlib.suppress(Exception):
         await task
-    except Exception:
-        # The task already has its own error handling — silence the
-        # BackgroundTasks's "exception in background task" warning.
-        pass
 
 
 async def _run_job_background(job_id: str) -> None:
@@ -175,10 +174,7 @@ async def list_jobs(
 
     total = query.count()
     jobs = (
-        query.order_by(desc(Job.created_at))
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
+        query.order_by(desc(Job.created_at)).offset((page - 1) * page_size).limit(page_size).all()
     )
 
     return PaginatedResponse(

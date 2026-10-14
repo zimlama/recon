@@ -82,7 +82,7 @@ class LLMClient:
             await self._client.aclose()
             self._client = None
 
-    async def chat_completion(
+    async def chat_completion(  # noqa: C901 - complexity 14, refactor tracked in issue #43
         self,
         messages: list[dict[str, str]],
         response_format: dict[str, str] | None = None,  # accepted for back-compat; ignored
@@ -126,10 +126,12 @@ class LLMClient:
         # for the user role. We pass strings as-is (the standard form).
         anthropic_messages: list[dict[str, Any]] = []
         for m in user_messages:
-            anthropic_messages.append({
-                "role": m["role"],
-                "content": m["content"],
-            })
+            anthropic_messages.append(
+                {
+                    "role": m["role"],
+                    "content": m["content"],
+                }
+            )
 
         payload: dict[str, Any] = {
             "model": self.model,
@@ -173,26 +175,33 @@ class LLMClient:
                 if e.response.status_code == 429:
                     # Rate limited — honor Retry-After header with jitter
                     import random
+
                     retry_after = e.response.headers.get("Retry-After")
                     if retry_after:
                         try:
                             wait = float(retry_after)
                         except ValueError:
-                            wait = 2 ** attempt
+                            wait = 2**attempt
                     else:
-                        wait = 2 ** attempt
+                        wait = 2**attempt
                     # Add jitter to avoid thundering herd
                     wait += random.uniform(0, 0.5 * wait)
                     logger.warning(
                         "LLM rate limited, waiting %.1fs (Retry-After: %s)",
-                        wait, retry_after or "default",
+                        wait,
+                        retry_after or "default",
                     )
                     await asyncio.sleep(wait)
                     continue
                 if attempt < self.max_retries:
-                    wait = 2 ** attempt
-                    logger.warning("LLM HTTP %s, retry %d/%d in %ds",
-                                   e.response.status_code, attempt+1, self.max_retries, wait)
+                    wait = 2**attempt
+                    logger.warning(
+                        "LLM HTTP %s, retry %d/%d in %ds",
+                        e.response.status_code,
+                        attempt + 1,
+                        self.max_retries,
+                        wait,
+                    )
                     await asyncio.sleep(wait)
                     continue
                 raise LLMError(f"LLM request failed: {e}") from e
@@ -200,8 +209,12 @@ class LLMClient:
                 last_error = e
                 if attempt < self.max_retries:
                     wait = 2**attempt
-                    logger.warning("LLM connection error, retry %d/%d in %ds",
-                                   attempt+1, self.max_retries, wait)
+                    logger.warning(
+                        "LLM connection error, retry %d/%d in %ds",
+                        attempt + 1,
+                        self.max_retries,
+                        wait,
+                    )
                     await asyncio.sleep(wait)
                     continue
                 raise LLMError(f"LLM connection failed: {e}") from e

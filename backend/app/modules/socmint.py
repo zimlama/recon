@@ -71,7 +71,9 @@ class SOCMINTModule(BaseReconModule):
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for (platform_name, url_template, _), result in zip(SOCIAL_PLATFORMS, results, strict=False):
+        for (platform_name, url_template, _), result in zip(
+            SOCIAL_PLATFORMS, results, strict=False
+        ):
             if isinstance(result, Exception):
                 errors.append(f"{platform_name} check failed: {result!s}")
                 continue

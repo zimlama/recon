@@ -29,6 +29,7 @@ XYZ9999999:1"""
 
 # ---- HIBP k-anonymity check ----
 
+
 @pytest.mark.asyncio
 async def test_hibp_no_breach_match(
     module: BreachDataModule,
@@ -43,9 +44,7 @@ async def test_hibp_no_breach_match(
     # Mock returns response that does NOT include our suffix
     response_text = f"0018A45C4F5C8B2E0F1A:5\n{prefix}NONO:1\n"
     with respx.mock(base_url="https://api.pwnedpasswords.com", assert_all_called=False) as mock:
-        mock.get(f"/range/{prefix}").mock(
-            return_value=httpx.Response(200, text=response_text)
-        )
+        mock.get(f"/range/{prefix}").mock(return_value=httpx.Response(200, text=response_text))
         count = await module._check_hibp(email)
     assert count == 0  # no match (suffix NONO doesn't match)
 
@@ -63,9 +62,7 @@ async def test_hibp_breach_match(
     # Mock response includes our suffix
     response_text = f"0018A45C4F5C8B2E0F1A:5\n{suffix}:7\n"
     with respx.mock(base_url="https://api.pwnedpasswords.com", assert_all_called=False) as mock:
-        mock.get(f"/range/{prefix}").mock(
-            return_value=httpx.Response(200, text=response_text)
-        )
+        mock.get(f"/range/{prefix}").mock(return_value=httpx.Response(200, text=response_text))
         count = await module._check_hibp(email)
     assert count == 7
 
@@ -107,6 +104,7 @@ async def test_hibp_privacy_padding_header(
 
 # ---- Run ----
 
+
 @pytest.mark.asyncio
 async def test_run_no_emails_finds_nothing(module: BreachDataModule) -> None:
     """If no emails found, no findings are produced."""
@@ -120,6 +118,7 @@ async def test_run_with_breaches_produces_findings(
     module: BreachDataModule,
 ) -> None:
     """When emails are checked and breaches found, findings are produced."""
+
     async def fake_get_emails(target: str) -> list[str]:
         return ["admin@example.com", "info@example.com"]
 
@@ -128,9 +127,8 @@ async def test_run_with_breaches_produces_findings(
             return 7
         return 0
 
-    with patch.object(module, "_get_target_emails", side_effect=fake_get_emails):
-        with patch.object(module, "_check_hibp", side_effect=fake_check_hibp):
-            result = await module.run(ModuleInput(target="example.com"))
+    with patch.object(module, "_get_target_emails", side_effect=fake_get_emails), patch.object(module, "_check_hibp", side_effect=fake_check_hibp):
+        result = await module.run(ModuleInput(target="example.com"))
 
     # admin had breaches, info didn't
     assert len(result.findings) == 1
@@ -144,20 +142,21 @@ async def test_run_with_breaches_produces_findings(
 @pytest.mark.asyncio
 async def test_severity_high_for_many_breaches(module: BreachDataModule) -> None:
     """>5 breaches → severity = MEDIUM, >10 → HIGH."""
+
     async def fake_get_emails(target: str) -> list[str]:
         return ["admin@example.com"]
 
     async def fake_check_hibp(email: str) -> int:
         return 15
 
-    with patch.object(module, "_get_target_emails", side_effect=fake_get_emails):
-        with patch.object(module, "_check_hibp", side_effect=fake_check_hibp):
-            result = await module.run(ModuleInput(target="example.com"))
+    with patch.object(module, "_get_target_emails", side_effect=fake_get_emails), patch.object(module, "_check_hibp", side_effect=fake_check_hibp):
+        result = await module.run(ModuleInput(target="example.com"))
 
     assert result.findings[0].finding_metadata["severity"] == "HIGH"
 
 
 # ---- Metadata ----
+
 
 def test_module_metadata(module: BreachDataModule) -> None:
     assert module.name == "breach_data"
@@ -176,6 +175,7 @@ def test_ai_prompt_is_substantive(module: BreachDataModule) -> None:
 def test_dedup_emails_via_pattern(module: BreachDataModule) -> None:
     """Common email patterns are generated."""
     import asyncio
+
     emails = asyncio.run(module._get_target_emails("example.com"))
     assert "admin@example.com" in emails
     assert "info@example.com" in emails
@@ -184,6 +184,7 @@ def test_dedup_emails_via_pattern(module: BreachDataModule) -> None:
 
 def test_finding_does_not_contain_plaintext_email(module: BreachDataModule) -> None:
     """The Finding value NEVER contains the plaintext email."""
+
     async def fake_get_emails(target: str) -> list[str]:
         return ["sensitive.secret@example.com"]
 
@@ -193,9 +194,8 @@ def test_finding_does_not_contain_plaintext_email(module: BreachDataModule) -> N
     import asyncio
 
     async def run() -> None:
-        with patch.object(module, "_get_target_emails", side_effect=fake_get_emails):
-            with patch.object(module, "_check_hibp", side_effect=fake_check_hibp):
-                result = await module.run(ModuleInput(target="example.com"))
+        with patch.object(module, "_get_target_emails", side_effect=fake_get_emails), patch.object(module, "_check_hibp", side_effect=fake_check_hibp):
+            result = await module.run(ModuleInput(target="example.com"))
         assert result.findings
         for f in result.findings:
             assert "sensitive.secret" not in f.value

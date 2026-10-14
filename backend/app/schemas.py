@@ -24,6 +24,7 @@ T = TypeVar("T")
 
 # ---- Common ----
 
+
 class ErrorResponse(BaseModel):
     """Standard error response."""
 
@@ -51,6 +52,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
 
 # ---- Job ----
 
+
 class JobCreate(BaseModel):
     """Request to create a new recon job."""
 
@@ -67,9 +69,7 @@ class JobCreate(BaseModel):
         description="Module names to run (max 14)",
     )
     user_consent: bool = Field(..., description="User has accepted the disclaimer")
-    typed_confirmation: str = Field(
-        ..., description="User must type the target domain to confirm"
-    )
+    typed_confirmation: str = Field(..., description="User must type the target domain to confirm")
     consent_modal_version: str = Field(default="v1.0")
 
 
@@ -111,6 +111,7 @@ class JobListResponse(BaseModel):
 
 # ---- Module Run ----
 
+
 class ModuleRunResponse(BaseModel):
     """Module run detail response."""
 
@@ -130,6 +131,7 @@ class ModuleRunResponse(BaseModel):
 
 # ---- Finding ----
 
+
 class FindingResponse(BaseModel):
     """Finding detail response."""
 
@@ -145,6 +147,7 @@ class FindingResponse(BaseModel):
 
 
 # ---- Module Catalog ----
+
 
 class ModuleInfo(BaseModel):
     """Module metadata (from catalog)."""
@@ -169,6 +172,7 @@ class ModuleListResponse(BaseModel):
 
 # ---- Handoff ----
 
+
 class HandoffResponse(BaseModel):
     """Handoff packet detail response."""
 
@@ -183,6 +187,7 @@ class HandoffResponse(BaseModel):
 
 
 # ---- AI Validation ----
+
 
 class AIValidationResponse(BaseModel):
     """AI validation detail response."""
@@ -202,6 +207,7 @@ class AIValidationResponse(BaseModel):
 
 
 # ---- Report ----
+
 
 class ReportGenerateRequest(BaseModel):
     """Request to generate a report for a job."""
@@ -223,6 +229,7 @@ class ReportResponse(BaseModel):
 
 
 # ---- Audit ----
+
 
 class AuditLogResponse(BaseModel):
     """Audit log entry response."""

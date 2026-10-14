@@ -15,6 +15,7 @@ Two layers of coverage:
    POST to `/api/v1/jobs`, verify the 403 / 201 outcome against a seeded
    RoE table. Slower but proves the wiring actually fires on real requests.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -131,9 +132,7 @@ def test_session_factory_passed_is_session_local(
     app = create_app()
     roe_mw = next(m for m in app.user_middleware if m.cls.__name__ == "RoEMiddleware")
     sf = roe_mw.kwargs["session_factory"]
-    assert sf is SessionLocal, (
-        f"session_factory must be SessionLocal (got {sf!r})"
-    )
+    assert sf is SessionLocal, f"session_factory must be SessionLocal (got {sf!r})"
     # And it must be a zero-arg callable, not a live Session.
     assert callable(sf)
     assert not isinstance(sf, Session)
@@ -285,9 +284,7 @@ async def client_with_roe(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Asyn
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=fresh_app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=fresh_app), base_url="http://test") as ac:
         yield ac
 
     Base.metadata.drop_all(bind=engine)
@@ -317,9 +314,7 @@ async def client_default(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Async
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=fresh_app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=fresh_app), base_url="http://test") as ac:
         yield ac
 
     Base.metadata.drop_all(bind=engine)
@@ -335,9 +330,7 @@ async def test_roe_blocks_job_creation_without_roe(
     validator returns `(False, "no RoE matches target+scope", [])` and
     the middleware returns 403 with `{"error": "roe_not_authorized", ...}`.
     """
-    response = await client_with_roe.post(
-        "/api/v1/jobs", json=_valid_job_body("example.com")
-    )
+    response = await client_with_roe.post("/api/v1/jobs", json=_valid_job_body("example.com"))
     assert response.status_code == 403, response.text
     body = response.json()
     assert body["error"] == "roe_not_authorized"
@@ -362,9 +355,7 @@ async def test_roe_allows_job_creation_with_roe(
     finally:
         db.close()
 
-    response = await client_with_roe.post(
-        "/api/v1/jobs", json=_valid_job_body("example.com")
-    )
+    response = await client_with_roe.post("/api/v1/jobs", json=_valid_job_body("example.com"))
     # 201 = route handler accepted; NOT 403 (would mean RoE blocked) and
     # NOT 500 (would mean the middleware threw on the request).
     assert response.status_code == 201, response.text
@@ -393,9 +384,7 @@ async def test_roe_blocks_expired_roe(
     finally:
         db.close()
 
-    response = await client_with_roe.post(
-        "/api/v1/jobs", json=_valid_job_body("example.com")
-    )
+    response = await client_with_roe.post("/api/v1/jobs", json=_valid_job_body("example.com"))
     assert response.status_code == 403, response.text
     body = response.json()
     assert body["error"] == "roe_not_authorized"
@@ -413,9 +402,7 @@ async def test_roe_blocks_with_disabled_env(
     fails if someone accidentally flips the default to True in
     `create_app()`.
     """
-    response = await client_default.post(
-        "/api/v1/jobs", json=_valid_job_body("example.com")
-    )
+    response = await client_default.post("/api/v1/jobs", json=_valid_job_body("example.com"))
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["target"] == "example.com"

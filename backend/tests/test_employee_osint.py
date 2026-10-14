@@ -17,6 +17,7 @@ def module() -> EmployeeOSINTModule:
 
 # ---- _generate_username_patterns ----
 
+
 def test_generate_username_patterns(module: EmployeeOSINTModule) -> None:
     """Username patterns are generated for the target."""
     findings = module._generate_username_patterns("acmecorp")
@@ -30,6 +31,7 @@ def test_generate_username_patterns(module: EmployeeOSINTModule) -> None:
 
 
 # ---- _run_sherlock ----
+
 
 @pytest.mark.asyncio
 async def test_run_sherlock_parses_output(module: EmployeeOSINTModule) -> None:
@@ -56,12 +58,12 @@ async def test_run_sherlock_timeout_caught(module: EmployeeOSINTModule) -> None:
     mock_proc = AsyncMock()
     mock_proc.communicate = AsyncMock(side_effect=TimeoutError())
 
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-        with pytest.raises(TimeoutError):
-            await module._run_sherlock("acmecorp")
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), pytest.raises(TimeoutError):
+        await module._run_sherlock("acmecorp")
 
 
 # ---- Run ----
+
 
 @pytest.mark.asyncio
 async def test_run_with_sherlock(module: EmployeeOSINTModule) -> None:
@@ -71,9 +73,8 @@ async def test_run_with_sherlock(module: EmployeeOSINTModule) -> None:
     mock_proc = AsyncMock()
     mock_proc.communicate = AsyncMock(return_value=(stdout, b""))
 
-    with patch("shutil.which", return_value="/usr/bin/sherlock"):
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            result = await module.run(ModuleInput(target="acmecorp"))
+    with patch("shutil.which", return_value="/usr/bin/sherlock"), patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+        result = await module.run(ModuleInput(target="acmecorp"))
 
     # Sherlock findings + pattern findings
     sherlock_findings = [f for f in result.findings if f.source == "sherlock"]
@@ -100,9 +101,8 @@ async def test_run_sherlock_error_logged(module: EmployeeOSINTModule) -> None:
     mock_proc = AsyncMock()
     mock_proc.communicate = AsyncMock(side_effect=RuntimeError("sherlock crashed"))
 
-    with patch("shutil.which", return_value="/usr/bin/sherlock"):
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            result = await module.run(ModuleInput(target="acmecorp"))
+    with patch("shutil.which", return_value="/usr/bin/sherlock"), patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+        result = await module.run(ModuleInput(target="acmecorp"))
 
     # Error is logged
     assert any("sherlock" in e for e in result.errors)
@@ -111,6 +111,7 @@ async def test_run_sherlock_error_logged(module: EmployeeOSINTModule) -> None:
 
 
 # ---- Metadata ----
+
 
 def test_module_metadata(module: EmployeeOSINTModule) -> None:
     assert module.name == "employee_osint"

@@ -47,9 +47,7 @@ def jobs_only_db(tmp_path):
     )
     Job.__table__.create(bind=eng, checkfirst=True)
     ModuleRun.__table__.create(bind=eng, checkfirst=True)
-    Session_ = sessionmaker(
-        bind=eng, autoflush=False, autocommit=False, expire_on_commit=False
-    )
+    session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
 
     # Patch SessionLocal in both modules so JobRunner + helpers see this DB.
     import app.database as app_db
@@ -57,10 +55,10 @@ def jobs_only_db(tmp_path):
 
     original_app_session = app_db.SessionLocal
     original_jr_session = jr_module.SessionLocal
-    app_db.SessionLocal = Session_
-    jr_module.SessionLocal = Session_
+    app_db.SessionLocal = session_
+    jr_module.SessionLocal = session_
 
-    db = Session_()
+    db = session_()
     try:
         yield db
     finally:
@@ -371,13 +369,11 @@ def identity_map_db(tmp_path):
     Job.__table__.create(bind=eng, checkfirst=True)
     ModuleRun.__table__.create(bind=eng, checkfirst=True)
     IdentityMap.__table__.create(bind=eng, checkfirst=True)
-    Session_ = sessionmaker(
-        bind=eng, autoflush=False, autocommit=False, expire_on_commit=False
-    )
+    session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
 
-    db = Session_()
+    db = session_()
     try:
-        yield db, Session_
+        yield db, session_
     finally:
         db.close()
         IdentityMap.__table__.drop(bind=eng, checkfirst=True)

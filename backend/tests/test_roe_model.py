@@ -7,6 +7,7 @@ Models live in `app.models`:
   - `RoE` — engagement envelope (target, scope, validity window, status)
   - `SignOff` — human authorization record; cascades with its RoE
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -60,11 +61,9 @@ def roe_db(tmp_path):
 
     RoE.__table__.create(bind=eng, checkfirst=True)
     SignOff.__table__.create(bind=eng, checkfirst=True)
-    Session_ = sessionmaker(
-        bind=eng, autoflush=False, autocommit=False, expire_on_commit=False
-    )
+    session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
 
-    db = Session_()
+    db = session_()
     try:
         yield db
     finally:

@@ -236,8 +236,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 "PERSON_DOSSIER_ENCRYPTION_KEY must be set in production. "
                 "Generate one with:\n"
-                "  python -c \"from cryptography.fernet import Fernet; "
-                "print(Fernet.generate_key().decode())\""
+                '  python -c "from cryptography.fernet import Fernet; '
+                'print(Fernet.generate_key().decode())"'
             )
         return v
 

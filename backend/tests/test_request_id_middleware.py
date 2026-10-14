@@ -6,6 +6,7 @@ Verifies:
 - The middleware honors an X-Request-ID header supplied by the caller.
 - The response carries the X-Request-ID header back.
 """
+
 from __future__ import annotations
 
 import re
@@ -28,14 +29,11 @@ async def client():
     @app.get("/echo")
     async def echo() -> dict[str, str]:
 
-
         return {}
 
     app.add_middleware(RequestIdMiddleware)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
 
 
@@ -83,9 +81,7 @@ async def test_request_id_middleware_is_attached_to_state(client) -> None:
 
     app.add_middleware(RequestIdMiddleware)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get("/capture")
 
     assert resp.status_code == 200

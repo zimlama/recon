@@ -82,16 +82,20 @@ def test_handoff_packet_serialization() -> None:
 
 def test_handoff_packet_rejects_extra_fields() -> None:
     """HandoffPacket rejects extra fields (strict schema)."""
-    with pytest.raises(Exception):  # ValidationError
-        HandoffPacket.model_validate({
-            "source": {
-                "version": "0.1.0",
-                "job_id": "x",
-                "completed_at": datetime.now(UTC).isoformat(),
-            },
-            "target": {"primary_domain": "example.com"},
-            "unknown_field": "should fail",  # extra="forbid"
-        })
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        HandoffPacket.model_validate(
+            {
+                "source": {
+                    "version": "0.1.0",
+                    "job_id": "x",
+                    "completed_at": datetime.now(UTC).isoformat(),
+                },
+                "target": {"primary_domain": "example.com"},
+                "unknown_field": "should fail",  # extra="forbid"
+            }
+        )
 
 
 # ---------------------------------------------------------------------------

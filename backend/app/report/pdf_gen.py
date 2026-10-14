@@ -23,7 +23,9 @@ class PDFGenerator:
     def __init__(self) -> None:
         self.timeout = 120  # seconds
 
-    async def convert(self, md_path: Path) -> Path | None:
+    async def convert(  # noqa: C901 - complexity 12, refactor tracked in issue #43
+        self, md_path: Path
+    ) -> Path | None:
         """Convert a markdown file to PDF using md-to-pdf.
 
         Returns the path to the generated PDF, or None if conversion failed.

@@ -98,7 +98,8 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         proc = await asyncio.create_subprocess_exec(
             "sherlock",
             "--print-found",
-            "--timeout", "10",
+            "--timeout",
+            "10",
             target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,

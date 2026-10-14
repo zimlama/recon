@@ -39,7 +39,10 @@ GITHUB_TIMEOUT = 20
 HTTP_TIMEOUT = 15
 # Common patterns that indicate secrets in code
 SECRET_PATTERNS = [
-    (r"(?i)(?:aws_access_key_id|aws_secret_access_key)\s*[=:]\s*['\"]?([A-Za-z0-9/+=]{20,})", "aws_credential"),
+    (
+        r"(?i)(?:aws_access_key_id|aws_secret_access_key)\s*[=:]\s*['\"]?([A-Za-z0-9/+=]{20,})",
+        "aws_credential",
+    ),
     (r"AKIA[0-9A-Z]{16}", "aws_access_key_id"),
     (r"(?i)api[_-]?key\s*[=:]\s*['\"]?([A-Za-z0-9_-]{20,})", "api_key"),
     (r"(?i)bearer\s+([A-Za-z0-9_.-]{20,})", "bearer_token"),
@@ -162,9 +165,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         }
         try:
             async with httpx.AsyncClient(timeout=GITHUB_TIMEOUT) as client:
-                response = await client.get(
-                    url, params=params, headers=self._get_headers()
-                )
+                response = await client.get(url, params=params, headers=self._get_headers())
                 if response.status_code == 403:
                     # Rate limit or auth required — parse GitHub rate-limit headers
                     # so we can warn clearly with the reset time instead of silent failure.
@@ -172,9 +173,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                     reset = response.headers.get("X-RateLimit-Reset")
                     if remaining == "0" and reset:
                         try:
-                            reset_dt = time.strftime(
-                                "%Y-%m-%d %H:%M:%S", time.gmtime(int(reset))
-                            )
+                            reset_dt = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(int(reset)))
                         except (ValueError, TypeError, OSError):
                             reset_dt = str(reset)
                         logger.warning(
@@ -255,9 +254,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         params = {"q": domain, "per_page": 20}
         try:
             async with httpx.AsyncClient(timeout=GITHUB_TIMEOUT) as client:
-                response = await client.get(
-                    url, params=params, headers=self._get_headers()
-                )
+                response = await client.get(url, params=params, headers=self._get_headers())
                 if response.status_code == 403:
                     # Rate limit or auth required — parse GitHub rate-limit headers
                     # so we can warn clearly with the reset time instead of silent failure.
@@ -265,9 +262,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                     reset = response.headers.get("X-RateLimit-Reset")
                     if remaining == "0" and reset:
                         try:
-                            reset_dt = time.strftime(
-                                "%Y-%m-%d %H:%M:%S", time.gmtime(int(reset))
-                            )
+                            reset_dt = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(int(reset)))
                         except (ValueError, TypeError, OSError):
                             reset_dt = str(reset)
                         logger.warning(

@@ -40,7 +40,9 @@ def init_db_cmd() -> None:
 @cli.command()
 def run(
     target: str = typer.Argument(..., help="Target domain to recon"),
-    modules: list[str] | None = typer.Option(None, "--module", "-m", help="Module names to run (repeatable)"),
+    modules: list[str] | None = typer.Option(
+        None, "--module", "-m", help="Module names to run (repeatable)"
+    ),
 ) -> None:
     """Run a recon from the CLI (without UI)."""
     from app.llm.client import LLMClient
@@ -58,6 +60,7 @@ def run(
 
     # Create job
     from app.models import _now
+
     with SessionLocal() as db:
         job = Job(
             target=target,
@@ -101,7 +104,9 @@ def run(
 @cli.command()
 def handoff(
     job_id: str = typer.Argument(..., help="Job ID to export handoff for"),
-    output: Path | None = typer.Option(None, "--output", "-o", help="Output file path (default: stdout)"),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Output file path (default: stdout)"
+    ),
 ) -> None:
     """Export a handoff packet for a job."""
     from app.handoff.exporter import export_handoff

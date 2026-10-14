@@ -16,13 +16,31 @@ Per spec.md REQ-018:
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
+from pathlib import Path
+from unittest.mock import AsyncMock
+
 import pytest
 from pydantic import ValidationError
 
-from app.models import FindingType
-from app.modules.base import Finding
+from app.database import Base, SessionLocal, engine
+from app.models import (
+    Finding as FindingModel,
+)
+from app.models import (
+    FindingType,
+    IdentityMap,
+    Job,
+    JobStatus,
+    ModuleRun,
+    ModuleStatus,
+    ModuleTier,
+)
+from app.modules.base import Finding, ModuleInput
 from app.modules.person_dossier import (
     PersonDossier,
+    PersonDossierModule,
     _aggregate_confidence,
     _extract_email_hash,
     _group_by_email_hash,
@@ -65,9 +83,14 @@ def test_person_dossier_round_trip_model_dump() -> None:
     pd = PersonDossier(**_valid_payload())
     d = pd.model_dump()
     expected_keys = {
-        "email_hash", "profiles", "breach_exposures",
-        "role_relevance", "priority_for_targeting",
-        "source_modules", "confidence", "coherence",
+        "email_hash",
+        "profiles",
+        "breach_exposures",
+        "role_relevance",
+        "priority_for_targeting",
+        "source_modules",
+        "confidence",
+        "coherence",
     }
     assert set(d.keys()) == expected_keys
 
@@ -272,7 +295,9 @@ def _social_profile_finding(email_hash: str | None = None) -> Finding:
     )
 
 
-def _credential_exposure_finding(prefix: str = "abc1234567", domain: str = "example.com") -> Finding:
+def _credential_exposure_finding(
+    prefix: str = "abc1234567", domain: str = "example.com"
+) -> Finding:
     return Finding(
         type=FindingType.CREDENTIAL_EXPOSURE,
         value=f"3_breaches_for_{prefix}",
@@ -539,28 +564,6 @@ def test_resolve_plaintext_email_returns_none_for_empty_value() -> None:
 # ---------------------------------------------------------------------------
 # PersonDossierModule.run() — orchestrator integration
 # ---------------------------------------------------------------------------
-
-import os
-from collections.abc import Iterator
-from pathlib import Path
-from unittest.mock import AsyncMock
-
-import pytest
-
-from app.database import Base, SessionLocal, engine
-from app.models import (
-    Finding as FindingModel,
-)
-from app.models import (
-    IdentityMap,
-    Job,
-    JobStatus,
-    ModuleRun,
-    ModuleStatus,
-    ModuleTier,
-)
-from app.modules.base import ModuleInput
-from app.modules.person_dossier import PersonDossierModule
 
 
 @pytest.fixture
@@ -836,7 +839,10 @@ async def test_run_writes_identity_map_with_ciphertext(fresh_db, monkeypatch, mo
         assert "jane@example.com" not in row.encrypted_email  # AC-020.7
         assert row.encrypted_email.startswith("gAAAAA")
         # Round-trip: Fernet can decrypt back to the plaintext.
-        assert Fernet(key.encode("ascii")).decrypt(row.encrypted_email.encode("ascii")).decode() == "jane@example.com"
+        assert (
+            Fernet(key.encode("ascii")).decrypt(row.encrypted_email.encode("ascii")).decode()
+            == "jane@example.com"
+        )
 
 
 @pytest.mark.asyncio
@@ -1151,9 +1157,7 @@ async def test_assess_coherence_non_dict_verdict_returns_none() -> None:
         source_modules=["socmint"],
     )
     client = AsyncMock()
-    client.chat_completion = AsyncMock(
-        return_value={"verdicts": ["not-a-dict"]}
-    )
+    client.chat_completion = AsyncMock(return_value={"verdicts": ["not-a-dict"]})
     tag = await _assess_coherence(dossier, client, "stub prompt")
     assert tag is None
 
@@ -1169,9 +1173,7 @@ async def test_assess_coherence_invalid_verdict_string_returns_none() -> None:
         source_modules=["socmint"],
     )
     client = AsyncMock()
-    client.chat_completion = AsyncMock(
-        return_value={"verdicts": [{"verdict": "MAYBE"}]}
-    )
+    client.chat_completion = AsyncMock(return_value={"verdicts": [{"verdict": "MAYBE"}]})
     tag = await _assess_coherence(dossier, client, "stub prompt")
     assert tag is None
 
@@ -1220,9 +1222,7 @@ async def test_run_includes_social_profile_in_dossier(fresh_db, mock_llm) -> Non
             .first()
         )
         socmint_finding = (
-            db.query(FindingModel)
-            .filter(FindingModel.module_run_id == socmint_run.id)
-            .first()
+            db.query(FindingModel).filter(FindingModel.module_run_id == socmint_run.id).first()
         )
         socmint_finding.finding_metadata = {"email_hash": jane_hash}
         db.commit()
@@ -1241,6 +1241,7 @@ async def test_run_encryption_key_invalid_logs_warning(fresh_db, mock_llm) -> No
     bogus_key = Fernet.generate_key().decode()[:-4] + "AAAA"  # truncated → invalid
     os.environ["PERSON_DOSSIER_ENCRYPTION_KEY"] = bogus_key
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     try:
@@ -1337,9 +1338,7 @@ async def test_assess_coherence_valid_verdict_string_returns_value() -> None:
         source_modules=["socmint"],
     )
     client = AsyncMock()
-    client.chat_completion = AsyncMock(
-        return_value={"verdicts": [{"verdict": "HIGH"}]}
-    )
+    client.chat_completion = AsyncMock(return_value={"verdicts": [{"verdict": "HIGH"}]})
     tag = await _assess_coherence(dossier, client, "stub prompt")
     assert tag == "HIGH"
 
@@ -1355,26 +1354,20 @@ async def test_assess_coherence_verdict_is_none_returns_none() -> None:
         source_modules=["socmint"],
     )
     client = AsyncMock()
-    client.chat_completion = AsyncMock(
-        return_value={"verdicts": [{"verdict": None}]}
-    )
+    client.chat_completion = AsyncMock(return_value={"verdicts": [{"verdict": None}]})
     tag = await _assess_coherence(dossier, client, "stub prompt")
     assert tag is None
 
 
 @pytest.mark.asyncio
-async def test_run_coherence_assigned_when_llm_returns_valid_verdict(
-    fresh_db, monkeypatch
-) -> None:
+async def test_run_coherence_assigned_when_llm_returns_valid_verdict(fresh_db, monkeypatch) -> None:
     """End-to-end: when LLM returns HIGH, dossier.coherence = 'HIGH' (lines 514-516)."""
     from unittest.mock import AsyncMock
 
     from app.modules.person_dossier import PersonDossierModule
 
     coherence_mock = AsyncMock()
-    coherence_mock.chat_completion = AsyncMock(
-        return_value={"verdicts": [{"verdict": "MEDIUM"}]}
-    )
+    coherence_mock.chat_completion = AsyncMock(return_value={"verdicts": [{"verdict": "MEDIUM"}]})
     coherence_mock.close = AsyncMock(return_value=None)
     monkeypatch.setattr(
         "app.modules.person_dossier.PersonDossierModule._make_llm_client",
@@ -1426,7 +1419,7 @@ def test_store_identity_map_handles_integrity_error(fresh_db, monkeypatch) -> No
             IdentityMap(
                 job_id=job_id,
                 email_hash=email_hash,
-                encrypted_email=b"existing" .decode("ascii"),
+                encrypted_email=b"existing".decode("ascii"),
                 persona_id="Persona_000",
             )
         )

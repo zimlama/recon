@@ -8,6 +8,7 @@ acquire on thousands of different targets no longer grow the bucket
 map without bound — when ``max_keys`` is reached, the least-recently-
 used entry is evicted before a new one is inserted.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -125,9 +126,7 @@ class RateLimiter:
 
     # ---- Public API ----
 
-    async def acquire(
-        self, target: str, action: str, tokens: int = 1
-    ) -> None:
+    async def acquire(self, target: str, action: str, tokens: int = 1) -> None:
         """Acquire ``tokens`` permits, blocking if necessary.
 
         Args:
@@ -156,9 +155,7 @@ class RateLimiter:
             else:
                 bucket.tokens -= tokens
 
-    def reset(
-        self, target: str | None = None, action: str | None = None
-    ) -> None:
+    def reset(self, target: str | None = None, action: str | None = None) -> None:
         """Reset buckets (for testing)."""
         if target is None and action is None:
             self._buckets.clear()

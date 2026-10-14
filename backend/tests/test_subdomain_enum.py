@@ -46,6 +46,7 @@ def sample_crtsh_response() -> list[dict]:
 
 # ---- crt.sh path ----
 
+
 @pytest.mark.asyncio
 async def test_crtsh_parses_multiple_names_per_entry(
     module: SubdomainEnumModule,
@@ -53,9 +54,7 @@ async def test_crtsh_parses_multiple_names_per_entry(
 ) -> None:
     """crt.sh entries with multiple name_value lines are split correctly."""
     with respx.mock(base_url="https://crt.sh") as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=sample_crtsh_response)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=sample_crtsh_response))
 
         with patch("shutil.which", return_value=None):  # no subfinder
             result = await module.run(ModuleInput(target="example.com"))
@@ -85,9 +84,7 @@ async def test_crtsh_strips_wildcard_prefix(
         }
     ]
     with respx.mock(base_url="https://crt.sh") as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=crtsh_data)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=crtsh_data))
 
         with patch("shutil.which", return_value=None):
             result = await module.run(ModuleInput(target="example.com"))
@@ -110,9 +107,7 @@ async def test_crtsh_filters_names_not_matching_target(
         }
     ]
     with respx.mock(base_url="https://crt.sh") as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=crtsh_data)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=crtsh_data))
 
         with patch("shutil.which", return_value=None):
             result = await module.run(ModuleInput(target="example.com"))
@@ -139,9 +134,7 @@ async def test_crtsh_metadata_includes_cert_info(
         }
     ]
     with respx.mock(base_url="https://crt.sh") as mock_router:
-        mock_router.get("/").mock(
-            return_value=httpx.Response(200, json=crtsh_data)
-        )
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=crtsh_data))
 
         with patch("shutil.which", return_value=None):
             result = await module.run(ModuleInput(target="example.com"))
@@ -170,6 +163,7 @@ async def test_crtsh_http_error_logged(
 
 # ---- subfinder path ----
 
+
 @pytest.mark.asyncio
 async def test_subfinder_parses_json_output(
     module: SubdomainEnumModule,
@@ -186,18 +180,18 @@ async def test_subfinder_parses_json_output(
     mock_proc = AsyncMock()
     mock_proc.communicate = AsyncMock(return_value=(stdout_data, b""))
 
-    with patch("shutil.which", return_value="/usr/bin/subfinder"):
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            with respx.mock(base_url="https://crt.sh") as mock_router:
-                mock_router.get("/").mock(
-                    return_value=httpx.Response(200, json=sample_crtsh_response)
-                )
-                result = await module.run(ModuleInput(target="example.com"))
+    with patch("shutil.which", return_value="/usr/bin/subfinder"), patch("asyncio.create_subprocess_exec", return_value=mock_proc), respx.mock(base_url="https://crt.sh") as mock_router:
+        mock_router.get("/").mock(
+            return_value=httpx.Response(200, json=sample_crtsh_response)
+        )
+        result = await module.run(ModuleInput(target="example.com"))
 
     subfinder_findings = [f for f in result.findings if f.source == "subfinder"]
     assert len(subfinder_findings) == 3
     assert {f.value for f in subfinder_findings} == {
-        "a.example.com", "b.example.com", "c.example.com"
+        "a.example.com",
+        "b.example.com",
+        "c.example.com",
     }
     # Source metadata is preserved
     a = next(f for f in subfinder_findings if f.value == "a.example.com")
@@ -209,17 +203,15 @@ async def test_subfinder_swallows_invalid_json(
     module: SubdomainEnumModule,
 ) -> None:
     """subfinder output with invalid JSON lines is handled gracefully."""
-    stdout_data = b'{"host": "valid.example.com"}\nnot-json-at-all\n{"host": "another.example.com"}\n'
+    stdout_data = (
+        b'{"host": "valid.example.com"}\nnot-json-at-all\n{"host": "another.example.com"}\n'
+    )
     mock_proc = AsyncMock()
     mock_proc.communicate = AsyncMock(return_value=(stdout_data, b""))
 
-    with patch("shutil.which", return_value="/usr/bin/subfinder"):
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            with respx.mock(base_url="https://crt.sh") as mock_router:
-                mock_router.get("/").mock(
-                    return_value=httpx.Response(200, json=[])
-                )
-                result = await module.run(ModuleInput(target="example.com"))
+    with patch("shutil.which", return_value="/usr/bin/subfinder"), patch("asyncio.create_subprocess_exec", return_value=mock_proc), respx.mock(base_url="https://crt.sh") as mock_router:
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=[]))
+        result = await module.run(ModuleInput(target="example.com"))
 
     hosts = {f.value for f in result.findings}
     assert "valid.example.com" in hosts
@@ -232,12 +224,9 @@ async def test_subfinder_not_installed_falls_back_to_crtsh(
     sample_crtsh_response: list[dict],
 ) -> None:
     """If subfinder is not in PATH, only crt.sh is used (not an error)."""
-    with patch("shutil.which", return_value=None):
-        with respx.mock(base_url="https://crt.sh") as mock_router:
-            mock_router.get("/").mock(
-                return_value=httpx.Response(200, json=sample_crtsh_response)
-            )
-            result = await module.run(ModuleInput(target="example.com"))
+    with patch("shutil.which", return_value=None), respx.mock(base_url="https://crt.sh") as mock_router:
+        mock_router.get("/").mock(return_value=httpx.Response(200, json=sample_crtsh_response))
+        result = await module.run(ModuleInput(target="example.com"))
 
     assert any("subfinder" in e.lower() for e in result.errors)
     assert any(f.source == "crt.sh" for f in result.findings)
@@ -252,13 +241,11 @@ async def test_subfinder_timeout_handled(
     mock_proc = AsyncMock()
     mock_proc.communicate = AsyncMock(side_effect=TimeoutError())
 
-    with patch("shutil.which", return_value="/usr/bin/subfinder"):
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            with respx.mock(base_url="https://crt.sh") as mock_router:
-                mock_router.get("/").mock(
-                    return_value=httpx.Response(200, json=sample_crtsh_response)
-                )
-                result = await module.run(ModuleInput(target="example.com"))
+    with patch("shutil.which", return_value="/usr/bin/subfinder"), patch("asyncio.create_subprocess_exec", return_value=mock_proc), respx.mock(base_url="https://crt.sh") as mock_router:
+        mock_router.get("/").mock(
+            return_value=httpx.Response(200, json=sample_crtsh_response)
+        )
+        result = await module.run(ModuleInput(target="example.com"))
 
     # subfinder failed but crt.sh worked
     assert any("subfinder" in e.lower() for e in result.errors)
@@ -266,6 +253,7 @@ async def test_subfinder_timeout_handled(
 
 
 # ---- Dedupe ----
+
 
 def test_dedupe_prefers_higher_confidence(module: SubdomainEnumModule) -> None:
     """When same subdomain is found by multiple sources, the higher-confidence one wins."""
@@ -335,6 +323,7 @@ def test_dedupe_case_insensitive(module: SubdomainEnumModule) -> None:
 
 
 # ---- Metadata ----
+
 
 def test_module_metadata(module: SubdomainEnumModule) -> None:
     """Module has the right Tier 1 metadata."""

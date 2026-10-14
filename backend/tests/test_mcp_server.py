@@ -59,11 +59,13 @@ async def test_tools_call_unknown_tool_returns_method_not_found() -> None:
     from app.mcp.server import ReconMCPServer
 
     server = ReconMCPServer()
-    response = await server.handle_request({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {"name": "does_not_exist", "arguments": {}},
-    })
+    response = await server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "does_not_exist", "arguments": {}},
+        }
+    )
     assert response["error"]["code"] == -32601
     assert "does_not_exist" in response["error"]["message"]

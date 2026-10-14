@@ -32,6 +32,7 @@ Design notes:
   rather than 403. The RoE gate never makes a "yes" decision on data
   it couldn't parse — that would be a silent foot-gun.
 """
+
 from __future__ import annotations
 
 import json
@@ -62,9 +63,7 @@ class RoEMiddleware(BaseHTTPMiddleware):
 
     # Methods that mutate state and therefore require RoE coverage.
     # GET / HEAD / OPTIONS are read-only and bypass the gate.
-    _STATE_CHANGING_METHODS: frozenset[str] = frozenset(
-        {"POST", "PUT", "PATCH", "DELETE"}
-    )
+    _STATE_CHANGING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
     def __init__(
         self,
@@ -87,14 +86,9 @@ class RoEMiddleware(BaseHTTPMiddleware):
         # Finding, AIValidation, IdentityMap, SignOff, RoE rows —
         # bypassing RoE for the delete path let any operator wipe
         # engagements they never had sign-off for (audit finding R1-H1).
-        if (
-            not self._enabled
-            or request.method not in self._STATE_CHANGING_METHODS
-        ):
+        if not self._enabled or request.method not in self._STATE_CHANGING_METHODS:
             return await call_next(request)
-        if not any(
-            request.url.path.startswith(p) for p in self._protected_paths
-        ):
+        if not any(request.url.path.startswith(p) for p in self._protected_paths):
             return await call_next(request)
 
         # Starlette caches `request.body()` internally, so a single read
@@ -131,9 +125,7 @@ class RoEMiddleware(BaseHTTPMiddleware):
         # ``retry_after`` seconds.
         try:
             validator = RoEValidator(self._session_factory)
-            authorized, reason, _ = validator.is_authorized(
-                target=target, scope_type=scope_type
-            )
+            authorized, reason, _ = validator.is_authorized(target=target, scope_type=scope_type)
         except SQLAlchemyError as exc:
             logger.error(
                 "roe_lookup_failed path=%s err=%s",
@@ -145,8 +137,7 @@ class RoEMiddleware(BaseHTTPMiddleware):
                 content={
                     "error": "rules_of_engagement_unavailable",
                     "detail": (
-                        "RoE lookup failed — DB connection issue. "
-                        "Retry after a short backoff."
+                        "RoE lookup failed — DB connection issue. Retry after a short backoff."
                     ),
                     "retry_after": 30,
                 },

@@ -61,7 +61,9 @@ class JobRunner:
         cap = module_concurrency or settings.MAX_CONCURRENT_MODULES
         self._module_sem = asyncio.Semaphore(cap)
 
-    async def run_job(self, job_id: str) -> None:
+    async def run_job(  # noqa: C901 - complexity 13, refactor tracked in issue #43
+        self, job_id: str
+    ) -> None:
         """Execute a full recon job.
 
         1. Load job from DB
@@ -136,13 +138,9 @@ class JobRunner:
                     job.error_message = "All modules failed or timed out"
                     job.completed_at = _now()
                     if job.started_at:
-                        job.duration_seconds = (
-                            job.completed_at - job.started_at
-                        ).total_seconds()
+                        job.duration_seconds = (job.completed_at - job.started_at).total_seconds()
                     db.commit()
-                    logger.error(
-                        "job_all_modules_failed", job_id=job_id, target=target
-                    )
+                    logger.error("job_all_modules_failed", job_id=job_id, target=target)
                     return
 
         # Validate with AI
@@ -157,6 +155,7 @@ class JobRunner:
         # Generate handoff
         try:
             from app.handoff.bridge import generate_handoff_for_job
+
             await generate_handoff_for_job(job_id)
         except Exception:
             logger.exception("handoff_generation_failed", job_id=job_id)
@@ -219,7 +218,9 @@ class JobRunner:
         # Run the module
         start = time.time()
         try:
-            output = await module.run(ModuleInput(target=target, job_id=job_id, module_run_id=module_run_id))
+            output = await module.run(
+                ModuleInput(target=target, job_id=job_id, module_run_id=module_run_id)
+            )
         except Exception as e:
             logger.exception("module_run_failed", module=module_name, error=str(e))
             output = ModuleOutput(
@@ -235,9 +236,7 @@ class JobRunner:
         with SessionLocal() as db:
             module_run = db.get(ModuleRun, module_run_id)
             if module_run:
-                module_run.status = (
-                    ModuleStatus.FAILED if output.errors else ModuleStatus.COMPLETED
-                )
+                module_run.status = ModuleStatus.FAILED if output.errors else ModuleStatus.COMPLETED
                 module_run.completed_at = _now()
                 module_run.duration_seconds = duration
                 module_run.findings_count = len(output.findings)

@@ -84,9 +84,7 @@ def test_create_app_accepts_explicit_cors_origin_list(monkeypatch: pytest.Monkey
     import app.main as main_mod
 
     # Explicit allowlist (the conftest default) — keep the original settings.
-    monkeypatch.setattr(
-        main_mod, "settings", main_mod.get_settings.__wrapped__()
-    )
+    monkeypatch.setattr(main_mod, "settings", main_mod.get_settings.__wrapped__())
     app = main_mod.create_app()
     assert app is not None
 
