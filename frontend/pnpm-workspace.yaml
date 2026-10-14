@@ -1,0 +1,23 @@
+packages:
+  - '.'
+
+minimumReleaseAgeExclude:
+  - '@playwright/test@1.64.1'
+  - playwright-core@1.64.1
+  - playwright@1.64.1
+
+# Override transitive deps for CVE remediation. PR-G2: clearing
+# glob (command injection), and postcss (path traversal / info
+# disclosure). The vite override is intentionally omitted because
+# vitest 1.x requires `vite: ^5.0.0` and overriding to >=6.4.3
+# installs vite 8.x which breaks vitest at runtime (ReferenceError:
+# __vite_ssr_exportName__). The vite advisories (vite <=6.4.2) are
+# false positives at our installed vite@5.4.21. The tinypool
+# advisories are also false positives — vitest 1.x requires
+# tinypool@^0.8.3 which predates the RCE code path flagged by
+# GHSA-5gmw-xhrv-c9v3 and GHSA-85c8-ppgw-ccpr. Both remain in the
+# audit-ci allowlist (see frontend/audit-ci.jsonc).
+overrides:
+  postcss-selector-parser: ^7.1.0
+  glob: '>=10.5.0'
+  postcss: '>=8.5.18'
