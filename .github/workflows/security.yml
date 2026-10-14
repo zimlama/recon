@@ -121,6 +121,9 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Enable corepack (pnpm shim)
+        run: corepack enable
+
       - name: npm audit (blocking — gate flipped in PR-G2 via audit-ci)
         working-directory: frontend
         run: |
