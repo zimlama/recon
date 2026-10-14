@@ -93,6 +93,7 @@ jobs:
       - name: Run pip-audit (blocking — gate flipped in PR-G1)
         working-directory: backend
         run: |
+          mkdir -p ../reports
           pip-audit --strict --disable-pip --no-deps \
                     --requirement requirements.txt \
                     --format json \
