@@ -32,10 +32,10 @@ from app.modules.whois_rdap import WhoisRDAPModule
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "BaseReconModule",
     "MODULE_REGISTRY",
-    "get_module_registry",
+    "BaseReconModule",
     "get_module",
+    "get_module_registry",
 ]
 
 

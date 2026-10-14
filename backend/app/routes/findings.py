@@ -18,7 +18,9 @@ router = APIRouter()
 async def list_findings(
     job_id: str,
     finding_type: FindingType | None = Query(None, alias="type"),
-    verdict: str | None = Query(None, description="AI verdict filter: CONFIRMED|LIKELY|SUSPECTED|FALSE_POSITIVE"),
+    verdict: str | None = Query(
+        None, description="AI verdict filter: CONFIRMED|LIKELY|SUSPECTED|FALSE_POSITIVE"
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -38,6 +40,7 @@ async def list_findings(
     if verdict:
         # Filter by AI verdict — requires subquery on AIValidation
         from app.models import AIValidation
+
         query = query.join(
             AIValidation,
             AIValidation.module_run_id == Finding.module_run_id,

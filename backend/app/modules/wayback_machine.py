@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import shlex
 import shutil
 import time
 from typing import Any
@@ -180,9 +179,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 
-    async def _run_tool(
-        self, tool: str, domain: str
-    ) -> list[Finding] | None:
+    async def _run_tool(self, tool: str, domain: str) -> list[Finding] | None:
         """Run a Go tool (gau or waybackurls) via subprocess.
 
         Returns the list of Finding, or None if the tool is not installed / fails.
@@ -198,9 +195,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=CDX_TIMEOUT
-            )
+            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=CDX_TIMEOUT)
         except (TimeoutError, OSError) as e:
             logger.debug("tool_failed", tool=tool, error=str(e))
             return None
@@ -257,7 +252,9 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                 continue
             url = row[url_idx]
             timestamp = row[ts_idx] if len(row) > ts_idx else None
-            status_code = row[status_idx] if status_idx is not None and len(row) > status_idx else None
+            status_code = (
+                row[status_idx] if status_idx is not None and len(row) > status_idx else None
+            )
             mimetype = row[mime_idx] if mime_idx is not None and len(row) > mime_idx else None
 
             finding = self._url_to_finding(
@@ -310,13 +307,13 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         """Dedupe by URL value, preserving the highest-confidence entry per URL."""
         by_url: dict[str, Finding] = {}
         for f in findings:
-            if f.value not in by_url:
-                by_url[f.value] = f
-            elif f.confidence > by_url[f.value].confidence:
-                by_url[f.value] = f
-            elif (
-                f.finding_metadata.get("timestamp")
-                and not by_url[f.value].finding_metadata.get("timestamp")
+            if (
+                f.value not in by_url
+                or f.confidence > by_url[f.value].confidence
+                or (
+                    f.finding_metadata.get("timestamp")
+                    and not by_url[f.value].finding_metadata.get("timestamp")
+                )
             ):
                 by_url[f.value] = f
         return list(by_url.values())

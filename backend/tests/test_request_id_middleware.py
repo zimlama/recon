@@ -6,6 +6,7 @@ Verifies:
 - The middleware honors an X-Request-ID header supplied by the caller.
 - The response carries the X-Request-ID header back.
 """
+
 from __future__ import annotations
 
 import re
@@ -17,7 +18,6 @@ from httpx import ASGITransport, AsyncClient
 
 from app.middleware import RequestIdMiddleware
 
-
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
@@ -28,16 +28,12 @@ async def client():
 
     @app.get("/echo")
     async def echo() -> dict[str, str]:
-        from fastapi import Request  # local import to avoid anyio issues
 
-        # noqa: D401 — middleware puts request_id on request.state
         return {}
 
     app.add_middleware(RequestIdMiddleware)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
 
 
@@ -80,15 +76,12 @@ async def test_request_id_middleware_is_attached_to_state(client) -> None:
 
     @app.get("/capture")
     async def capture_rid(request: Request) -> dict[str, str]:
-        from fastapi import Request
         captured["rid"] = getattr(request.state, "request_id", "")
         return {"rid": captured["rid"]}
 
     app.add_middleware(RequestIdMiddleware)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get("/capture")
 
     assert resp.status_code == 200

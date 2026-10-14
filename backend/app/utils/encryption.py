@@ -81,9 +81,7 @@ def encrypt_email(email: str, key: bytes | None) -> bytes:
         # Fernet raises ValueError for malformed keys. We translate to
         # EncryptionKeyMissingError so callers have a single exception
         # type to catch (per spec.md A-020.e).
-        raise EncryptionKeyMissingError(
-            f"PERSON_DOSSIER_ENCRYPTION_KEY is malformed: {e!s}"
-        ) from e
+        raise EncryptionKeyMissingError(f"PERSON_DOSSIER_ENCRYPTION_KEY is malformed: {e!s}") from e
     return fernet.encrypt(email.encode("utf-8"))
 
 

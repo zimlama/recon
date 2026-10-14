@@ -6,15 +6,17 @@ finding R1-H2 / R4-M5: the lack of an ``identity_map`` migration left
 production deployments running ``alembic upgrade head`` without the
 table, crashing ``person_dossier._store_identity_map`` mid-job.
 """
+
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+
+from alembic import command
 
 # Skip the whole module if alembic is unavailable — keeps the rest of
 # the suite runnable in minimal environments.
@@ -83,9 +85,7 @@ def test_identity_map_migration_round_trip(tmp_path: Path) -> None:
     _run_with_target_db(target_url, upgrade)
 
     inspector = inspect(eng)
-    assert inspector.has_table("identity_map"), (
-        "identity_map missing after 'alembic upgrade head'"
-    )
+    assert inspector.has_table("identity_map"), "identity_map missing after 'alembic upgrade head'"
 
     cols = {c["name"] for c in inspector.get_columns("identity_map")}
     expected_cols = {
@@ -96,9 +96,7 @@ def test_identity_map_migration_round_trip(tmp_path: Path) -> None:
         "persona_id",
         "created_at",
     }
-    assert expected_cols.issubset(cols), (
-        f"identity_map missing columns: {expected_cols - cols}"
-    )
+    assert expected_cols.issubset(cols), f"identity_map missing columns: {expected_cols - cols}"
 
     indexes = {idx["name"] for idx in inspector.get_indexes("identity_map")}
     assert "ix_identity_map_job_id" in indexes
@@ -117,9 +115,7 @@ def test_identity_map_migration_round_trip(tmp_path: Path) -> None:
 
     _run_with_target_db(target_url, upgrade)
     inspector = inspect(eng)
-    assert inspector.has_table("identity_map"), (
-        "identity_map must come back after re-upgrade"
-    )
+    assert inspector.has_table("identity_map"), "identity_map must come back after re-upgrade"
 
 
 def test_identity_map_unique_constraint_exists(tmp_path: Path) -> None:
@@ -148,14 +144,13 @@ def test_identity_map_unique_constraint_exists(tmp_path: Path) -> None:
     )
     from sqlalchemy.exc import IntegrityError
 
-    with eng.begin() as conn:
-        with pytest.raises(IntegrityError):
-            conn.execute(
-                sql,
-                {
-                    "id1": "row-1",
-                    "id2": "row-2",
-                    "job_id": "job-1",
-                    "email_hash": "a" * 64,
-                },
-            )
+    with eng.begin() as conn, pytest.raises(IntegrityError):
+        conn.execute(
+            sql,
+            {
+                "id1": "row-1",
+                "id2": "row-2",
+                "job_id": "job-1",
+                "email_hash": "a" * 64,
+            },
+        )

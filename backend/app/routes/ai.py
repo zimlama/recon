@@ -25,11 +25,7 @@ async def validate_job(
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-    module_runs = (
-        db.query(ModuleRun)
-        .filter(ModuleRun.job_id == job_id)
-        .all()
-    )
+    module_runs = db.query(ModuleRun).filter(ModuleRun.job_id == job_id).all()
 
     llm_client = LLMClient()
     try:
@@ -40,6 +36,7 @@ async def validate_job(
             if not module:
                 continue
             from app.modules.base import Finding
+
             findings = [
                 Finding(
                     type=f.type,
@@ -59,7 +56,8 @@ async def validate_job(
                 existing.summary = validation.summary
                 existing.confidence = (
                     sum(v.confidence for v in validation.verdicts) / len(validation.verdicts)
-                    if validation.verdicts else 0.0
+                    if validation.verdicts
+                    else 0.0
                 )
                 existing.recommended_action = validation.recommended_action.value
                 existing.recommended_next_modules = validation.recommended_next_module_chain
@@ -70,8 +68,10 @@ async def validate_job(
                         decision=validation.model_dump(),
                         summary=validation.summary,
                         confidence=(
-                            sum(v.confidence for v in validation.verdicts) / len(validation.verdicts)
-                            if validation.verdicts else 0.0
+                            sum(v.confidence for v in validation.verdicts)
+                            / len(validation.verdicts)
+                            if validation.verdicts
+                            else 0.0
                         ),
                         recommended_action=validation.recommended_action.value,
                         recommended_next_modules=validation.recommended_next_module_chain,
@@ -79,9 +79,7 @@ async def validate_job(
                 )
             db.commit()
             results.append(
-                db.query(AIValidation)
-                .filter(AIValidation.module_run_id == mr.id)
-                .first()
+                db.query(AIValidation).filter(AIValidation.module_run_id == mr.id).first()
             )
         return [AIValidationResponse.model_validate(r) for r in results if r is not None]
     finally:
@@ -115,6 +113,7 @@ async def validate_module(
         raise HTTPException(status_code=404, detail=f"Module {module_name} not in registry")
 
     from app.modules.base import Finding
+
     findings = [
         Finding(
             type=f.type,
@@ -139,7 +138,8 @@ async def validate_module(
         existing.summary = validation.summary
         existing.confidence = (
             sum(v.confidence for v in validation.verdicts) / len(validation.verdicts)
-            if validation.verdicts else 0.0
+            if validation.verdicts
+            else 0.0
         )
         existing.recommended_action = validation.recommended_action.value
         existing.recommended_next_modules = validation.recommended_next_module_chain
@@ -150,7 +150,8 @@ async def validate_module(
             summary=validation.summary,
             confidence=(
                 sum(v.confidence for v in validation.verdicts) / len(validation.verdicts)
-                if validation.verdicts else 0.0
+                if validation.verdicts
+                else 0.0
             ),
             recommended_action=validation.recommended_action.value,
             recommended_next_modules=validation.recommended_next_module_chain,

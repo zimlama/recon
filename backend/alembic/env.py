@@ -11,11 +11,11 @@ from alembic import context
 # Ensure backend root is on the path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from sqlalchemy import engine_from_config, pool  # noqa: E402
+from sqlalchemy import engine_from_config, pool
 
-from app.config import get_settings  # noqa: E402
-from app.database import Base  # noqa: E402
-from app import models  # noqa: F401, E402 — register models
+from app import models  # noqa: F401 — register models
+from app.config import get_settings
+from app.database import Base
 
 config = context.config
 settings = get_settings()

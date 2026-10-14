@@ -29,6 +29,7 @@ Design choices:
 - Revoked signoffs are filtered out of the returned list. Auditors still see
   them via the SignOff table — we don't delete.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -165,9 +166,7 @@ class RoEValidator:
         stmt = (
             select(RoE)
             .where(RoE.scope_type == scope_type)
-            .where(
-                (RoE.target == target_norm) | (RoE.scope_value == target_norm)
-            )
+            .where((RoE.target == target_norm) | (RoE.scope_value == target_norm))
             .order_by(RoE.created_at.desc())
             .options(selectinload(RoE.sign_offs))
         )

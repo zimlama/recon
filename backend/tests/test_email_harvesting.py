@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -35,19 +34,20 @@ uid:No Reply <noreply@otherdomain.com>:1700000000:::
 
 # ---- PGP keyserver path ----
 
+
 @pytest.mark.asyncio
 async def test_pgp_query_success(
     module: EmailHarvestingModule,
     sample_pgp_response: str,
 ) -> None:
     """PGP keyserver returns emails for the target domain."""
+
     # Patch _query_pgp_servers (the public method that calls _query_single_pgp_server)
     async def fake_query_pgp(domain: str) -> set[str]:
         return {"john@acmecorp.com", "jane@acmecorp.com", "admin@acmecorp.com"}
 
-    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_pgp):
-        with patch("shutil.which", return_value=None):
-            result = await module.run(ModuleInput(target="acmecorp.com"))
+    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_pgp), patch("shutil.which", return_value=None):
+        result = await module.run(ModuleInput(target="acmecorp.com"))
 
     emails = {f.value for f in result.findings if f.source == "pgp_keyserver"}
     assert "john@acmecorp.com" in emails
@@ -62,13 +62,13 @@ async def test_pgp_query_filters_other_domains(
     module: EmailHarvestingModule,
 ) -> None:
     """PGP query for target domain only returns emails matching the domain."""
+
     async def fake_query_pgp(domain: str) -> set[str]:
         # Simulate that PGP returned emails from multiple domains
         return {"john@acmecorp.com", "external@otherdomain.com"}
 
-    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_pgp):
-        with patch("shutil.which", return_value=None):
-            result = await module.run(ModuleInput(target="acmecorp.com"))
+    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_pgp), patch("shutil.which", return_value=None):
+        result = await module.run(ModuleInput(target="acmecorp.com"))
 
     # The mock returns what we tell it; the actual filter is in _query_single_pgp_server
     emails = {f.value for f in result.findings if f.source == "pgp_keyserver"}
@@ -84,6 +84,7 @@ async def test_pgp_query_with_actual_response(
     """End-to-end: sample PGP response is parsed correctly."""
     # Test the _query_single_pgp_server method directly with httpx_mock
     import respx
+
     from app.modules.email_harvesting import EmailHarvestingModule as Mod
 
     m = Mod()
@@ -91,9 +92,7 @@ async def test_pgp_query_with_actual_response(
         mock_router.get(url__regex=r".*/pks/lookup.*").mock(
             return_value=httpx.Response(200, text=sample_pgp_response)
         )
-        result = await m._query_single_pgp_server(
-            "https://keys.openpgp.org", "example.com"
-        )
+        result = await m._query_single_pgp_server("https://keys.openpgp.org", "example.com")
 
     assert "john@example.com" in result
     assert "jane@example.com" in result
@@ -107,16 +106,15 @@ async def test_pgp_emails_marked_as_verified(
     module: EmailHarvestingModule,
 ) -> None:
     """PGP keyserver emails are marked as verified."""
+
     async def fake_query_pgp(domain: str) -> set[str]:
         return {"john@acmecorp.com"}
 
-    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_pgp):
-        with patch("shutil.which", return_value=None):
-            result = await module.run(ModuleInput(target="acmecorp.com"))
+    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_pgp), patch("shutil.which", return_value=None):
+        result = await module.run(ModuleInput(target="acmecorp.com"))
 
     pgp_finding = next(
-        f for f in result.findings
-        if f.value == "john@acmecorp.com" and f.source == "pgp_keyserver"
+        f for f in result.findings if f.value == "john@acmecorp.com" and f.source == "pgp_keyserver"
     )
     assert pgp_finding.finding_metadata["verified"] is True
     assert pgp_finding.finding_metadata["local_part"] == "john"
@@ -128,12 +126,12 @@ async def test_pgp_http_error_logged(
     module: EmailHarvestingModule,
 ) -> None:
     """PGP HTTP error is handled gracefully."""
+
     async def fake_query_error(domain: str) -> set[str]:
         return set()  # empty = no emails but no crash
 
-    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_error):
-        with patch("shutil.which", return_value=None):
-            result = await module.run(ModuleInput(target="acmecorp.com"))
+    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_error), patch("shutil.which", return_value=None):
+        result = await module.run(ModuleInput(target="acmecorp.com"))
 
     # No PGP errors block the rest of the module
     # Pattern inference still runs
@@ -146,12 +144,12 @@ async def test_pgp_handles_malformed_response(
     module: EmailHarvestingModule,
 ) -> None:
     """PGP keyserver returns malformed data — no crash."""
+
     async def fake_query_empty(domain: str) -> set[str]:
         return set()
 
-    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_empty):
-        with patch("shutil.which", return_value=None):
-            result = await module.run(ModuleInput(target="acmecorp.com"))
+    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_empty), patch("shutil.which", return_value=None):
+        result = await module.run(ModuleInput(target="acmecorp.com"))
 
     # No PGP findings, but pattern inference still runs
     assert not any(f.source == "pgp_keyserver" for f in result.findings)
@@ -159,6 +157,7 @@ async def test_pgp_handles_malformed_response(
 
 
 # ---- Pattern inference ----
+
 
 @pytest.mark.asyncio
 async def test_pattern_inference_generates_candidates(
@@ -172,9 +171,8 @@ async def test_pattern_inference_generates_candidates(
     async def fake_empty(server: str, domain: str) -> set[str]:
         return set()
 
-    with patch.object(module, "_query_single_pgp_server", side_effect=fake_empty):
-        with patch("shutil.which", return_value=None):
-            result = await module.run(ModuleInput(target=target))
+    with patch.object(module, "_query_single_pgp_server", side_effect=fake_empty), patch("shutil.which", return_value=None):
+        result = await module.run(ModuleInput(target=target))
 
     pattern_findings = [f for f in result.findings if f.source == "pattern_inference"]
     # Top 10 most common patterns are generated
@@ -195,6 +193,7 @@ async def test_pattern_inference_generates_candidates(
 
 # ---- theHarvester path ----
 
+
 @pytest.mark.asyncio
 async def test_theharvester_subprocess_success(
     module: EmailHarvestingModule,
@@ -214,22 +213,18 @@ async def test_theharvester_subprocess_success(
     <email>harvest@other.com</email>
     """
 
-    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_pgp_empty):
-        with patch("shutil.which", return_value="/usr/bin/theHarvester"):
-            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-                # Patch the Path constructor to return a mock
-                mock_path_instance = MagicMock()
-                mock_path_instance.exists.return_value = True
-                mock_path_instance.read_text.return_value = output_text
-                with patch(
-                    "app.modules.email_harvesting.Path",
-                    return_value=mock_path_instance,
-                ):
-                    result = await module.run(ModuleInput(target="acmecorp.com"))
+    with patch.object(module, "_query_pgp_servers", side_effect=fake_query_pgp_empty), patch("shutil.which", return_value="/usr/bin/theHarvester"), patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+        # Patch the Path constructor to return a mock
+        mock_path_instance = MagicMock()
+        mock_path_instance.exists.return_value = True
+        mock_path_instance.read_text.return_value = output_text
+        with patch(
+            "app.modules.email_harvesting.Path",
+            return_value=mock_path_instance,
+        ):
+            result = await module.run(ModuleInput(target="acmecorp.com"))
 
-    harvester_emails = {
-        f.value for f in result.findings if f.source == "theharvester"
-    }
+    harvester_emails = {f.value for f in result.findings if f.source == "theharvester"}
     assert "harvest1@acmecorp.com" in harvester_emails
     assert "harvest2@acmecorp.com" in harvester_emails
     # Other domain filtered
@@ -253,10 +248,11 @@ async def test_theharvester_not_installed(
 
 # ---- Dedupe + filter ----
 
+
 def test_dedupe_and_filter_removes_test_patterns(module: EmailHarvestingModule) -> None:
     """Test/placeholder patterns are filtered."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     findings = [
         Finding(type=FindingType.EMAIL, value="real@acmecorp.com", source="x", confidence=0.9),
@@ -274,8 +270,8 @@ def test_dedupe_and_filter_removes_test_patterns(module: EmailHarvestingModule) 
 
 def test_dedupe_and_filter_removes_privacy_protected(module: EmailHarvestingModule) -> None:
     """Privacy-protected example domains are filtered."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     findings = [
         Finding(type=FindingType.EMAIL, value="user@acmecorp.com", source="x"),
@@ -291,8 +287,8 @@ def test_dedupe_and_filter_removes_privacy_protected(module: EmailHarvestingModu
 
 def test_dedupe_and_filter_dedupes_by_value(module: EmailHarvestingModule) -> None:
     """Same email from multiple sources is deduped (highest confidence wins)."""
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     findings = [
         Finding(type=FindingType.EMAIL, value="admin@acmecorp.com", source="low", confidence=0.5),
@@ -314,6 +310,7 @@ def test_email_to_finding(module: EmailHarvestingModule) -> None:
 
 
 # ---- Metadata ----
+
 
 def test_module_metadata(module: EmailHarvestingModule) -> None:
     """Module requires consent (PII)."""

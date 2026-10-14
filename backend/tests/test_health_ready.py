@@ -11,6 +11,7 @@ These tests verify:
   - DB failure -> 503 (not 200)
   - LLMClient construction failure -> 503 (not 200)
 """
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager, contextmanager
@@ -19,8 +20,8 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.main import app
 from app.database import Base, engine
+from app.main import app
 
 
 @pytest.fixture
@@ -38,11 +39,11 @@ async def client():
     async def _lifespan_runner():
         # Run the FastAPI lifespan context manager — it handles
         # startup (init_db + LLMClient) and teardown (close LLMClient).
-        async with app.router.lifespan_context(app):
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as ac:
-                yield ac
+        async with (
+            app.router.lifespan_context(app),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac,
+        ):
+            yield ac
 
     async with _lifespan_runner() as ac:
         yield ac
@@ -120,6 +121,7 @@ async def test_ready_returns_503_when_llm_client_fails(client) -> None:
     raises. The endpoint must catch the exception, return 503, and
     signal retry-after.
     """
+
     def _boom_init(*args, **kwargs):
         raise RuntimeError("MINIMAX_API_KEY malformed")
 

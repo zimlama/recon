@@ -11,11 +11,9 @@ MITRE ATT&CK: T1589.003, T1593.001
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import shutil
 import time
-from typing import Any
 
 from app.models import ModuleTier
 from app.modules.base import (
@@ -59,7 +57,7 @@ class EmployeeOSINTModule(BaseReconModule):
             try:
                 sherlock_findings = await self._run_sherlock(target)
                 findings.extend(sherlock_findings)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"sherlock failed: {e!s}")
         # 2. Always provide common username patterns (manual verification)
         pattern_findings = self._generate_username_patterns(target)
@@ -91,7 +89,7 @@ Enrich each with:
 PII HANDLING: Only validate. Do not suggest unauthorized use of personal data.
 Username patterns are useful for authorized password spray only.
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 
@@ -100,7 +98,8 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         proc = await asyncio.create_subprocess_exec(
             "sherlock",
             "--print-found",
-            "--timeout", "10",
+            "--timeout",
+            "10",
             target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,

@@ -14,7 +14,7 @@ router = APIRouter()
 
 @router.get("", response_model=ModuleListResponse)
 async def list_modules(
-    db: Session = Depends(get_db),  # noqa: ARG001 — keep for future DB-backed catalog
+    db: Session = Depends(get_db),
 ) -> ModuleListResponse:
     """List all available recon modules (catalog)."""
     modules = [

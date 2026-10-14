@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest
 import respx
 
 from app.modules.base import ModuleInput
-from app.modules.dark_web_osint import AHMIA_API_URL, DarkWebOSINTModule, TOR_SOCKS5
+from app.modules.dark_web_osint import AHMIA_API_URL, TOR_SOCKS5, DarkWebOSINTModule
 
 
 @pytest.fixture
@@ -36,6 +36,7 @@ def sample_ahmia_response() -> dict:
 
 
 # ---- _search_ahmia ----
+
 
 @pytest.mark.asyncio
 async def test_search_ahmia_success(
@@ -79,9 +80,7 @@ async def test_search_ahmia_invalid_json(module: DarkWebOSINTModule) -> None:
 async def test_search_ahmia_connection_error(module: DarkWebOSINTModule) -> None:
     """ahmia.fi connection error returns empty list."""
     with respx.mock(assert_all_called=False) as mock_router:
-        mock_router.get(url__regex=r".*ahmia\.fi/.*").mock(
-            side_effect=httpx.ConnectError("down")
-        )
+        mock_router.get(url__regex=r".*ahmia\.fi/.*").mock(side_effect=httpx.ConnectError("down"))
         findings = await module._search_ahmia("acmecorp.com")
     assert findings == []
 
@@ -90,10 +89,7 @@ async def test_search_ahmia_connection_error(module: DarkWebOSINTModule) -> None
 async def test_search_ahmia_limits_results(module: DarkWebOSINTModule) -> None:
     """Returns max 10 results even when more available."""
     response = {
-        "results": [
-            {"title": f"Leak {i}", "url": f"http://example.onion/{i}"}
-            for i in range(20)
-        ]
+        "results": [{"title": f"Leak {i}", "url": f"http://example.onion/{i}"} for i in range(20)]
     }
     with respx.mock(assert_all_called=False) as mock_router:
         mock_router.get(url__regex=r".*ahmia\.fi/.*").mock(
@@ -104,6 +100,7 @@ async def test_search_ahmia_limits_results(module: DarkWebOSINTModule) -> None:
 
 
 # ---- _search_via_tor ----
+
 
 @pytest.mark.asyncio
 async def test_search_via_tor_uses_socks5(module: DarkWebOSINTModule) -> None:
@@ -123,8 +120,7 @@ async def test_search_via_tor_limits_results(module: DarkWebOSINTModule) -> None
         200,
         json={
             "results": [
-                {"title": f"Tor leak {i}", "url": f"http://tor{i}.onion"}
-                for i in range(10)
+                {"title": f"Tor leak {i}", "url": f"http://tor{i}.onion"} for i in range(10)
             ]
         },
     )
@@ -146,10 +142,12 @@ async def test_search_via_tor_limits_results(module: DarkWebOSINTModule) -> None
             data = response.json()
         findings = []
         for item in data.get("results", [])[:5]:
-            findings.append({
-                "title": item.get("title", ""),
-                "url": item.get("url", ""),
-            })
+            findings.append(
+                {
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                }
+            )
         return findings
 
     # Test the limit logic via the function itself
@@ -225,6 +223,7 @@ async def test_search_via_tor_non_200(module: DarkWebOSINTModule) -> None:
 @pytest.mark.asyncio
 async def test_search_via_tor_exception(module: DarkWebOSINTModule) -> None:
     """Tor search returns [] on exception."""
+
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs):
             pass
@@ -246,17 +245,17 @@ async def test_search_via_tor_exception(module: DarkWebOSINTModule) -> None:
 
 # ---- Run ----
 
+
 @pytest.mark.asyncio
 async def test_run_ahmia_only_when_tor_absent(module: DarkWebOSINTModule) -> None:
     """Without tor in PATH, only ahmia.fi is queried."""
-    with patch("shutil.which", return_value=None):  # no tor
-        with respx.mock(assert_all_called=False) as mock_router:
-            mock_router.get(url__regex=r".*ahmia\.fi/.*").mock(
-                return_value=httpx.Response(
-                    200, json={"results": [{"title": "leak", "url": "http://x.onion"}]}
-                )
+    with patch("shutil.which", return_value=None), respx.mock(assert_all_called=False) as mock_router:  # no tor
+        mock_router.get(url__regex=r".*ahmia\.fi/.*").mock(
+            return_value=httpx.Response(
+                200, json={"results": [{"title": "leak", "url": "http://x.onion"}]}
             )
-            result = await module.run(ModuleInput(target="acmecorp.com"))
+        )
+        result = await module.run(ModuleInput(target="acmecorp.com"))
 
     assert len(result.findings) >= 1
     assert all(f.source == "ahmia.fi" for f in result.findings)
@@ -279,20 +278,18 @@ async def test_run_tor_additional_findings_when_present(module: DarkWebOSINTModu
             )
         ]
 
-    with patch("shutil.which", return_value="/usr/bin/tor"):  # tor installed
-        with patch.object(module, "_search_via_tor", side_effect=fake_search_tor):
-            with respx.mock(assert_all_called=False) as mock_router:
-                mock_router.get(url__regex=r".*ahmia\.fi/.*").mock(
-                    return_value=httpx.Response(
-                        200,
-                        json={
-                            "results": [
-                                {"title": "clearnet", "url": "http://clearnet.onion"},
-                            ]
-                        },
-                    )
-                )
-                result = await module.run(ModuleInput(target="acmecorp.com"))
+    with patch("shutil.which", return_value="/usr/bin/tor"), patch.object(module, "_search_via_tor", side_effect=fake_search_tor), respx.mock(assert_all_called=False) as mock_router:  # tor installed
+        mock_router.get(url__regex=r".*ahmia\.fi/.*").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"title": "clearnet", "url": "http://clearnet.onion"},
+                    ]
+                },
+            )
+        )
+        result = await module.run(ModuleInput(target="acmecorp.com"))
 
     # Should have findings from both ahmia.fi (clearnet) and tor
     sources = {f.source for f in result.findings}
@@ -303,12 +300,11 @@ async def test_run_tor_additional_findings_when_present(module: DarkWebOSINTModu
 @pytest.mark.asyncio
 async def test_run_handles_ahmia_error(module: DarkWebOSINTModule) -> None:
     """If ahmia.fi connection fails, _search_ahmia returns empty (silent)."""
-    with patch("shutil.which", return_value=None):
-        with respx.mock(assert_all_called=False) as mock_router:
-            mock_router.get(url__regex=r".*ahmia\.fi/.*").mock(
-                side_effect=httpx.ConnectError("down")
-            )
-            result = await module.run(ModuleInput(target="acmecorp.com"))
+    with patch("shutil.which", return_value=None), respx.mock(assert_all_called=False) as mock_router:
+        mock_router.get(url__regex=r".*ahmia\.fi/.*").mock(
+            side_effect=httpx.ConnectError("down")
+        )
+        result = await module.run(ModuleInput(target="acmecorp.com"))
 
     # ahmia.fi connection error is caught inside _search_ahmia and returns []
     # so no findings are produced, no errors are logged
@@ -316,6 +312,7 @@ async def test_run_handles_ahmia_error(module: DarkWebOSINTModule) -> None:
 
 
 # ---- Metadata ----
+
 
 def test_module_metadata(module: DarkWebOSINTModule) -> None:
     assert module.name == "dark_web_osint"
@@ -332,6 +329,7 @@ def test_ai_prompt_is_substantive(module: DarkWebOSINTModule) -> None:
 
 
 # ---- SSRF defense: adopt BaseReconModule.safe_http_get_async ----
+
 
 @pytest.mark.asyncio
 async def test_search_ahmia_uses_safe_http_get_async(
@@ -366,6 +364,7 @@ async def test_search_ahmia_safe_http_returns_none(
     module: DarkWebOSINTModule,
 ) -> None:
     """When safe_http_get_async returns None (e.g., SSRF blocked), returns []."""
+
     async def fake_safe(url: str, **kwargs: object) -> None:
         return None
 

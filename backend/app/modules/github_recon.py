@@ -14,14 +14,10 @@ MITRE ATT&CK: T1593.003, T1552.001
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import re
-import shlex
 import shutil
 import time
-from typing import Any
 
 import httpx
 
@@ -43,7 +39,10 @@ GITHUB_TIMEOUT = 20
 HTTP_TIMEOUT = 15
 # Common patterns that indicate secrets in code
 SECRET_PATTERNS = [
-    (r"(?i)(?:aws_access_key_id|aws_secret_access_key)\s*[=:]\s*['\"]?([A-Za-z0-9/+=]{20,})", "aws_credential"),
+    (
+        r"(?i)(?:aws_access_key_id|aws_secret_access_key)\s*[=:]\s*['\"]?([A-Za-z0-9/+=]{20,})",
+        "aws_credential",
+    ),
     (r"AKIA[0-9A-Z]{16}", "aws_access_key_id"),
     (r"(?i)api[_-]?key\s*[=:]\s*['\"]?([A-Za-z0-9_-]{20,})", "api_key"),
     (r"(?i)bearer\s+([A-Za-z0-9_.-]{20,})", "bearer_token"),
@@ -86,7 +85,7 @@ class GitHubReconModule(BaseReconModule):
             findings.extend(code_findings)
             if code_findings:
                 sources_used.append("github_code_search")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"GitHub code search failed: {e!s}")
 
         # 2. Search commits for the domain
@@ -95,7 +94,7 @@ class GitHubReconModule(BaseReconModule):
             findings.extend(commit_findings)
             if commit_findings:
                 sources_used.append("github_commit_search")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"GitHub commit search failed: {e!s}")
 
         # 3. Check if gitleaks is available (does NOT actually run it — see docstring)
@@ -139,7 +138,7 @@ Watch for:
 SECRET HANDLING: NEVER transmit, log, or share actual secrets. Truncate to
 first 4 + last 4 chars. Flag the secret TYPE only.
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 
@@ -166,9 +165,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         }
         try:
             async with httpx.AsyncClient(timeout=GITHUB_TIMEOUT) as client:
-                response = await client.get(
-                    url, params=params, headers=self._get_headers()
-                )
+                response = await client.get(url, params=params, headers=self._get_headers())
                 if response.status_code == 403:
                     # Rate limit or auth required — parse GitHub rate-limit headers
                     # so we can warn clearly with the reset time instead of silent failure.
@@ -176,9 +173,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                     reset = response.headers.get("X-RateLimit-Reset")
                     if remaining == "0" and reset:
                         try:
-                            reset_dt = time.strftime(
-                                "%Y-%m-%d %H:%M:%S", time.gmtime(int(reset))
-                            )
+                            reset_dt = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(int(reset)))
                         except (ValueError, TypeError, OSError):
                             reset_dt = str(reset)
                         logger.warning(
@@ -259,9 +254,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
         params = {"q": domain, "per_page": 20}
         try:
             async with httpx.AsyncClient(timeout=GITHUB_TIMEOUT) as client:
-                response = await client.get(
-                    url, params=params, headers=self._get_headers()
-                )
+                response = await client.get(url, params=params, headers=self._get_headers())
                 if response.status_code == 403:
                     # Rate limit or auth required — parse GitHub rate-limit headers
                     # so we can warn clearly with the reset time instead of silent failure.
@@ -269,9 +262,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                     reset = response.headers.get("X-RateLimit-Reset")
                     if remaining == "0" and reset:
                         try:
-                            reset_dt = time.strftime(
-                                "%Y-%m-%d %H:%M:%S", time.gmtime(int(reset))
-                            )
+                            reset_dt = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(int(reset)))
                         except (ValueError, TypeError, OSError):
                             reset_dt = str(reset)
                         logger.warning(

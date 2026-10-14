@@ -18,8 +18,6 @@ import dns.rdatatype
 import dns.resolver
 import dns.zone
 
-import httpx
-
 from app.models import ModuleTier
 from app.modules.base import (
     BaseReconModule,
@@ -111,14 +109,14 @@ class DNSEnumModule(BaseReconModule):
                 # to avoid piling up work in the executor queue.
                 errors.append(f"DNS query failed at {label}: {e!s}")
                 break
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"{label} query failed: {e!s}")
 
         # Attempt AXFR (zone transfer)
         try:
             axfr_findings = await self._attempt_axfr(resolver, target)
             findings.extend(axfr_findings)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"AXFR attempt failed: {e!s}")
 
         return ModuleOutput(
@@ -182,9 +180,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
             except dns.resolver.NXDOMAIN:
                 raise  # propagate to caller
             except (dns.resolver.NoNameservers, dns.exception.Timeout) as e:
-                logger.debug(
-                    "dns_query_terminated", rdatatype=rdatatype, error=str(e)
-                )
+                logger.debug("dns_query_terminated", rdatatype=rdatatype, error=str(e))
                 raise  # propagate so run() can break early
 
             for rdata in answers:
@@ -202,7 +198,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
         except (TimeoutError, dns.exception.Timeout):
             raise
 
-    def _format_rdata(
+    def _format_rdata(  # noqa: C901 - complexity 14, refactor tracked in issue #43
         self,
         rdata: dns.rdata.Rdata,
         rdatatype: int,
@@ -251,7 +247,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
                 return f"{rdata.target}".rstrip(".")
             # Fallback
             return rdata.to_text()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.debug("rdata_format_error", error=str(e), rdatatype=rdatatype)
             return None
 
@@ -279,7 +275,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""
             try:
                 loop = asyncio.get_event_loop()
 
-                def _do_axfr() -> dns.zone.Zone | None:
+                def _do_axfr(ns_host: str = ns_host) -> dns.zone.Zone | None:
                     try:
                         return dns.zone.from_xfr(
                             dns.query.xfr(

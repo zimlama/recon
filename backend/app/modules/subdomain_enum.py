@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any
 
 import httpx
 
@@ -113,7 +112,7 @@ Watch for:
 - Wildcard DNS (entire *.example.com returns same IP — usually a CDN)
 - Stale subdomains that no longer resolve
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 

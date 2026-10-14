@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from app.models import _now
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import Job
+from app.models import Job, _now
 from app.schemas import ReportGenerateRequest, ReportResponse
 from app.utils.network import safe_filename_part
 
@@ -86,7 +84,7 @@ async def generate_report(
 @router.get("/jobs/{job_id}/report/download")
 async def download_report(
     job_id: str,
-    format: str = "pdf",  # noqa: A002
+    format: str = "pdf",
     db: Session = Depends(get_db),
 ) -> FileResponse:
     """Download the report file (md or pdf)."""

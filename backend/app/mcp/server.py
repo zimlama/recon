@@ -113,7 +113,15 @@ class ReconMCPServer:
                                 "type": "object",
                                 "properties": {
                                     "job_id": {"type": "string"},
-                                    "verdict": {"type": "string", "enum": ["CONFIRMED", "LIKELY", "SUSPECTED", "FALSE_POSITIVE"]},
+                                    "verdict": {
+                                        "type": "string",
+                                        "enum": [
+                                            "CONFIRMED",
+                                            "LIKELY",
+                                            "SUSPECTED",
+                                            "FALSE_POSITIVE",
+                                        ],
+                                    },
                                 },
                                 "required": ["job_id"],
                             },
@@ -166,9 +174,11 @@ class ReconMCPServer:
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": {"content": [{"type": "text", "text": json.dumps(result, default=str)}]},
+                    "result": {
+                        "content": [{"type": "text", "text": json.dumps(result, default=str)}]
+                    },
                 }
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # Never leak the raw exception text to MCP clients: it can
                 # carry SQL fragments, file paths, secrets, stack frames,
                 # and other internal details. Log the full traceback
@@ -196,9 +206,9 @@ class ReconMCPServer:
         self,
         target: str,
         modules: list[str] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Create a new job and trigger background execution."""
-        from datetime import datetime
         from app.models import _now
 
         if modules is None:
@@ -282,11 +292,9 @@ class ReconMCPServer:
                     job = db.get(Job, job_id)
                     if job and job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
                         job.status = JobStatus.FAILED
-                        job.error_message = (
-                            "Job cancelled (server shutdown or client disconnect)"
-                        )
+                        job.error_message = "Job cancelled (server shutdown or client disconnect)"
                         db.commit()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception("job_cancellation_cleanup_failed job_id=%s", job_id)
             raise
 
@@ -310,11 +318,7 @@ class ReconMCPServer:
             job = db.get(Job, job_id)
             if not job:
                 raise ValueError(f"Job {job_id} not found")
-            module_runs = (
-                db.query(ModuleRun)
-                .filter(ModuleRun.job_id == job_id)
-                .all()
-            )
+            module_runs = db.query(ModuleRun).filter(ModuleRun.job_id == job_id).all()
             return {
                 "job_id": job.id,
                 "target": job.target,
@@ -340,7 +344,7 @@ class ReconMCPServer:
         verdict: str | None = None,
     ) -> dict[str, Any]:
         """Get findings for a job."""
-        from app.models import AIValidation, Finding
+        from app.models import AIValidation
 
         with SessionLocal() as db:
             job = db.get(Job, job_id)
@@ -350,7 +354,9 @@ class ReconMCPServer:
             module_runs = db.query(ModuleRun).filter(ModuleRun.job_id == job_id).all()
             findings_data = []
             for mr in module_runs:
-                validation = db.query(AIValidation).filter(AIValidation.module_run_id == mr.id).first()
+                validation = (
+                    db.query(AIValidation).filter(AIValidation.module_run_id == mr.id).first()
+                )
                 for f in mr.findings:
                     verdict_for_finding = None
                     if validation:
@@ -360,14 +366,16 @@ class ReconMCPServer:
                                 break
                     if verdict and verdict_for_finding != verdict:
                         continue
-                    findings_data.append({
-                        "module": mr.module_name,
-                        "type": f.type.value,
-                        "value": f.value,
-                        "source": f.source,
-                        "confidence": f.confidence,
-                        "ai_verdict": verdict_for_finding,
-                    })
+                    findings_data.append(
+                        {
+                            "module": mr.module_name,
+                            "type": f.type.value,
+                            "value": f.value,
+                            "source": f.source,
+                            "confidence": f.confidence,
+                            "ai_verdict": verdict_for_finding,
+                        }
+                    )
 
             return {
                 "job_id": job_id,
@@ -423,7 +431,9 @@ class ReconMCPServer:
 
 async def main() -> None:
     """MCP server entry point."""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     server = ReconMCPServer()
     await server.run()
 

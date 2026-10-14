@@ -18,6 +18,7 @@ The middleware:
 Wired in ``main.create_app()`` BEFORE RoEMiddleware / AuditLog so the
 ID is on every request that flows through the chain.
 """
+
 from __future__ import annotations
 
 import uuid

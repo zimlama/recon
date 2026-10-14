@@ -5,8 +5,7 @@ Target: lines 95, 108, 122-161 of base.py (default validate impl + abstract bodi
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -20,8 +19,8 @@ from app.models import FindingType, ModuleTier
 from app.modules.base import BaseReconModule, Finding, ModuleInput, ModuleOutput
 from app.modules.whois_rdap import WhoisRDAPModule
 
-
 # ---- Concrete test module for testing default behavior ----
+
 
 class _ConcreteModule(BaseReconModule):
     name = "concrete"
@@ -38,6 +37,7 @@ class _ConcreteModule(BaseReconModule):
 
 # ---- Test abstract bodies (instantiation contract) ----
 
+
 def test_cannot_instantiate_base_abc() -> None:
     """BaseReconModule is abstract — cannot be instantiated directly."""
     with pytest.raises(TypeError):
@@ -52,6 +52,7 @@ def test_concrete_module_instantiable() -> None:
 
 # ---- Test default validate() with empty findings ----
 
+
 @pytest.mark.asyncio
 async def test_validate_empty_findings_returns_continue() -> None:
     """Empty findings → CONTINUE with no verdicts."""
@@ -65,6 +66,7 @@ async def test_validate_empty_findings_returns_continue() -> None:
 
 
 # ---- Test default validate() with findings + successful LLM call ----
+
 
 @pytest.mark.asyncio
 async def test_validate_calls_llm_and_parses_response() -> None:

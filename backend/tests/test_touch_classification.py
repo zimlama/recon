@@ -344,7 +344,7 @@ def test_get_module_unknown_name_raises_keyerror() -> None:
     msg = str(exc_info.value)
     assert "does_not_exist_anywhere" in msg
     # At least one known module name appears in the error context
-    assert any(name in msg for name in MODULE_REGISTRY.keys())
+    assert any(name in msg for name in MODULE_REGISTRY)
 
 
 def test_get_module_picks_correct_instance_per_name() -> None:
@@ -395,10 +395,9 @@ def test_base_module_validate_target_format_rejects_short_target() -> None:
             return "x"
 
     instance = _Probe()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="target"):
         instance.validate_target_format("ab")  # len 2 < 3 minimum
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="target"):
         instance.validate_target_format("")
     # And a valid one returns a normalized target
     assert instance.validate_target_format("  Example.COM  ") == "example.com"
-

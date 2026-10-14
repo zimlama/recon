@@ -14,11 +14,9 @@ MITRE ATT&CK: T1589.001, T1593.001
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import shutil
 import time
-from typing import Any
 
 import httpx
 
@@ -68,7 +66,7 @@ class DarkWebOSINTModule(BaseReconModule):
         try:
             ahmia_results = await self._search_ahmia(target)
             findings.extend(ahmia_results)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"ahmia.fi query failed: {e!s}")
 
         # 2. If Tor is available, query .onion sources (note: requires Tor sidecar)
@@ -76,7 +74,7 @@ class DarkWebOSINTModule(BaseReconModule):
             try:
                 tor_findings = await self._search_via_tor(target)
                 findings.extend(tor_findings)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"Tor search failed: {e!s}")
 
         return ModuleOutput(
@@ -107,7 +105,7 @@ SAFETY RULES:
 - Document all access for chain of custody
 - Never tip off the target during active recon
 
-Respond with structured JSON matching the LDMValidationResult schema."""  # noqa: E501
+Respond with structured JSON matching the LDMValidationResult schema."""
 
     # ---- Private helpers ----
 
@@ -127,7 +125,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                 return []
             try:
                 data = response.json()
-            except (ValueError, TypeError):  # noqa: PERF203
+            except (ValueError, TypeError):
                 return []
         except (ValueError, TypeError):
             return []
@@ -168,7 +166,7 @@ Respond with structured JSON matching the LDMValidationResult schema."""  # noqa
                 if response.status_code != 200:
                     return []
                 data = response.json()
-        except (httpx.HTTPError, Exception) as e:  # noqa: BLE001
+        except (httpx.HTTPError, Exception) as e:
             logger.debug("tor_search_error", error=str(e))
             return []
 

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -34,6 +35,7 @@ from app.models import (
     Job,
     ModuleRun,
 )
+from app.modules.base import Finding
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -87,19 +89,15 @@ async def export_handoff(job_id: str) -> HandoffPacket:
                 f"{file_path_resolved} ({e})"
             ) from e
 
-        json_data = json.dumps(
-            packet.model_dump(mode="json"), indent=2, ensure_ascii=False
-        )
+        json_data = json.dumps(packet.model_dump(mode="json"), indent=2, ensure_ascii=False)
         fd, tmp_path = tempfile.mkstemp(suffix=".json.tmp", dir=handoffs_dir)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(json_data)
             os.replace(tmp_path, file_path)
         except Exception:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             raise
 
         # Persist DB row. If the DB write fails, the JSON file is already
@@ -128,7 +126,7 @@ async def export_handoff(job_id: str) -> HandoffPacket:
     return packet
 
 
-def _build_packet(db: Session, job: Job) -> HandoffPacket:  # noqa: C901 — orchestrator function
+def _build_packet(db: Session, job: Job) -> HandoffPacket:
     """Build a HandoffPacket from a Job and its ModuleRuns."""
     module_runs = db.query(ModuleRun).filter(ModuleRun.job_id == job.id).all()
 
@@ -146,11 +144,7 @@ def _build_packet(db: Session, job: Job) -> HandoffPacket:  # noqa: C901 — orc
             consent_tier3.append(mr.module_name)
 
         # Find AI validation for this module run
-        validation = (
-            db.query(AIValidation)
-            .filter(AIValidation.module_run_id == mr.id)
-            .first()
-        )
+        validation = db.query(AIValidation).filter(AIValidation.module_run_id == mr.id).first()
 
         # Recommended modules from validation
         if validation and validation.recommended_next_modules:
@@ -227,11 +221,7 @@ def _process_finding(
     del emails_found, breach_count  # unused here; counters live in the caller
     if finding.type == FindingType.SUBDOMAIN and validation:
         verdict = next(
-            (
-                v
-                for v in validation.decision.get("verdicts", [])
-                if v.get("value") == finding.value
-            ),
+            (v for v in validation.decision.get("verdicts", []) if v.get("value") == finding.value),
             None,
         )
         if verdict and verdict.get("verdict") in ("CONFIRMED", "LIKELY"):
@@ -243,7 +233,9 @@ def _process_finding(
                     ai_reasoning=verdict.get("reasoning", ""),
                     ai_verdict=verdict.get("verdict", "LIKELY"),
                     ai_confidence=verdict.get("confidence", 0.5),
-                    shodan_exposure=HandoffShodanExposure() if mr.module_name == "shodan_censys" else None,
+                    shodan_exposure=HandoffShodanExposure()
+                    if mr.module_name == "shodan_censys"
+                    else None,
                 )
             )
 
@@ -280,7 +272,11 @@ def _process_finding(
             tech_stack.web_servers.setdefault(name, []).append(version)
         elif "framework" in name.lower():
             tech_stack.frameworks.setdefault(name, []).append(version)
-        elif "database" in name.lower() or "postgres" in version.lower() or "mysql" in version.lower():
+        elif (
+            "database" in name.lower()
+            or "postgres" in version.lower()
+            or "mysql" in version.lower()
+        ):
             tech_stack.databases.setdefault(name, []).append(version)
 
 

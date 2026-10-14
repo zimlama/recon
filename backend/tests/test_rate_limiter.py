@@ -10,11 +10,11 @@ holding different Lock instances).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
 
 from app.orchestrator.rate_limiter import RateLimiter
-
 
 # ---- Basic bucket behaviour ----
 
@@ -37,7 +37,7 @@ async def test_acquire_consumes_one_token() -> None:
     """First acquire takes 1 token; bucket has capacity - 1 tokens after."""
     limiter = RateLimiter(default_rps=10, default_burst=5)
     await limiter.acquire("example.com", "dns_enum")
-    bucket = limiter._buckets[("example.com", "dns_enum")]  # noqa: SLF001
+    bucket = limiter._buckets[("example.com", "dns_enum")]
     # Allow for refill during the call: capacity is 5, at least 4 consumed.
     assert bucket.tokens < 5.0
 
@@ -60,8 +60,8 @@ async def test_keys_are_case_insensitive_and_separated() -> None:
     limiter = RateLimiter(default_rps=10, default_burst=2)
     await limiter.acquire("Example.COM", "dns_enum")
     await limiter.acquire("example.com", "subdomain_enum")
-    assert ("example.com", "dns_enum") in limiter._buckets  # noqa: SLF001
-    assert ("example.com", "subdomain_enum") in limiter._buckets  # noqa: SLF001
+    assert ("example.com", "dns_enum") in limiter._buckets
+    assert ("example.com", "subdomain_enum") in limiter._buckets
 
 
 def test_reset_clears_all_buckets() -> None:
@@ -75,7 +75,7 @@ def test_reset_clears_all_buckets() -> None:
     assert len(limiter) == 1
 
     limiter.reset()
-    assert limiter._buckets == {}  # noqa: SLF001
+    assert limiter._buckets == {}
 
 
 def test_reset_with_target_clears_one_bucket() -> None:
@@ -87,8 +87,8 @@ def test_reset_with_target_clears_one_bucket() -> None:
 
     asyncio.run(_seed())
     limiter.reset(target="example.com", action="dns_enum")
-    assert ("example.com", "dns_enum") not in limiter._buckets  # noqa: SLF001
-    assert ("example.com", "subdomain_enum") in limiter._buckets  # noqa: SLF001
+    assert ("example.com", "dns_enum") not in limiter._buckets
+    assert ("example.com", "subdomain_enum") in limiter._buckets
 
 
 # ---- Audit R4-H5: LRU eviction ----
@@ -104,9 +104,7 @@ async def test_rate_limiter_evicts_old_buckets() -> None:
     cap, the oldest (target, action) pair is evicted first.
     """
     cap = 4
-    limiter = RateLimiter(
-        default_rps=10, default_burst=5, max_keys=cap
-    )
+    limiter = RateLimiter(default_rps=10, default_burst=5, max_keys=cap)
 
     # Force 4 distinct keys into the bucket dict.
     for idx in range(cap):
@@ -137,14 +135,14 @@ async def test_rate_limiter_evicts_old_buckets() -> None:
     # Add a new key — oldest non-touched (target_1) should evict.
     await limiter.acquire("new_target.example.com", "dns_enum")
     assert len(limiter) == cap
-    assert ("target_0.com", "dns_enum") in limiter._buckets  # noqa: SLF001
+    assert ("target_0.com", "dns_enum") in limiter._buckets
 
 
 def test_rate_limiter_initial_state_includes_capped_dict() -> None:
     """Construction with max_keys=N starts with an empty LRU dict."""
     limiter = RateLimiter(default_rps=10, default_burst=5, max_keys=42)
     assert len(limiter) == 0
-    assert limiter._max_keys == 42  # noqa: SLF001
+    assert limiter._max_keys == 42
 
     async def _seed_then_clear() -> None:
         await limiter.acquire("a.com", "x")
@@ -152,7 +150,7 @@ def test_rate_limiter_initial_state_includes_capped_dict() -> None:
     asyncio.run(_seed_then_clear())
     limiter.reset()
     assert len(limiter) == 0
-    assert ("a.com", "x") not in limiter._locks  # noqa: SLF001
+    assert ("a.com", "x") not in limiter._locks
 
 
 # ---- Race-condition fix: per-key Lock must be shared ----
@@ -161,16 +159,16 @@ def test_rate_limiter_initial_state_includes_capped_dict() -> None:
 def test_get_lock_returns_same_instance_for_same_key() -> None:
     """Repeated calls with the same key must return the same Lock object."""
     limiter = RateLimiter()
-    lock1 = limiter._get_lock(("example.com", "dns_enum"))  # noqa: SLF001
-    lock2 = limiter._get_lock(("example.com", "dns_enum"))  # noqa: SLF001
+    lock1 = limiter._get_lock(("example.com", "dns_enum"))
+    lock2 = limiter._get_lock(("example.com", "dns_enum"))
     assert lock1 is lock2
 
 
 def test_get_lock_returns_different_instances_per_key() -> None:
     """Different keys must get different Lock objects."""
     limiter = RateLimiter()
-    lock1 = limiter._get_lock(("a.com", "dns_enum"))  # noqa: SLF001
-    lock2 = limiter._get_lock(("b.com", "dns_enum"))  # noqa: SLF001
+    lock1 = limiter._get_lock(("a.com", "dns_enum"))
+    lock2 = limiter._get_lock(("b.com", "dns_enum"))
     assert lock1 is not lock2
 
 
@@ -195,7 +193,7 @@ async def test_concurrent_acquires_share_one_lock() -> None:
     # the refill (1000 rps) makes it hard to assert an exact number. The
     # critical invariant is that the bucket never went negative — the
     # Lock guarantees that all 10 first-pass acquires see bucket >= 1.
-    bucket = limiter._buckets[("race.example.com", "dns_enum")]  # noqa: SLF001
+    bucket = limiter._buckets[("race.example.com", "dns_enum")]
     assert bucket.tokens >= 0.0, f"bucket went negative: {bucket.tokens}"
 
 
@@ -231,7 +229,7 @@ async def test_high_contention_no_token_loss() -> None:
     limiter = RateLimiter(default_rps=1, default_burst=20)
 
     # Use a flag so each coroutine records whether it had to wait.
-    waited = asyncio.Event()
+    asyncio.Event()
     waiters = []
     for i in range(100):
 
@@ -338,7 +336,7 @@ def jobrunner_db(tmp_path):
     # duplicate-index bug in Finding's source column).
     Job.__table__.create(bind=eng, checkfirst=True)
     ModuleRun.__table__.create(bind=eng, checkfirst=True)
-    Session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
+    session_ = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
 
     # Patch global + the import-bound reference inside job_runner.
     import app.database as app_db
@@ -349,10 +347,10 @@ def jobrunner_db(tmp_path):
     original_jr_session = jr_module.SessionLocal
 
     app_db.engine = eng
-    app_db.SessionLocal = Session_
-    jr_module.SessionLocal = Session_
+    app_db.SessionLocal = session_
+    jr_module.SessionLocal = session_
 
-    db = Session_()
+    db = session_()
     try:
         yield db
     finally:
@@ -363,10 +361,8 @@ def jobrunner_db(tmp_path):
         app_db.SessionLocal = original_app_session
         jr_module.SessionLocal = original_jr_session
         eng.dispose()
-        try:
+        with contextlib.suppress(FileNotFoundError):
             db_path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 @pytest.mark.asyncio
@@ -486,9 +482,7 @@ async def test_module_execution_respects_concurrency_limit(jobrunner_db) -> None
     completed = sum(1 for t in tasks if t.done())
     # Exactly `cap` tasks should have completed; the remaining `extra`
     # must still be waiting (parity-2 inventory under asyncio).
-    assert completed == cap, (
-        f"semaphore oversubscribed: {completed} > {cap} acquired"
-    )
+    assert completed == cap, f"semaphore oversubscribed: {completed} > {cap} acquired"
 
     # Cancel the parked tasks and release the held slots so the test
     # cleans up.

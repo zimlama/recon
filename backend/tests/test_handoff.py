@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from app.handoff.importer import import_handoff
 from app.handoff.schema import (
+    HandoffConfirmedTarget,
     HandoffPacket,
     HandoffSource,
     HandoffTarget,
-    HandoffConfirmedTarget,
 )
-from app.handoff.importer import import_handoff
 
 
 def test_handoff_packet_minimal() -> None:
@@ -23,7 +22,7 @@ def test_handoff_packet_minimal() -> None:
         source=HandoffSource(
             version="0.1.0",
             job_id="test-123",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         ),
         target=HandoffTarget(
             primary_domain="example.com",
@@ -41,7 +40,7 @@ def test_handoff_packet_with_confirmed_targets() -> None:
         source=HandoffSource(
             version="0.1.0",
             job_id="test-123",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         ),
         target=HandoffTarget(
             primary_domain="example.com",
@@ -68,7 +67,7 @@ def test_handoff_packet_serialization() -> None:
         source=HandoffSource(
             version="0.1.0",
             job_id="test-123",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         ),
         target=HandoffTarget(
             primary_domain="example.com",
@@ -83,16 +82,20 @@ def test_handoff_packet_serialization() -> None:
 
 def test_handoff_packet_rejects_extra_fields() -> None:
     """HandoffPacket rejects extra fields (strict schema)."""
-    with pytest.raises(Exception):  # ValidationError
-        HandoffPacket.model_validate({
-            "source": {
-                "version": "0.1.0",
-                "job_id": "x",
-                "completed_at": datetime.now(timezone.utc).isoformat(),
-            },
-            "target": {"primary_domain": "example.com"},
-            "unknown_field": "should fail",  # extra="forbid"
-        })
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        HandoffPacket.model_validate(
+            {
+                "source": {
+                    "version": "0.1.0",
+                    "job_id": "x",
+                    "completed_at": datetime.now(UTC).isoformat(),
+                },
+                "target": {"primary_domain": "example.com"},
+                "unknown_field": "should fail",  # extra="forbid"
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +114,7 @@ def test_handoff_packet_with_person_dossiers() -> None:
         source=HandoffSource(
             version="0.1.0",
             job_id="test-123",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         ),
         target=HandoffTarget(
             primary_domain="example.com",
@@ -143,7 +146,7 @@ def test_handoff_packet_default_person_dossiers_empty() -> None:
         source=HandoffSource(
             version="0.1.0",
             job_id="test-123",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         ),
         target=HandoffTarget(
             primary_domain="example.com",
@@ -155,8 +158,9 @@ def test_handoff_packet_default_person_dossiers_empty() -> None:
 
 def test_handoff_person_dossier_summary_rejects_plaintext_email() -> None:
     """HandoffPersonDossierSummary has NO `email` field (privacy invariant)."""
-    from app.handoff.schema import HandoffPersonDossierSummary
     from pydantic import ValidationError
+
+    from app.handoff.schema import HandoffPersonDossierSummary
 
     with pytest.raises(ValidationError):
         HandoffPersonDossierSummary(
@@ -174,8 +178,9 @@ def test_handoff_person_dossier_summary_rejects_plaintext_email() -> None:
 
 def test_handoff_person_dossier_summary_rejects_short_email_hash() -> None:
     """email_hash MUST be exactly 64 lowercase hex (per design.md REQ-020)."""
-    from app.handoff.schema import HandoffPersonDossierSummary
     from pydantic import ValidationError
+
+    from app.handoff.schema import HandoffPersonDossierSummary
 
     with pytest.raises(ValidationError):
         HandoffPersonDossierSummary(
@@ -192,8 +197,9 @@ def test_handoff_person_dossier_summary_rejects_short_email_hash() -> None:
 
 def test_handoff_person_dossier_summary_role_relevance_literal() -> None:
     """role_relevance MUST be HIGH/MEDIUM/LOW."""
-    from app.handoff.schema import HandoffPersonDossierSummary
     from pydantic import ValidationError
+
+    from app.handoff.schema import HandoffPersonDossierSummary
 
     with pytest.raises(ValidationError):
         HandoffPersonDossierSummary(
@@ -216,7 +222,7 @@ def test_handoff_packet_serialization_with_dossiers() -> None:
         source=HandoffSource(
             version="0.1.0",
             job_id="test-123",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         ),
         target=HandoffTarget(
             primary_domain="example.com",
@@ -248,7 +254,7 @@ def test_import_handoff_validates_schema(tmp_path: Path) -> None:
         source=HandoffSource(
             version="0.1.0",
             job_id="test-123",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         ),
         target=HandoffTarget(
             primary_domain="example.com",
@@ -346,8 +352,8 @@ def test_resolve_under_handoffs_rejects_traversal(tmp_path: Path) -> None:
     """Path traversal escapes from HANDOFFS_DIR return 403."""
     from fastapi import HTTPException
 
-    from app.routes.handoff import _resolve_under_handoffs
     from app.config import Settings
+    from app.routes.handoff import _resolve_under_handoffs
 
     cfg = Settings(HANDOFFS_DIR=str(tmp_path / "handoffs"))
     (tmp_path / "handoffs").mkdir()
@@ -367,8 +373,8 @@ def test_resolve_under_handoffs_rejects_absolute_escape(tmp_path: Path) -> None:
     """Absolute paths outside HANDOFFS_DIR return 403."""
     from fastapi import HTTPException
 
-    from app.routes.handoff import _resolve_under_handoffs
     from app.config import Settings
+    from app.routes.handoff import _resolve_under_handoffs
 
     cfg = Settings(HANDOFFS_DIR=str(tmp_path / "handoffs"))
     (tmp_path / "handoffs").mkdir()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -55,6 +54,7 @@ def sample_commit_search_response() -> dict:
 
 
 # ---- Code search ----
+
 
 @pytest.mark.asyncio
 async def test_code_search_success(
@@ -134,6 +134,7 @@ async def test_code_search_no_token(
 
 # ---- Commit search ----
 
+
 @pytest.mark.asyncio
 async def test_commit_search_success(
     module: GitHubReconModule,
@@ -141,9 +142,7 @@ async def test_commit_search_success(
 ) -> None:
     """GitHub commit search returns commit findings."""
     with respx.mock(base_url=GITHUB_API_URL) as mock_router:
-        mock_router.get("/search/code").mock(
-            return_value=httpx.Response(200, json={"items": []})
-        )
+        mock_router.get("/search/code").mock(return_value=httpx.Response(200, json={"items": []}))
         mock_router.get("/search/commits").mock(
             return_value=httpx.Response(200, json=sample_commit_search_response)
         )
@@ -156,9 +155,9 @@ async def test_commit_search_success(
 
 # ---- Secret pattern detection ----
 
+
 def test_aws_access_key_pattern_detected(module: GitHubReconModule) -> None:
     """AWS access key ID (AKIA...) is detected."""
-    from app.modules.base import Finding
     from app.models import FindingType
 
     # Simulate search result with a file name that contains an AWS key
@@ -180,6 +179,7 @@ def test_aws_access_key_pattern_detected(module: GitHubReconModule) -> None:
         )
         # Run via asyncio
         import asyncio
+
         result = asyncio.run(module.run(ModuleInput(target="example.com")))
 
     # Should detect the secret
@@ -189,8 +189,8 @@ def test_aws_access_key_pattern_detected(module: GitHubReconModule) -> None:
 
 
 def test_dedupe_dedupes_by_value_and_source(module: GitHubReconModule) -> None:
-    from app.modules.base import Finding
     from app.models import FindingType
+    from app.modules.base import Finding
 
     f1 = Finding(type=FindingType.OTHER, value="x", source="y", confidence=0.9)
     f2 = Finding(type=FindingType.OTHER, value="x", source="y", confidence=0.9)
@@ -200,6 +200,7 @@ def test_dedupe_dedupes_by_value_and_source(module: GitHubReconModule) -> None:
 
 
 # ---- Metadata ----
+
 
 def test_module_metadata(module: GitHubReconModule) -> None:
     assert module.name == "github_recon"

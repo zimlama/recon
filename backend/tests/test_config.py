@@ -57,7 +57,6 @@ def test_encryption_key_required_in_production() -> None:
     production silently skipped identity_map rows. Raising at boot
     keeps the "encrypted at rest" contract from being silently broken.
     """
-    import pytest
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError) as exc_info:

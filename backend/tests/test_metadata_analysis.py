@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -12,8 +13,8 @@ import respx
 
 from app.modules.base import ModuleInput
 from app.modules.metadata_analysis import (
-    MetadataAnalysisModule,
     WAYBACK_CDX_URL,
+    MetadataAnalysisModule,
 )
 
 
@@ -45,6 +46,7 @@ def sample_cdx_response() -> list:
 
 
 # ---- Wayback CDX document discovery ----
+
 
 @pytest.mark.asyncio
 async def test_wayback_cdx_finds_documents(
@@ -91,10 +93,15 @@ async def test_run_logs_error_when_metadata_extraction_fails(
     module: MetadataAnalysisModule,
 ) -> None:
     """When _extract_metadata raises, the error is logged and the module continues."""
-    with patch.object(module, "_find_documents_via_wayback", return_value=[
-        "https://example.com/a.pdf",
-        "https://example.com/b.pdf",
-    ]):
+    with patch.object(
+        module,
+        "_find_documents_via_wayback",
+        return_value=[
+            "https://example.com/a.pdf",
+            "https://example.com/b.pdf",
+        ],
+    ):
+
         async def boom(url: str) -> None:
             raise RuntimeError("synthetic failure")
 
@@ -108,6 +115,7 @@ async def test_run_logs_error_when_metadata_extraction_fails(
 
 
 # ---- Metadata → findings conversion ----
+
 
 def test_metadata_username_extracted(module: MetadataAnalysisModule) -> None:
     """Username from Author field becomes a finding."""
@@ -177,6 +185,7 @@ def test_metadata_empty_returns_no_findings(module: MetadataAnalysisModule) -> N
 
 # ---- Extension helper ----
 
+
 def test_ext_from_url(module: MetadataAnalysisModule) -> None:
     """File extension is extracted from URL."""
     assert module._ext_from_url("https://example.com/file.pdf") == ".pdf"
@@ -200,6 +209,7 @@ def test_ai_prompt_is_substantive(module: MetadataAnalysisModule) -> None:
 
 
 # ---- Wayback CDX (additional tests) ----
+
 
 @pytest.mark.asyncio
 async def test_wayback_http_error(
@@ -246,9 +256,7 @@ async def test_wayback_deduplicates_urls(
         ],
     ]
     with respx.mock(base_url="https://web.archive.org", assert_all_called=False) as mock_router:
-        mock_router.get("/cdx/search/cdx").mock(
-            return_value=httpx.Response(200, json=cdx_data)
-        )
+        mock_router.get("/cdx/search/cdx").mock(return_value=httpx.Response(200, json=cdx_data))
         urls = await module._find_documents_via_wayback("example.com")
     assert len(urls) == 1
     assert urls[0] == "https://example.com/doc.pdf"
@@ -261,14 +269,13 @@ async def test_wayback_no_header_in_response(
     """Wayback CDX response without header row is empty."""
     with respx.mock(base_url="https://web.archive.org", assert_all_called=False) as mock_router:
         # Empty array (no header)
-        mock_router.get("/cdx/search/cdx").mock(
-            return_value=httpx.Response(200, json=[])
-        )
+        mock_router.get("/cdx/search/cdx").mock(return_value=httpx.Response(200, json=[]))
         urls = await module._find_documents_via_wayback("example.com")
     assert urls == []
 
 
 # ---- Run with exiftool mocked ----
+
 
 @pytest.mark.asyncio
 async def test_run_with_exiftool_success(
@@ -285,25 +292,26 @@ async def test_run_with_exiftool_success(
             "200",
         ],
     ]
-    exiftool_output = json.dumps([{
-        "Author": "jane.doe",
-        "Software": "Microsoft Office 16.0",
-        "CreateDate": "2024:01:01 00:00:00",
-    }]).encode()
+    exiftool_output = json.dumps(
+        [
+            {
+                "Author": "jane.doe",
+                "Software": "Microsoft Office 16.0",
+                "CreateDate": "2024:01:01 00:00:00",
+            }
+        ]
+    ).encode()
 
     mock_proc = AsyncMock()
     mock_proc.communicate = AsyncMock(return_value=(exiftool_output, b""))
 
     with respx.mock(base_url="https://web.archive.org", assert_all_called=False) as mock_router:
-        mock_router.get("/cdx/search/cdx").mock(
-            return_value=httpx.Response(200, json=cdx_data)
-        )
+        mock_router.get("/cdx/search/cdx").mock(return_value=httpx.Response(200, json=cdx_data))
         mock_router.get("https://example.com/doc.pdf").mock(
             return_value=httpx.Response(200, content=b"fake pdf content")
         )
-        with patch("shutil.which", return_value="/usr/bin/exiftool"):
-            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-                result = await module.run(ModuleInput(target="example.com"))
+        with patch("shutil.which", return_value="/usr/bin/exiftool"), patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            result = await module.run(ModuleInput(target="example.com"))
 
     assert len(result.findings) > 0
     assert any(f.value == "jane.doe" for f in result.findings)
@@ -329,20 +337,20 @@ async def test_run_with_exiftool_timeout(
     mock_proc.communicate = AsyncMock(side_effect=TimeoutError())
 
     with respx.mock(base_url="https://web.archive.org", assert_all_called=False) as mock_router:
-        mock_router.get("/cdx/search/cdx").mock(
-            return_value=httpx.Response(200, json=cdx_data)
-        )
+        mock_router.get("/cdx/search/cdx").mock(return_value=httpx.Response(200, json=cdx_data))
         mock_router.get("https://example.com/doc.pdf").mock(
             return_value=httpx.Response(200, content=b"fake pdf content")
         )
-        with patch("shutil.which", return_value="/usr/bin/exiftool"):
-            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-                result = await module.run(ModuleInput(target="example.com"))
+        with patch("shutil.which", return_value="/usr/bin/exiftool"), patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            result = await module.run(ModuleInput(target="example.com"))
 
-    assert any("Failed to extract metadata" in e for e in result.errors) or len(result.findings) == 0
+    assert (
+        any("Failed to extract metadata" in e for e in result.errors) or len(result.findings) == 0
+    )
 
 
 # ---- Run without exiftool ----
+
 
 @pytest.mark.asyncio
 async def test_run_without_exiftool_python_docx_fallback(
@@ -362,14 +370,16 @@ async def test_run_without_exiftool_python_docx_fallback(
 
     # Mock the docx module's parse (the test environment has python-docx)
     with respx.mock(base_url="https://web.archive.org", assert_all_called=False) as mock_router:
-        mock_router.get("/cdx/search/cdx").mock(
-            return_value=httpx.Response(200, json=cdx_data)
-        )
+        mock_router.get("/cdx/search/cdx").mock(return_value=httpx.Response(200, json=cdx_data))
         # Mock the docx download (skip actual download by patching)
-        with patch.object(module, "_extract_metadata", return_value={
-            "Author": "alice.smith",
-            "Software": "Microsoft Office 16.0",
-        }):
+        with patch.object(
+            module,
+            "_extract_metadata",
+            return_value={
+                "Author": "alice.smith",
+                "Software": "Microsoft Office 16.0",
+            },
+        ):
             result = await module.run(ModuleInput(target="example.com"))
 
     # Findings from the mocked metadata
@@ -393,12 +403,8 @@ async def test_run_download_failure(
     ]
 
     with respx.mock(base_url="https://web.archive.org", assert_all_called=False) as mock_router:
-        mock_router.get("/cdx/search/cdx").mock(
-            return_value=httpx.Response(200, json=cdx_data)
-        )
-        mock_router.get("https://example.com/doc.pdf").mock(
-            return_value=httpx.Response(404)
-        )
+        mock_router.get("/cdx/search/cdx").mock(return_value=httpx.Response(200, json=cdx_data))
+        mock_router.get("https://example.com/doc.pdf").mock(return_value=httpx.Response(404))
         with patch("shutil.which", return_value=None):
             result = await module.run(ModuleInput(target="example.com"))
 
@@ -407,6 +413,7 @@ async def test_run_download_failure(
 
 
 # ---- Ext helper ----
+
 
 def test_ext_from_url_for_file_with_extension(module: MetadataAnalysisModule) -> None:
     """URL with extension returns the extension."""
@@ -424,6 +431,7 @@ def test_ext_from_url_default_falls_back_to_bin(module: MetadataAnalysisModule) 
 
 
 # ---- Mock-based tests for the python-docx and pypdf paths ----
+
 
 def test_extract_from_docx_no_python_docx(module: MetadataAnalysisModule) -> None:
     """If python-docx is not installed, _extract_from_docx returns None."""
@@ -482,7 +490,6 @@ async def test_extract_metadata_no_exiftool_no_fallback(module: MetadataAnalysis
 async def test_extract_from_docx_success(module: MetadataAnalysisModule) -> None:
     """Happy path: python-docx is installed and parses a docx blob."""
     # Stub the docx module so we can exercise the full body
-    import io
     import sys
     import types
 
@@ -507,6 +514,7 @@ async def test_extract_from_docx_success(module: MetadataAnalysisModule) -> None
     sys.modules["docx"] = fake_docx
 
     try:
+
         async def fake_safe(url: str, **kwargs: object) -> httpx.Response:
             return httpx.Response(200, content=b"%PDF-stub")
 
@@ -528,7 +536,6 @@ async def test_extract_from_docx_success(module: MetadataAnalysisModule) -> None
 @pytest.mark.asyncio
 async def test_extract_from_pdf_success(module: MetadataAnalysisModule) -> None:
     """Happy path: pypdf is installed and parses a pdf blob."""
-    import io
     import sys
     import types
 
@@ -553,6 +560,7 @@ async def test_extract_from_pdf_success(module: MetadataAnalysisModule) -> None:
     sys.modules["pypdf"] = fake_pypdf
 
     try:
+
         async def fake_safe(url: str, **kwargs: object) -> httpx.Response:
             return httpx.Response(200, content=b"%PDF-stub")
 
@@ -574,7 +582,6 @@ async def test_extract_from_pdf_success(module: MetadataAnalysisModule) -> None:
 @pytest.mark.asyncio
 async def test_extract_from_pdf_no_metadata(module: MetadataAnalysisModule) -> None:
     """When pypdf returns no metadata, returns None."""
-    import io
     import sys
     import types
 
@@ -589,6 +596,7 @@ async def test_extract_from_pdf_no_metadata(module: MetadataAnalysisModule) -> N
     sys.modules["pypdf"] = fake_pypdf
 
     try:
+
         async def fake_safe(url: str, **kwargs: object) -> httpx.Response:
             return httpx.Response(200, content=b"%PDF-stub")
 
@@ -624,6 +632,7 @@ async def test_extract_from_docx_returns_none_on_bad_response(
     sys.modules["docx"] = fake_docx
 
     try:
+
         async def fake_safe(url: str, **kwargs: object) -> httpx.Response:
             return httpx.Response(200, content=b"not-a-docx")
 
@@ -666,12 +675,9 @@ async def test_extract_metadata_exiftool_json_decode_error(
     mock_proc.communicate = AsyncMock(return_value=(b"not-json{", b""))
 
     with respx.mock(base_url="https://web.archive.org", assert_all_called=False) as mock_router:
-        mock_router.get("/cdx/search/cdx").mock(
-            return_value=httpx.Response(200, json=cdx_data)
-        )
-        with patch("shutil.which", return_value="/usr/bin/exiftool"):
-            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-                result = await module._extract_metadata("https://example.com/doc.pdf")
+        mock_router.get("/cdx/search/cdx").mock(return_value=httpx.Response(200, json=cdx_data))
+        with patch("shutil.which", return_value="/usr/bin/exiftool"), patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            result = await module._extract_metadata("https://example.com/doc.pdf")
     assert result is None
 
 
@@ -679,9 +685,7 @@ async def test_extract_metadata_exiftool_json_decode_error(
 async def test_extract_metadata_download_failure(module: MetadataAnalysisModule) -> None:
     """When document download fails, returns None."""
     with respx.mock(assert_all_called=False) as mock_router:
-        mock_router.get(url__regex=r".*example\.com/.*").mock(
-            return_value=httpx.Response(404)
-        )
+        mock_router.get(url__regex=r".*example\.com/.*").mock(return_value=httpx.Response(404))
         result = await module._extract_metadata("https://example.com/file.pdf")
     assert result is None
 
@@ -698,6 +702,7 @@ async def test_extract_metadata_network_error(module: MetadataAnalysisModule) ->
 
 
 # ---- _metadata_to_findings edge cases ----
+
 
 def test_metadata_author_with_lastmodifiedby(module: MetadataAnalysisModule) -> None:
     """Author can also come from LastModifiedBy field."""
@@ -752,10 +757,7 @@ def test_metadata_ip_limit_3(module: MetadataAnalysisModule) -> None:
         target="example.com",
         url="https://example.com/doc.pdf",
         metadata={
-            "Comment": (
-                "192.168.1.1 10.0.0.1 172.16.0.1 "
-                "192.168.2.2 10.0.0.2"
-            ),
+            "Comment": ("192.168.1.1 10.0.0.1 172.16.0.1 192.168.2.2 10.0.0.2"),
         },
     )
     ip_findings = [f for f in findings if f.finding_metadata.get("kind") == "internal_ip"]
@@ -763,6 +765,7 @@ def test_metadata_ip_limit_3(module: MetadataAnalysisModule) -> None:
 
 
 # ---- Run() with exception in Wayback CDX ----
+
 
 @pytest.mark.asyncio
 async def test_run_wayback_cdx_invalid_json(module: MetadataAnalysisModule) -> None:
@@ -774,9 +777,7 @@ async def test_run_wayback_cdx_invalid_json(module: MetadataAnalysisModule) -> N
     """
     with respx.mock(base_url="https://web.archive.org", assert_all_called=False) as mock_router:
         # Return an empty header-only response — module handles empty data gracefully
-        mock_router.get("/cdx/search/cdx").mock(
-            return_value=httpx.Response(200, json=[])
-        )
+        mock_router.get("/cdx/search/cdx").mock(return_value=httpx.Response(200, json=[]))
         result = await module.run(ModuleInput(target="example.com"))
     # No findings, error logged about no documents found
     assert result.findings == []
@@ -786,9 +787,7 @@ async def test_run_wayback_cdx_invalid_json(module: MetadataAnalysisModule) -> N
 async def test_wayback_invalid_json_handled(module: MetadataAnalysisModule) -> None:
     """Wayback returns 200 but invalid JSON → empty list (no crash)."""
     with respx.mock(base_url="https://web.archive.org", assert_all_called=False) as mock_router:
-        mock_router.get("/cdx/search/cdx").mock(
-            return_value=httpx.Response(200, text="not-json{")
-        )
+        mock_router.get("/cdx/search/cdx").mock(return_value=httpx.Response(200, text="not-json{"))
         urls = await module._find_documents_via_wayback("example.com")
     assert urls == []
 
@@ -831,6 +830,7 @@ async def test_wayback_short_rows_skipped(module: MetadataAnalysisModule) -> Non
 
 
 # ---- SSRF defense: adopt BaseReconModule.safe_http_get_async ----
+
 
 @pytest.mark.asyncio
 async def test_find_documents_via_wayback_uses_safe_http_get_async(
@@ -875,17 +875,20 @@ async def test_extract_metadata_uses_safe_http_get_async(
 
     module.safe_http_get_async = fake_safe  # type: ignore[method-assign]
 
-    exiftool_output = json.dumps([{
-        "Author": "jane.doe",
-        "Software": "Microsoft Office 16.0",
-    }]).encode()
+    exiftool_output = json.dumps(
+        [
+            {
+                "Author": "jane.doe",
+                "Software": "Microsoft Office 16.0",
+            }
+        ]
+    ).encode()
 
     mock_proc = AsyncMock()
     mock_proc.communicate = AsyncMock(return_value=(exiftool_output, b""))
 
-    with patch("shutil.which", return_value="/usr/bin/exiftool"):
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            await module._extract_metadata("https://example.com/file.pdf")
+    with patch("shutil.which", return_value="/usr/bin/exiftool"), patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+        await module._extract_metadata("https://example.com/file.pdf")
 
     assert captured, "safe_http_get_async must have been called for download"
     assert captured[0] == "https://example.com/file.pdf"
@@ -896,6 +899,7 @@ async def test_safe_http_get_async_returns_none_handled_gracefully(
     module: MetadataAnalysisModule,
 ) -> None:
     """When safe_http_get_async returns None (e.g., SSRF blocked), module handles it."""
+
     async def fake_safe(url: str, **kwargs: object) -> None:
         return None
 

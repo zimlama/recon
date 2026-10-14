@@ -79,12 +79,15 @@ def make_resolver_with(answers_by_rtype: dict[int, MagicMock]) -> MagicMock:
 
 # ---- Happy paths ----
 
+
 @pytest.mark.asyncio
 async def test_a_record_queried(module: DNSEnumModule) -> None:
     """A records produce IP_ADDRESS findings."""
-    resolver = make_resolver_with({
-        dns.rdatatype.A: make_answer(make_rdata(dns.rdatatype.A, "93.184.216.34")),
-    })
+    resolver = make_resolver_with(
+        {
+            dns.rdatatype.A: make_answer(make_rdata(dns.rdatatype.A, "93.184.216.34")),
+        }
+    )
 
     with patch.object(module, "_build_resolver", return_value=resolver):
         result = await module.run(ModuleInput(target="example.com"))
@@ -100,9 +103,11 @@ async def test_a_record_queried(module: DNSEnumModule) -> None:
 async def test_mx_record_queried(module: DNSEnumModule) -> None:
     """MX records produce findings with preference metadata."""
     mx_rdata = make_rdata(dns.rdatatype.MX, "mail.example.com")
-    resolver = make_resolver_with({
-        dns.rdatatype.MX: make_answer(mx_rdata),
-    })
+    resolver = make_resolver_with(
+        {
+            dns.rdatatype.MX: make_answer(mx_rdata),
+        }
+    )
 
     with patch.object(module, "_build_resolver", return_value=resolver):
         result = await module.run(ModuleInput(target="example.com"))
@@ -116,12 +121,12 @@ async def test_mx_record_queried(module: DNSEnumModule) -> None:
 @pytest.mark.asyncio
 async def test_txt_record_spf_classified(module: DNSEnumModule) -> None:
     """TXT records with SPF are tagged in metadata."""
-    spf_rdata = make_rdata(
-        dns.rdatatype.TXT, "v=spf1 include:_spf.example.com ~all"
+    spf_rdata = make_rdata(dns.rdatatype.TXT, "v=spf1 include:_spf.example.com ~all")
+    resolver = make_resolver_with(
+        {
+            dns.rdatatype.TXT: make_answer(spf_rdata),
+        }
     )
-    resolver = make_resolver_with({
-        dns.rdatatype.TXT: make_answer(spf_rdata),
-    })
 
     with patch.object(module, "_build_resolver", return_value=resolver):
         result = await module.run(ModuleInput(target="example.com"))
@@ -135,12 +140,12 @@ async def test_txt_record_spf_classified(module: DNSEnumModule) -> None:
 @pytest.mark.asyncio
 async def test_txt_record_dmarc_classified(module: DNSEnumModule) -> None:
     """TXT records with DMARC are tagged in metadata."""
-    dmarc_rdata = make_rdata(
-        dns.rdatatype.TXT, "v=DMARC1; p=reject; rua=mailto:dmarc@example.com"
+    dmarc_rdata = make_rdata(dns.rdatatype.TXT, "v=DMARC1; p=reject; rua=mailto:dmarc@example.com")
+    resolver = make_resolver_with(
+        {
+            dns.rdatatype.TXT: make_answer(dmarc_rdata),
+        }
     )
-    resolver = make_resolver_with({
-        dns.rdatatype.TXT: make_answer(dmarc_rdata),
-    })
 
     with patch.object(module, "_build_resolver", return_value=resolver):
         result = await module.run(ModuleInput(target="example.com"))
@@ -153,9 +158,11 @@ async def test_txt_record_dmarc_classified(module: DNSEnumModule) -> None:
 async def test_ns_records_queried(module: DNSEnumModule) -> None:
     """NS records produce findings."""
     ns_rdata = make_rdata(dns.rdatatype.NS, "ns1.example.com")
-    resolver = make_resolver_with({
-        dns.rdatatype.NS: make_answer(ns_rdata),
-    })
+    resolver = make_resolver_with(
+        {
+            dns.rdatatype.NS: make_answer(ns_rdata),
+        }
+    )
 
     with patch.object(module, "_build_resolver", return_value=resolver):
         result = await module.run(ModuleInput(target="example.com"))
@@ -168,13 +175,15 @@ async def test_ns_records_queried(module: DNSEnumModule) -> None:
 @pytest.mark.asyncio
 async def test_multiple_a_records(module: DNSEnumModule) -> None:
     """Multiple A records produce multiple findings."""
-    resolver = make_resolver_with({
-        dns.rdatatype.A: make_answer(
-            make_rdata(dns.rdatatype.A, "1.1.1.1"),
-            make_rdata(dns.rdatatype.A, "2.2.2.2"),
-            make_rdata(dns.rdatatype.A, "3.3.3.3"),
-        ),
-    })
+    resolver = make_resolver_with(
+        {
+            dns.rdatatype.A: make_answer(
+                make_rdata(dns.rdatatype.A, "1.1.1.1"),
+                make_rdata(dns.rdatatype.A, "2.2.2.2"),
+                make_rdata(dns.rdatatype.A, "3.3.3.3"),
+            ),
+        }
+    )
 
     with patch.object(module, "_build_resolver", return_value=resolver):
         result = await module.run(ModuleInput(target="example.com"))
@@ -186,13 +195,12 @@ async def test_multiple_a_records(module: DNSEnumModule) -> None:
 
 # ---- Error handling ----
 
+
 @pytest.mark.asyncio
 async def test_nxdomain_aborts_early(module: DNSEnumModule) -> None:
     """NXDOMAIN stops further queries (domain doesn't exist)."""
     resolver = MagicMock()
-    resolver.resolve = MagicMock(
-        side_effect=dns.resolver.NXDOMAIN("domain does not exist")
-    )
+    resolver.resolve = MagicMock(side_effect=dns.resolver.NXDOMAIN("domain does not exist"))
 
     with patch.object(module, "_build_resolver", return_value=resolver):
         result = await module.run(ModuleInput(target="nonexistent.example"))
@@ -204,6 +212,7 @@ async def test_nxdomain_aborts_early(module: DNSEnumModule) -> None:
 @pytest.mark.asyncio
 async def test_timeout_aborts_remaining_record_types(module: DNSEnumModule) -> None:
     """Timeout on one record type aborts the remaining record queries (resilience fix)."""
+
     # A succeeds, then MX times out (loop breaks before TXT/CNAME/SOA/SRV/etc.)
     def _resolve(domain: str, rtype: int, **kwargs: object) -> MagicMock:
         if rtype == dns.rdatatype.A:
@@ -228,6 +237,7 @@ async def test_timeout_aborts_remaining_record_types(module: DNSEnumModule) -> N
 
 # ---- AXFR ----
 
+
 @pytest.mark.asyncio
 async def test_axfr_refused_no_finding(module: DNSEnumModule) -> None:
     """If AXFR is refused (most common), no AXFR finding is produced."""
@@ -242,11 +252,13 @@ async def test_axfr_refused_no_finding(module: DNSEnumModule) -> None:
     resolver = MagicMock()
     resolver.resolve = MagicMock(side_effect=_resolve)
 
-    with patch.object(module, "_build_resolver", return_value=resolver):
+    with (
+        patch.object(module, "_build_resolver", return_value=resolver),
+        patch("dns.query.xfr", side_effect=Exception("AXFR refused")),
+    ):
         # _attempt_axfr uses dns.query.xfr + dns.zone.from_xfr, which would
         # raise in a real env. With mocks, we let it raise.
-        with patch("dns.query.xfr", side_effect=Exception("AXFR refused")):
-            result = await module.run(ModuleInput(target="example.com"))
+        result = await module.run(ModuleInput(target="example.com"))
 
     assert not any(f.source == "dns_axfr" for f in result.findings)
 
@@ -268,10 +280,8 @@ async def test_axfr_succeeds_produces_high_severity_finding(module: DNSEnumModul
     mock_zone = MagicMock()
     mock_zone.nodes = [MagicMock() for _ in range(42)]  # 42 records
 
-    with patch.object(module, "_build_resolver", return_value=resolver):
-        with patch("dns.query.xfr", return_value=MagicMock()):
-            with patch("dns.zone.from_xfr", return_value=mock_zone):
-                result = await module.run(ModuleInput(target="example.com"))
+    with patch.object(module, "_build_resolver", return_value=resolver), patch("dns.query.xfr", return_value=MagicMock()), patch("dns.zone.from_xfr", return_value=mock_zone):
+        result = await module.run(ModuleInput(target="example.com"))
 
     axfr_findings = [f for f in result.findings if f.source == "dns_axfr"]
     assert len(axfr_findings) == 1
@@ -282,6 +292,7 @@ async def test_axfr_succeeds_produces_high_severity_finding(module: DNSEnumModul
 
 
 # ---- rdata formatting ----
+
 
 def test_format_rdata_a(module: DNSEnumModule) -> None:
     """A record formatting."""
@@ -383,6 +394,7 @@ def test_format_rdata_soa(module: DNSEnumModule) -> None:
 
 # ---- NoNameservers error path ----
 
+
 @pytest.mark.asyncio
 async def test_no_nameservers_aborts_remaining_record_types(module: DNSEnumModule) -> None:
     """When all resolvers fail, NoNameservers is recorded and the loop breaks early."""
@@ -442,9 +454,8 @@ async def test_axfr_timeout_caught_silently(module: DNSEnumModule) -> None:
     resolver = MagicMock()
     resolver.resolve = MagicMock(side_effect=_resolve)
 
-    with patch.object(module, "_build_resolver", return_value=resolver):
-        with patch("asyncio.wait_for", side_effect=TimeoutError):
-            result = await module.run(ModuleInput(target="example.com"))
+    with patch.object(module, "_build_resolver", return_value=resolver), patch("asyncio.wait_for", side_effect=TimeoutError):
+        result = await module.run(ModuleInput(target="example.com"))
 
     # No AXFR findings, no errors
     assert not any(f.source == "dns_axfr" for f in result.findings)
@@ -452,6 +463,7 @@ async def test_axfr_timeout_caught_silently(module: DNSEnumModule) -> None:
 
 
 # ---- Metadata ----
+
 
 def test_module_metadata(module: DNSEnumModule) -> None:
     """Module has the right Tier 1 metadata."""
@@ -462,6 +474,7 @@ def test_module_metadata(module: DNSEnumModule) -> None:
 
 
 # ---- Resolver config ----
+
 
 def test_resolver_uses_public_servers(module: DNSEnumModule) -> None:
     """Resolver is configured with public DNS servers (no auth required)."""

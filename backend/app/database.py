@@ -54,6 +54,7 @@ if settings.DATABASE_URL.startswith("sqlite"):
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.close()
 
+
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
