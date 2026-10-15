@@ -21,16 +21,17 @@ clear that cache and set the env var per test.
 
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from alembic.config import Config as AlembicConfig
-from alembic import command as alembic_command
+import sqlalchemy
 from sqlalchemy import create_engine, event, text
+
+from alembic import command as alembic_command
+from alembic.config import Config as AlembicConfig
 
 
 def _make_sqlite_engine(db_url: str):
@@ -43,7 +44,7 @@ def _make_sqlite_engine(db_url: str):
     engine = create_engine(db_url)
 
     @event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_conn, _conn_record):  # noqa: ANN001
+    def _set_sqlite_pragma(dbapi_conn, _conn_record):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA journal_mode=WAL")
@@ -123,7 +124,7 @@ def _seed_audit_rows(db_url: str, n: int) -> None:
     engine.dispose()
 
 
-@pytest.fixture
+@pytest.fixture()
 def isolated_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """Per-test SQLite file. Pre-seeds the audit_log schema so revisions
     that depend on it can apply cleanly.
@@ -215,15 +216,14 @@ def test_revision_1_email_unique_constraint(isolated_db: str) -> None:
             ),
             {"id": user_id_1, "email": "dup@example.com"},
         )
-    with pytest.raises(Exception):  # IntegrityError on UNIQUE email
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO auth_users (id, email, password_hash, role, scopes, created_at) "
-                    "VALUES (:id, :email, 'h', 'operator', '[]', '2026-01-01 00:00:00')"
-                ),
-                {"id": user_id_2, "email": "dup@example.com"},
-            )
+    with pytest.raises(sqlalchemy.exc.IntegrityError), engine.begin() as conn:  # UNIQUE email
+        conn.execute(
+            text(
+                "INSERT INTO auth_users (id, email, password_hash, role, scopes, created_at) "
+                "VALUES (:id, :email, 'h', 'operator', '[]', '2026-01-01 00:00:00')"
+            ),
+            {"id": user_id_2, "email": "dup@example.com"},
+        )
     engine.dispose()
 
 
@@ -254,16 +254,15 @@ def test_revision_1_token_hash_unique_constraint(isolated_db: str) -> None:
             ),
             {"id": rt_id_1, "uid": user_id, "fid": family_id},
         )
-    with pytest.raises(Exception):  # IntegrityError on UNIQUE token_hash
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO refresh_tokens "
-                    "(id, user_id, token_hash, family_id, expires_at, created_at) "
-                    "VALUES (:id, :uid, 'same-hash', :fid, '2099-01-01 00:00:00', '2026-01-01 00:00:00')"
-                ),
-                {"id": rt_id_2, "uid": user_id, "fid": family_id},
-            )
+    with pytest.raises(sqlalchemy.exc.IntegrityError), engine.begin() as conn:  # UNIQUE token_hash
+        conn.execute(
+            text(
+                "INSERT INTO refresh_tokens "
+                "(id, user_id, token_hash, family_id, expires_at, created_at) "
+                "VALUES (:id, :uid, 'same-hash', :fid, '2099-01-01 00:00:00', '2026-01-01 00:00:00')"
+            ),
+            {"id": rt_id_2, "uid": user_id, "fid": family_id},
+        )
     engine.dispose()
 
 
@@ -324,9 +323,7 @@ def test_revision_1_round_trip(isolated_db: str) -> None:
 
     with engine.connect() as conn:
         post_count = conn.execute(text("SELECT COUNT(*) FROM audit_log")).scalar_one()
-        post_action = conn.execute(
-            text("SELECT action FROM audit_log WHERE id = 1")
-        ).scalar_one()
+        post_action = conn.execute(text("SELECT action FROM audit_log WHERE id = 1")).scalar_one()
     assert post_count == 1
     assert post_action == "BASELINE"
     engine.dispose()
@@ -374,7 +371,9 @@ def test_revision_2_backfills_legacy_username(isolated_db: str) -> None:
         ).fetchall()
     assert len(rows) == 5
     for user_id, username in rows:
-        assert username == "legacy", f"row user_id={user_id} username={username!r}, expected 'legacy'"
+        assert (
+            username == "legacy"
+        ), f"row user_id={user_id} username={username!r}, expected 'legacy'"
     engine.dispose()
 
 

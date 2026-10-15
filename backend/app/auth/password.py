@@ -44,8 +44,8 @@ _MEMORY_COST = 65_536  # KiB
 _PARALLELISM = 4
 
 # Spec §1.1: LoginRequest.min_password_length=12. Enforced at hash time so
-    # callers (CLI, /auth/login router) cannot store a sub-12-char password
-    # even if their own validation is bypassed by a refactor.
+# callers (CLI, /auth/login router) cannot store a sub-12-char password
+# even if their own validation is bypassed by a refactor.
 MIN_PASSWORD_LENGTH = 12
 
 
@@ -100,8 +100,7 @@ class PasswordService:
 
         phc_hasher = (
             _PHCR
-            if (time_cost, memory_cost, parallelism)
-            == (_TIME_COST, _MEMORY_COST, _PARALLELISM)
+            if (time_cost, memory_cost, parallelism) == (_TIME_COST, _MEMORY_COST, _PARALLELISM)
             else PasswordHasher(
                 time_cost=time_cost,
                 memory_cost=memory_cost,
@@ -166,8 +165,11 @@ def _read_pepper() -> str:
     Empty string is allowed at test-time so unit tests don't need to set up
     a fixture for every test. Production deployments MUST set this in the
     deployment manifest — a missing pepper produces a hash that still works
-    but is no longer defense-in-depth. The PR-J1.6 Settings validator
-    fails-loud on missing values in production.
+    but is no longer defense-in-depth. The ``Settings._validate_pepper_secret``
+    field validator (``backend/app/config.py``) raises
+    ``pydantic.ValidationError`` at boot when ``APP_ENV=production`` and the
+    value is empty or below 32 bytes; see
+    ``tests/test_settings_pepper_secret.py`` for the contract.
     """
     return os.environ.get("PEPPER_SECRET", "")
 

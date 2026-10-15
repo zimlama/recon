@@ -25,7 +25,6 @@ from app.auth.password import (
     WeakPasswordError,
 )
 
-
 # ---------------------------------------------------------------------------
 # Hash format + determinism
 # ---------------------------------------------------------------------------
@@ -35,9 +34,9 @@ def test_hash_returns_argon2id_phc_string(monkeypatch: pytest.MonkeyPatch) -> No
     """hash() returns a PHC string starting with ``$argon2id$...``."""
     monkeypatch.setenv("PEPPER_SECRET", "x" * 32)
     h = PasswordService.hash("correct horse battery staple")
-    assert h.startswith("$argon2id$"), (
-        f"hash output {h[:40]!r} does not start with the argon2id PHC prefix"
-    )
+    assert h.startswith(
+        "$argon2id$"
+    ), f"hash output {h[:40]!r} does not start with the argon2id PHC prefix"
     # The PHC string must contain the OWASP 2024 parameters we configured.
     assert "m=65536" in h, "memory_cost=65536 not embedded in PHC"
     assert "t=3" in h, "time_cost=3 not embedded in PHC"
@@ -68,13 +67,9 @@ def test_hash_changes_when_pepper_changes(
 
     assert h_old != h_new, "pepper rotation did not change the hash output"
     # And the new hash MUST verify under the new pepper:
-    assert PasswordService.verify(
-        "correct horse battery staple", h_new, pepper="B" * 32
-    )
+    assert PasswordService.verify("correct horse battery staple", h_new, pepper="B" * 32)
     # And the old hash MUST NOT verify under the new pepper:
-    assert not PasswordService.verify(
-        "correct horse battery staple", h_old, pepper="B" * 32
-    )
+    assert not PasswordService.verify("correct horse battery staple", h_old, pepper="B" * 32)
 
 
 # ---------------------------------------------------------------------------
@@ -210,13 +205,9 @@ def test_pepper_rotation_invalidates_old_hashes() -> None:
     """
     pw = "correct horse battery staple"
     h_old = PasswordService.hash(pw, pepper="OLD-PEPPER-VALUE-PAD-PAD-PAD-PAD-PAD")
-    assert PasswordService.verify(
-        pw, h_old, pepper="OLD-PEPPER-VALUE-PAD-PAD-PAD-PAD-PAD"
-    )
+    assert PasswordService.verify(pw, h_old, pepper="OLD-PEPPER-VALUE-PAD-PAD-PAD-PAD-PAD")
     # Rotate the pepper:
-    assert not PasswordService.verify(
-        pw, h_old, pepper="NEW-PEPPER-VALUE-PAD-PAD-PAD-PAD-PAD"
-    )
+    assert not PasswordService.verify(pw, h_old, pepper="NEW-PEPPER-VALUE-PAD-PAD-PAD-PAD-PAD")
 
 
 # ---------------------------------------------------------------------------

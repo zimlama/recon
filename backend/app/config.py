@@ -250,6 +250,72 @@ class Settings(BaseSettings):
             raise ValueError("CORS_ORIGINS cannot be empty")
         return v.strip()
 
+    @field_validator("PEPPER_SECRET")
+    @classmethod
+    def _validate_pepper_secret(cls, v: str, info: Any) -> str:
+        """Fail-loud when ``PEPPER_SECRET`` is missing or weak in production.
+
+        R1 Risk review (PR-J1 B-2): the PasswordService reads
+        ``PEPPER_SECRET`` via ``os.environ.get(..., "")``. Without this
+        validator, an empty pepper boots happily, the deployment manifest
+        publishes empty, and a stolen DB can be brute-forced at full
+        argon2 speed (no second secret to crack).
+
+        Operator-friendly rule (matches PERSON_DOSSIER_ENCRYPTION_KEY):
+        empty / short values are accepted in development/staging/test so
+        unit tests and local operators can boot without ceremony; the
+        fail-loud gate fires only in ``APP_ENV=production``.
+        """
+        env = info.data.get("APP_ENV", "development")
+        if env == "production":
+            if v == "":
+                raise ValueError(
+                    "PEPPER_SECRET must be set in production. "
+                    "Generate one with: openssl rand -base64 32"
+                )
+            if len(v) < 32:
+                raise ValueError(
+                    f"PEPPER_SECRET must be at least 32 bytes when set; " f"got {len(v)} bytes"
+                )
+        elif v != "" and len(v) < 32:
+            # Dev/staging/test: validate length when an operator does
+            # set a value, so a typo like ``PEPPER_SECRET=x`` doesn't
+            # silently weaken the production-style deployment that
+            # promotes with APP_ENV unchanged.
+            raise ValueError(
+                f"PEPPER_SECRET must be at least 32 bytes when set; " f"got {len(v)} bytes"
+            )
+        return v
+
+    @field_validator("REFRESH_HASH_KEY")
+    @classmethod
+    def _validate_refresh_hash_key(cls, v: str, info: Any) -> str:
+        """Fail-loud when ``REFRESH_HASH_KEY`` is missing or weak in production.
+
+        Refresh-token hashes are stored at rest (PR-J2). If the HMAC
+        key is empty, the storage falls back to an unsalted SHA-256,
+        which is publicly brute-forceable for 256-bit-entropy tokens.
+        A leaked DB then leaks live refresh tokens.
+
+        Same leniency rules as ``PEPPER_SECRET``.
+        """
+        env = info.data.get("APP_ENV", "development")
+        if env == "production":
+            if v == "":
+                raise ValueError(
+                    "REFRESH_HASH_KEY must be set in production. "
+                    "Generate one with: openssl rand -base64 32"
+                )
+            if len(v) < 32:
+                raise ValueError(
+                    f"REFRESH_HASH_KEY must be at least 32 bytes when set; " f"got {len(v)} bytes"
+                )
+        elif v != "" and len(v) < 32:
+            raise ValueError(
+                f"REFRESH_HASH_KEY must be at least 32 bytes when set; " f"got {len(v)} bytes"
+            )
+        return v
+
     @field_validator("tools_only_free", mode="before")
     @classmethod
     def _validate_tools_only_free(cls, v: object) -> bool:

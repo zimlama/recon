@@ -33,9 +33,13 @@ def test_settings_is_production() -> None:
     """is_production is True only when APP_ENV is production."""
     # Provide a non-empty key so the production-mode validator passes —
     # see test_encryption_key_required_in_production for the missing-key path.
+    # PR-J1 also requires PEPPER_SECRET and REFRESH_HASH_KEY to be set in
+    # production (test_settings_pepper_secret.py for the missing-key path).
     s = Settings(
         APP_ENV="production",
         PERSON_DOSSIER_ENCRYPTION_KEY="ZmFrZS1mZXJuZXQta2V5LXdlLWluc3BlY3QtY2Y=",
+        PEPPER_SECRET="p" * 32,
+        REFRESH_HASH_KEY="k" * 32,
     )
     assert s.is_production is True
 
@@ -83,9 +87,13 @@ def test_encryption_key_present_in_production_is_accepted() -> None:
     # Fernet.generate_key() returns a URL-safe base64 32-byte key.
     # We use a value-shaped valid one — value parsing happens lazily in
     # `encryption.encrypt_email()`; Settings only checks that *some*
-    # value is present in production.
+    # value is present in production. PR-J1 also requires PEPPER_SECRET
+    # and REFRESH_HASH_KEY to be set in production (see
+    # test_settings_pepper_secret.py).
     s = Settings(
         APP_ENV="production",
         PERSON_DOSSIER_ENCRYPTION_KEY="ZmFrZS1mZXJuZXQta2V5LXdlLWluc3BlY3QtY2Y=",  # 32B b64 fake
+        PEPPER_SECRET="p" * 32,
+        REFRESH_HASH_KEY="k" * 32,
     )
     assert s.PERSON_DOSSIER_ENCRYPTION_KEY.startswith("ZmFrZS")

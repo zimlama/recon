@@ -13,10 +13,10 @@ import os
 from pathlib import Path
 
 import pytest
-from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
 from alembic import command
+from alembic.config import Config
 
 # Skip the whole module if alembic is unavailable — keeps the rest of
 # the suite runnable in minimal environments.
@@ -153,9 +153,9 @@ def test_identity_map_migration_round_trip(tmp_path: Path) -> None:
 
     _run_with_target_db(target_url, downgrade_to_roe)
     inspector = inspect(eng)
-    assert not inspector.has_table("identity_map"), (
-        "identity_map should be gone after downgrading past its rev"
-    )
+    assert not inspector.has_table(
+        "identity_map"
+    ), "identity_map should be gone after downgrading past its rev"
     assert inspector.has_table("roes"), "roes should survive downgrade"
     assert inspector.has_table("sign_offs"), "sign_offs should survive downgrade"
 
