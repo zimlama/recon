@@ -184,6 +184,65 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Authentication (PR-J1, sec-auth-jwt Issue #29) ----
+    # Field declarations only. PR-J3 / J4 wire these into the auth
+    # service; PR-J1 just makes the env-var surface explicit so the
+    # deployment manifests can be authored ahead of code that reads them.
+    PEPPER_SECRET: str = Field(
+        default="",
+        description=(
+            "Server-side pepper for argon2id (PR-J1 PasswordService) "
+            "and HMAC-SHA256 refresh-token hashing. MUST be at least 32 "
+            "bytes; rotate via docs/auth-operations.md playbook (rotating "
+            "invalidates every stored hash)."
+        ),
+    )
+    JWT_PRIVATE_KEY_PATH: str | None = Field(
+        default=None,
+        description=(
+            "Absolute or relative path to the RS256 private key PEM "
+            "(mode 0600). Generate via openssl genpkey -algorithm RSA "
+            "-pkeyopt rsa_keygen_bits:2048. PR-J1 reads only."
+        ),
+    )
+    JWT_PUBLIC_KEY_PATH: str | None = Field(
+        default=None,
+        description=(
+            "Absolute or relative path to the matching RS256 public key " "PEM. PR-J1 reads only."
+        ),
+    )
+    JWT_ACCESS_TTL_SECONDS: int = Field(
+        default=900,
+        ge=60,
+        le=3600,
+        description="RS256 access token TTL. Spec §7 clamp [60, 3600].",
+    )
+    JWT_REFRESH_TTL_SECONDS: int = Field(
+        default=604_800,  # 7 days
+        ge=3600,
+        le=2_592_000,  # 30 days
+        description="Opaque refresh token TTL. Spec §7 clamp [3600, 2592000].",
+    )
+    REFRESH_HASH_KEY: str = Field(
+        default="",
+        description=(
+            "HMAC-SHA256 key used to hash refresh tokens at rest (PR-J2). "
+            "MUST be at least 32 bytes. Never logged; never persisted in DB."
+        ),
+    )
+    JWT_ISSUER: str = Field(
+        default="recon-auth",
+        description="``iss`` claim. PR-J3 JwtKeyManager reads this.",
+    )
+    ALLOW_LEGACY_API_KEY: bool = Field(
+        default=True,
+        description=(
+            "When False, the dual-auth window is closed and RECON_API_KEY "
+            "no longer authenticates anyone. Default True for the "
+            "v0.1→v0.2 transition; set False at v0.3.0 (PR-J8)."
+        ),
+    )
+
     @field_validator("CORS_ORIGINS")
     @classmethod
     def _validate_cors(cls, v: str) -> str:
