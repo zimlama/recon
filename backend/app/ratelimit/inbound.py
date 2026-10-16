@@ -280,9 +280,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 policy = pol
                 break
 
-        if policy is None:
-            # Fail-open per REQ-INB-016 #3 + REQ-INB-006 acceptance.
+        # Narrow the optional types before consuming them as dict keys.
+        # `endpoint` is set iff the loop body runs (regex.pattern is always str),
+        # but mypy can't infer the invariant — pin it here once.
+        if endpoint is None or policy is None:
             return await call_next(request)
+        endpoint = endpoint  # type-narrow: now str (mypy: now-asserted)
+        policy = policy      # type-narrow: now tuple[int, int]
 
         _limit, _window = policy
         # Register the policy in the limiter so is_allowed can consult it.
