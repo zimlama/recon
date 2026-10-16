@@ -8,15 +8,13 @@ MITRE ATT&CK: T1596.002, T1596.003, T1589.001
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import asyncio
 import json
-import logging
 import time
 
 import httpx
 
+from app.logging import get_logger
 from app.models import ModuleTier
 from app.modules.base import (
     BaseReconModule,

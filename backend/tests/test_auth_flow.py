@@ -1,3 +1,4 @@
+# ruff: noqa: E402  # tests intentionally position imports after module-level vars (del _db)
 """End-to-end auth flow tests (PR-J3.5+J3.8 integration).
 
 Exercises the new /api/v1/auth/* endpoints via the FastAPI test client,
@@ -29,6 +30,7 @@ _os.environ.setdefault("ALLOW_LEGACY_API_KEY", "false")
 # function (the conftest's sqlite:///:memory: creates per-connection
 # databases, which won't share rows).
 import tempfile as _tf
+
 _test_db_dir = _tf.mkdtemp(prefix="recon-auth-test-")
 _os.environ["DATABASE_URL"] = f"sqlite:///{_test_db_dir}/auth.db"
 del _test_db_dir
@@ -41,11 +43,8 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import AsyncClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from app.auth.password import PasswordService
-from app.auth.refresh import RefreshService
 from app.config import get_settings
 from app.database import Base
 from app.main import create_app
@@ -84,10 +83,10 @@ def keypair_paths(
     # Set the env vars so the app's lifespan picks them up.
     os.environ["JWT_PRIVATE_KEY_PATH"] = str(p)
     os.environ["JWT_PUBLIC_KEY_PATH"] = str(pu)
-    yield p, pu
+    return p, pu
 
 
-@pytest.fixture()
+@pytest.fixture
 def app_with_db(keypair_paths: tuple[Path, Path]) -> Iterator:
     """Build an app with a clean DB for each test (drop+create_all)."""
     # Reset settings cache so the new env values (keypair paths) are picked up.
@@ -102,15 +101,15 @@ def app_with_db(keypair_paths: tuple[Path, Path]) -> Iterator:
     Base.metadata.drop_all(bind=engine)
 
 
-@pytest.fixture()
+@pytest.fixture
 async def client(app_with_db) -> AsyncClient:
     """HTTPX async client wired to the lifespan'd app."""
     from httpx import ASGITransport
 
     transport = ASGITransport(app=app_with_db)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        async with app_with_db.router.lifespan_context(app_with_db):
-            yield ac
+    async with AsyncClient(transport=transport, base_url="http://test") as ac, \
+            app_with_db.router.lifespan_context(app_with_db):
+        yield ac
 
 
 # ---------------------------------------------------------------------------

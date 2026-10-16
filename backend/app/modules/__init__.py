@@ -11,9 +11,6 @@ Single source of truth for which modules are available. Adding a new module:
 from __future__ import annotations
 
 from app.logging import get_logger
-
-import logging
-
 from app.modules.base import BaseReconModule
 from app.modules.breach_data import BreachDataModule
 from app.modules.certificate_transparency import CertificateTransparencyModule

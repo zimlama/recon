@@ -8,8 +8,6 @@ Run with: `recon mcp` or `python -m app.mcp.server`
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import asyncio
 import json
 import logging
@@ -19,6 +17,7 @@ from typing import Any
 
 from app.database import SessionLocal
 from app.handoff.exporter import export_handoff
+from app.logging import get_logger
 from app.models import Handoff, Job, JobStatus, ModuleRun
 from app.modules import MODULE_REGISTRY
 

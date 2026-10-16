@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
-import logging
-
 import httpx
 from pydantic import ValidationError
 
 from app.llm.client import LLMClient, LLMError
 from app.llm.prompts import get_prompt
 from app.llm.schemas import LDMValidationResult
+from app.logging import get_logger
 from app.modules.base import BaseReconModule, Finding
 
 logger = get_logger(__name__)

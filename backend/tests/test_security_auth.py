@@ -70,7 +70,7 @@ _TEST_PASSWORD = "correct horse battery staple"  # 28 chars — well over the 12
 _TEST_PEPPER = "p" * 64  # realistic length; long enough to avoid false positives
 
 
-@pytest.fixture()
+@pytest.fixture
 def engine():
     """Per-test in-memory SQLite engine with auth tables only.
 
@@ -93,7 +93,7 @@ def engine():
     eng.dispose()
 
 
-@pytest.fixture()
+@pytest.fixture
 def session_factory(engine):
     """Return a ``session_factory`` callable for ``RefreshService``."""
     from sqlalchemy.orm import sessionmaker
@@ -101,7 +101,7 @@ def session_factory(engine):
     return sessionmaker(bind=engine)
 
 
-@pytest.fixture()
+@pytest.fixture
 def service_with_engine(engine, session_factory):
     """RefreshService wired to a per-test in-memory engine.
 
@@ -120,7 +120,7 @@ def service_with_engine(engine, session_factory):
     os.environ.pop("PEPPER_SECRET", None)
 
 
-@pytest.fixture()
+@pytest.fixture
 def seeded_user(engine, session_factory):
     """Pre-seeded AuthUser so the service has a target user_id.
 

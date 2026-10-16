@@ -26,7 +26,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-
 # Standard logging kwargs that are NOT part of the structured payload.
 # Any kwarg NOT in this set is treated as a structured-logging field
 # and merged into the `extra` dict passed to the underlying logger.

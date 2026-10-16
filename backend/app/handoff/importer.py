@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import json
-import logging
 from pathlib import Path
 
 from app.handoff.schema import HandoffPacket
+from app.logging import get_logger
 
 logger = get_logger(__name__)
 

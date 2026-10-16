@@ -8,10 +8,7 @@ MITRE ATT&CK: T1590.002, T1596.001
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import asyncio
-import logging
 import time
 from typing import Any, cast
 
@@ -20,6 +17,7 @@ import dns.rdatatype
 import dns.resolver
 import dns.zone
 
+from app.logging import get_logger
 from app.models import ModuleTier
 from app.modules.base import (
     BaseReconModule,

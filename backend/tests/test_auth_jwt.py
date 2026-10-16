@@ -48,7 +48,7 @@ from app.auth.jwt import (
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def rsa_keypair() -> tuple[bytes, bytes]:
     """Generate a fresh 2048-bit RSA keypair as (private_pem, public_pem)."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -64,7 +64,7 @@ def rsa_keypair() -> tuple[bytes, bytes]:
     return private_pem, public_pem
 
 
-@pytest.fixture()
+@pytest.fixture
 def keypair_paths(tmp_path: Path, rsa_keypair: tuple[bytes, bytes]) -> Iterator[tuple[Path, Path]]:
     """Write the keypair to disk and yield (private_path, public_path)."""
     priv, pub = rsa_keypair
@@ -481,7 +481,7 @@ def test_constructor_raises_when_keys_are_not_a_keypair(keypair_paths, tmp_path)
     """
     priv_path, _ = keypair_paths
     # Write a public key that DOES NOT match the private key.
-    other_priv, other_pub = _fresh_keypair_pems()
+    _other_priv, other_pub = _fresh_keypair_pems()
     other_pub_path = tmp_path / "wrong_pub.pem"
     other_pub_path.write_bytes(other_pub)
     # Touch the private so it exists.

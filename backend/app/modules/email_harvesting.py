@@ -13,10 +13,7 @@ MITRE ATT&CK: T1589.002
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import asyncio
-import logging
 import os
 import re
 import shutil
@@ -26,6 +23,7 @@ from pathlib import Path
 
 import httpx
 
+from app.logging import get_logger
 from app.models import ModuleTier
 from app.modules.base import (
     BaseReconModule,

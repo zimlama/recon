@@ -9,15 +9,13 @@ MITRE ATT&CK: T1593.002
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
-import logging
 import time
 from typing import Any, cast
 
 import httpx
 
 from app.config import get_settings
+from app.logging import get_logger
 from app.models import ModuleTier
 from app.modules.base import (
     BaseReconModule,

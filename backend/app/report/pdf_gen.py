@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import asyncio
 import contextlib
-import logging
 import os
 import shutil
 import signal
 from pathlib import Path
 
 from app.config import get_settings
+from app.logging import get_logger
 from app.report.css_style import load_css
 
 logger = get_logger(__name__)

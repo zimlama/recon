@@ -12,18 +12,16 @@ MITRE ATT&CK: T1593
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import asyncio
 import contextlib
 import json
-import logging
 import re
 import shutil
 import time
 from typing import Any, cast
 from urllib.parse import urlencode
 
+from app.logging import get_logger
 from app.models import ModuleTier
 from app.modules.base import (
     BaseReconModule,

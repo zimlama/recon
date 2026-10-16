@@ -33,7 +33,6 @@ in the middleware so log shape stays uniform across endpoints.
 
 from __future__ import annotations
 
-import secrets
 import uuid
 from dataclasses import dataclass
 
@@ -51,23 +50,22 @@ from app.auth.jwt import JwtKeyManager
 from app.auth.models import (
     AuthUser,
     auth_user_to_dict,
-    encode_scopes,
 )
-
 
 # Spec-defined defaults for failed-login lockout (section 4 INV-5).
 # Lockout was deferred to the controller layer in PR-J1; the constants
 # live here so this service is self-contained.
 MAX_FAILED_LOGINS = 5
 LOCKOUT_DURATION_SECONDS = 900
-from app.auth.password import PasswordService, WeakPasswordError
-from app.auth.refresh import (
+from app.auth.password import PasswordService, WeakPasswordError  # noqa: E402
+from app.auth.refresh import (  # noqa: E402
     FamilyRevokedError,
     RefreshService,
+)
+from app.auth.refresh import (  # noqa: E402
     TokenInvalidError as RefreshTokenInvalidError,
 )
-from app.auth.schemas import UserResponse
-
+from app.auth.schemas import UserResponse  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Public return types — keep them lean (router shapes them into Pydantic)

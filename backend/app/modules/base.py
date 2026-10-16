@@ -12,10 +12,7 @@ Each module is a SUBAGENT in the recon pipeline:
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import abc
-import logging
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -24,16 +21,17 @@ import httpx
 from pydantic import BaseModel, Field
 
 from app.llm.schemas import LDMValidationResult
+from app.logging import get_logger
 from app.models import FindingType, ModuleTier
-from app.utils.network import filter_public_ips  # noqa: F401 — SSRF contract anchor
+from app.utils.network import filter_public_ips
 
 __all__ = [
     "BaseReconModule",
     "Finding",
     "FindingType",
+    "LDMValidationResult",
     "ModuleTier",
     "TouchClass",
-    "LDMValidationResult",
     "filter_public_ips",
 ]
 

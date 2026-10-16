@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
-import logging
-
 from app.handoff.exporter import export_handoff
+from app.logging import get_logger
 
 logger = get_logger(__name__)
 

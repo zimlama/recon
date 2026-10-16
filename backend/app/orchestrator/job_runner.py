@@ -13,16 +13,14 @@ Per module:
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import asyncio
-import logging
 import time
 from datetime import timedelta
 from typing import Any
 
 from app.config import get_settings
 from app.database import SessionLocal
+from app.logging import get_logger
 from app.models import (
     AIValidation,
     Job,

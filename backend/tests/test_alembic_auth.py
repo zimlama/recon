@@ -28,10 +28,10 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy
+from alembic.config import Config as AlembicConfig
 from sqlalchemy import create_engine, event, text
 
 from alembic import command as alembic_command
-from alembic.config import Config as AlembicConfig
 
 
 def _make_sqlite_engine(db_url: str):
@@ -124,7 +124,7 @@ def _seed_audit_rows(db_url: str, n: int) -> None:
     engine.dispose()
 
 
-@pytest.fixture()
+@pytest.fixture
 def isolated_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """Per-test SQLite file. Pre-seeds the audit_log schema so revisions
     that depend on it can apply cleanly.
