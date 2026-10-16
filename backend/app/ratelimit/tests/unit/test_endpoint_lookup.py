@@ -79,6 +79,116 @@ async def test_dynamic_segment_matches_template_via_regex(lookup_app: FastAPI) -
 
 
 @pytest.mark.asyncio
+async def test_handoff_packet_url_matches_template_via_regex() -> None:
+    """PR-J3.6.5 (Issue #60): ``GET /api/v1/jobs/<job_id>/handoff`` matches
+    ``/api/v1/jobs/{job_id}/handoff`` and rejects at the policy limit.
+
+    Mirrors ``test_dynamic_segment_matches_template_via_regex`` for
+    the handoff packet route. The endpoint key in the 429 body must
+    be the regex string with anchors — same lookup-key contract as
+    the cancel route (design.md §Decision M / spec REQ-INB-007).
+    """
+    app = FastAPI()
+    patterns = compile_rate_limit_patterns({
+        "/api/v1/jobs/{job_id}/handoff": (2, 60),
+    })
+    app.state.rate_limit_patterns = patterns
+
+    @app.get("/api/v1/jobs/{job_id}/handoff")
+    async def _packet(request: Request) -> dict[str, str]:
+        return {"status": "ok"}
+
+    app.add_middleware(RateLimitMiddleware)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        r1 = await ac.get("/api/v1/jobs/abc/handoff")
+        r2 = await ac.get("/api/v1/jobs/xyz/handoff")
+        assert r1.status_code == 200, r1.text
+        assert r2.status_code == 200, r2.text
+        r3 = await ac.get("/api/v1/jobs/123/handoff")
+        assert r3.status_code == 429, r3.text
+        body = r3.json()
+        assert body["endpoint"] == r"^/api/v1/jobs/[^/]+/handoff$", (
+            f"Endpoint key must be the regex string; got {body['endpoint']!r}"
+        )
+        assert body["scope"] in ("ip", "user"), (
+            f"Scope must be one of ip/user; got {body['scope']!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_handoff_download_url_matches_template_via_regex() -> None:
+    """PR-J3.6.5 (Issue #60): ``GET /api/v1/jobs/<job_id>/handoff/download``
+    matches ``/api/v1/jobs/{job_id}/handoff/download`` and rejects at
+    the policy limit.
+
+    The download route is the load-bearing defense for threat T2
+    (worker starvation via repeated FileResponse of ~MB JSON). It
+    must produce a 429 with the download regex as the lookup key.
+    """
+    app = FastAPI()
+    patterns = compile_rate_limit_patterns({
+        "/api/v1/jobs/{job_id}/handoff/download": (2, 60),
+    })
+    app.state.rate_limit_patterns = patterns
+
+    @app.get("/api/v1/jobs/{job_id}/handoff/download")
+    async def _download(request: Request) -> dict[str, str]:
+        return {"status": "ok"}
+
+    app.add_middleware(RateLimitMiddleware)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        r1 = await ac.get("/api/v1/jobs/abc/handoff/download")
+        r2 = await ac.get("/api/v1/jobs/xyz/handoff/download")
+        assert r1.status_code == 200, r1.text
+        assert r2.status_code == 200, r2.text
+        r3 = await ac.get("/api/v1/jobs/123/handoff/download")
+        assert r3.status_code == 429, r3.text
+        body = r3.json()
+        assert body["endpoint"] == r"^/api/v1/jobs/[^/]+/handoff/download$", (
+            f"Endpoint key must be the regex string; got {body['endpoint']!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_handoff_list_url_matches_template_via_regex() -> None:
+    """PR-J3.6.5 (Issue #60): ``GET /api/v1/handoffs`` matches the
+    ``/api/v1/handoffs`` template — NO dynamic segments on this one.
+
+    The list endpoint caps threat T1 (corpus exfiltration via
+    paginate + walk job_ids). It has no ``{job_id}`` placeholder
+    because the list paginates over ``handoffs`` rows, not jobs.
+    """
+    app = FastAPI()
+    patterns = compile_rate_limit_patterns({
+        "/api/v1/handoffs": (2, 60),
+    })
+    app.state.rate_limit_patterns = patterns
+
+    @app.get("/api/v1/handoffs")
+    async def _list(request: Request) -> dict[str, object]:
+        return {"status": "ok"}
+
+    app.add_middleware(RateLimitMiddleware)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        r1 = await ac.get("/api/v1/handoffs")
+        r2 = await ac.get("/api/v1/handoffs?page=2")
+        assert r1.status_code == 200, r1.text
+        assert r2.status_code == 200, r2.text
+        r3 = await ac.get("/api/v1/handoffs?page=3")
+        assert r3.status_code == 429, r3.text
+        body = r3.json()
+        assert body["endpoint"] == r"^/api/v1/handoffs$", (
+            f"Endpoint key must be the regex string; got {body['endpoint']!r}"
+        )
+
+
+@pytest.mark.asyncio
 async def test_unmatched_url_fails_open(lookup_app: FastAPI) -> None:
     """An URL not in ``RATE_LIMITS`` (e.g., ``/api/v1/whatever``) is never rejected.
 
@@ -160,9 +270,18 @@ async def test_compile_rate_limit_patterns_lives_on_app_state() -> None:
 
 
 def test_settings_provide_seven_endpoint_defaults() -> None:
-    """``Settings.RATE_LIMITS`` has the 7 locked routes from spec REQ-INB-006."""
+    """``Settings.RATE_LIMITS`` has the 7 PR-J3.6 routes from spec REQ-INB-006.
+
+    PR-J3.6.5 (Issue #60) extends the policy table by 3 handoff
+    entries; the count is now 10. The 3 PR-J3.6.5 additions are pinned
+    in ``test_handoff_endpoints_added_to_rate_limits`` so the
+    invariant stays traceable.
+    """
     s = Settings()
-    assert len(s.RATE_LIMITS) == 7
+    assert len(s.RATE_LIMITS) == 10, (
+        f"Expected 10 entries (7 PR-J3.6 + 3 PR-J3.6.5 handoff), "
+        f"got {len(s.RATE_LIMITS)}: {sorted(s.RATE_LIMITS)!r}"
+    )
 
 
 __all__: list[str] = []

@@ -89,9 +89,10 @@ def test_rate_limit_patterns_live_on_app_state(monkeypatch: pytest.MonkeyPatch) 
     app = create_app()
     assert hasattr(app.state, "rate_limit_patterns")
     patterns = app.state.rate_limit_patterns
-    # 7 default templates.
-    assert len(patterns) == 7, (
-        f"Expected 7 compiled patterns from Settings.RATE_LIMITS, got {len(patterns)}"
+    # 10 default templates: 7 from PR-J3.6 (spec REQ-INB-006) +
+    # 3 handoff additions from PR-J3.6.5 (Issue #60).
+    assert len(patterns) == 10, (
+        f"Expected 10 compiled patterns from Settings.RATE_LIMITS, got {len(patterns)}"
     )
 
 

@@ -174,14 +174,23 @@ class Settings(BaseSettings):
     )
 
     # ---- Inbound rate limiting (PR-J3.6 — sec-auth-jwt follow-up) ----
-    # 7 route templates per spec REQ-INB-006, locked by proposal.md
-    # decision O (post-gate correction). Each tuple is
+    # 7 PR-J3.6 route templates per spec REQ-INB-006, locked by
+    # proposal.md decision O (post-gate correction). Each tuple is
     # ``(requests_limit, window_seconds)``. Keys are route TEMPLATES
     # (with ``{job_id}`` and ``{module_name}`` placeholders preserved);
     # the middleware compiles a regex per entry against
     # ``request.url.path`` at app startup (spec REQ-INB-016 — using
     # ``request.scope["route"].path`` would fail-open because that
     # field is ``None`` inside ``BaseHTTPMiddleware.dispatch``).
+    #
+    # PR-J3.6.5 (Issue #60) extends the table by 3 handoff routes —
+    # distinct threat model from the credential-stuffing defense above:
+    # the handoff routes are auth-gated (DualAuth at main.py:186) so
+    # per-IP is redundant; the per-user ceiling bounds T1 corpus
+    # exfiltration, T2 worker starvation via /handoff/download, and
+    # T3 re-export amplification via missing file_path. All caps
+    # remain env-overridable via the standard pydantic-settings
+    # machinery (REQ-INB-006).
     RATE_LIMITS: dict[str, tuple[int, int]] = Field(
         default_factory=lambda: {
             "/api/v1/auth/login": (10, 60),
@@ -191,6 +200,13 @@ class Settings(BaseSettings):
             "/api/v1/ai/jobs/{job_id}/validate": (10, 60),
             "/api/v1/ai/jobs/{job_id}/modules/{module_name}/validate": (10, 60),
             "/api/v1/jobs/{job_id}/report": (5, 60),
+            # ---- PR-J3.6.5 (Issue #60): handoff endpoints ----
+            # T1: paginate /handoffs + walk job_ids → exfiltrate corpus
+            "/api/v1/handoffs": (60, 60),
+            # T3: missing file_path re-triggers export_handoff (DB+IO amp)
+            "/api/v1/jobs/{job_id}/handoff": (120, 60),
+            # T2: /handoff/download (FileResponse, ~MB JSON) starves workers
+            "/api/v1/jobs/{job_id}/handoff/download": (10, 60),
         },
         description=(
             "Per-endpoint inbound rate-limit policy: route template → "

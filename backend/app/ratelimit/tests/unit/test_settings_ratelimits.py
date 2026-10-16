@@ -22,6 +22,11 @@ def test_seven_default_rate_limits_present() -> None:
 
     RED before impl: missing fields. GREEN after the three settings
     fields land in ``Settings`` with the post-gate-corrected defaults.
+
+    PR-J3.6.5 (Issue #60) extends this to 10 defaults — the three
+    handoff entries live in a sibling test
+    (``test_handoff_endpoints_added_to_rate_limits``) so the diff to
+    this assertion stays minimal and traceable.
     """
     s = Settings()
     expected = {
@@ -33,8 +38,56 @@ def test_seven_default_rate_limits_present() -> None:
         "/api/v1/ai/jobs/{job_id}/modules/{module_name}/validate": (10, 60),
         "/api/v1/jobs/{job_id}/report": (5, 60),
     }
-    assert dict(s.RATE_LIMITS) == expected, (
-        f"Expected the 7 spec defaults, got {s.RATE_LIMITS!r}"
+    # PR-J3.6.5 (Issue #60): the handoff endpoints are added by a
+    # separate test below; assert the 7 PR-J3.6 defaults here and the
+    # 3 handoff additions in the sibling test. ``>=`` keeps this test
+    # forward-compatible with future additions to the policy table.
+    assert all(s.RATE_LIMITS.get(k) == v for k, v in expected.items()), (
+        f"Expected the 7 spec defaults as-is, got {s.RATE_LIMITS!r}"
+    )
+
+
+def test_handoff_endpoints_added_to_rate_limits() -> None:
+    """PR-J36.5 (Issue #60): 3 handoff endpoints with per-user caps.
+
+    Threat-driven defaults (proposal §Threat model):
+    - T1 (corpus exfiltration via paginate + walk): ``/api/v1/handoffs`` → (60, 60)
+    - T2 (worker starvation via /handoff/download, ~MB JSON FileResponse):
+      ``/api/v1/jobs/{job_id}/handoff/download`` → (10, 60) tightest cap
+    - T3 (re-export amplification via missing file_path): bounded by the
+      packet endpoint cap ``/api/v1/jobs/{job_id}/handoff`` → (120, 60)
+
+    The middleware fans each entry out to ``("ip", endpoint)`` and
+    ``("user", endpoint)`` keys via ``_scope_policies``; handoffs are
+    auth-gated so the per-user limit is the binding constraint (per-IP
+    is redundant on already-authenticated traffic).
+    """
+    s = Settings()
+    handoff_entries = {
+        "/api/v1/handoffs": (60, 60),
+        "/api/v1/jobs/{job_id}/handoff": (120, 60),
+        "/api/v1/jobs/{job_id}/handoff/download": (10, 60),
+    }
+    for template, expected_policy in handoff_entries.items():
+        actual = s.RATE_LIMITS.get(template)
+        assert actual == expected_policy, (
+            f"handoff policy {template!r} expected {expected_policy!r}, "
+            f"got {actual!r}; full table: {s.RATE_LIMITS!r}"
+        )
+
+
+def test_rate_limits_count_is_ten_after_handoff_additions() -> None:
+    """PR-J3.6.5: PR-J3.6 had 7 entries; the 3 handoff additions bring it to 10.
+
+    Pinned as a separate test so a future addition to the policy
+    table is a deliberate move (the previous sibling test
+    ``test_seven_default_rate_limits_present`` no longer asserts a
+    hard count — see its updated docstring).
+    """
+    s = Settings()
+    assert len(s.RATE_LIMITS) == 10, (
+        f"Expected 10 entries (7 PR-J3.6 + 3 PR-J3.6.5 handoff), "
+        f"got {len(s.RATE_LIMITS)}: {sorted(s.RATE_LIMITS)!r}"
     )
 
 
