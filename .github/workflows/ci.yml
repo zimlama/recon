@@ -73,6 +73,35 @@ jobs:
         working-directory: backend
         run: ruff format --check .
 
+  # ---- Backend integration (rate-limit adversarial harness, PR-J3.6) ----
+  # Spec REQ-INB-012 mandates the adversarial harness runs in CI as
+  # a separate ``integration`` job (100 fake-credential login attempts,
+  # ≥ 1 × 429 in < 60 s). Excluded from the coverage gate (NFR-INB-001)
+  # because the in-process ``httpx.ASGITransport`` + per-iteration DB
+  # spin-up runs below the unit-test budget.
+  backend-integration:
+    name: Backend integration (rate-limit adversarial harness)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install deps
+        working-directory: backend
+        run: pip install -e ".[dev]"
+      - name: Run integration tests
+        working-directory: backend
+        env:
+          DATABASE_URL: 'sqlite:///:memory:'
+          MINIMAX_API_KEY: test-dummy
+          SECRET_KEY: test-secret
+          LOG_LEVEL: DEBUG
+          APP_ENV: test
+          RATE_LIMIT_BYPASS_TOKEN: ''
+        run: |
+          pytest -m integration app/ratelimit/tests/
+
   # ---- Backend typecheck ----
   backend-typecheck:
     name: Backend typecheck (mypy + pyright)
@@ -196,6 +225,7 @@ jobs:
     name: All checks pass
     needs:
       - backend-test
+      - backend-integration
       - backend-lint
       - backend-typecheck
       - frontend-test
