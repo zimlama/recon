@@ -12,6 +12,16 @@ The fallback to ``"local"`` is preserved for endpoints that bypass auth
 endpoints the dual-auth middleware itself keeps open). The audit row
 type stays distinguishable — ``username='local'`` means unauthenticated
 bypass, ``username='legacy'`` means Bearer-key legacy path.
+
+PR-J3.7 (legacy-usage-stats): ``details`` now ALSO carries
+``ip`` (from ``request.client.host`` or ``"unknown"``) and
+``auth_method`` (one of ``"jwt"`` / ``"legacy"`` / ``"dev"`` /
+``"unknown"`` — written by DualAuthMiddleware). The endpoint
+``GET /api/v1/auth/legacy-usage-stats`` aggregates legacy rows by
+``details.ip`` (REQ-LEG-003) so this extension is the one cross-
+cutting change that makes the deprecation-window operator dashboard
+work without a new write path. Additive per NFR-LEG-004 — no
+existing keys are removed.
 """
 
 from __future__ import annotations
@@ -75,6 +85,26 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                         "path": str(request.url.path),
                         "status_code": response.status_code,
                         "duration_ms": round(duration * 1000, 2),
+                        # PR-J3.7 (REQ-013 mod): ip + auth_method +
+                        # user_agent are additive — the legacy-usage-
+                        # stats aggregator (REQ-LEG-003) groups by
+                        # details.ip AND surfaces first/last
+                        # user-agent per IP for operator triage.
+                        # ``unknown`` is the documented bucket for
+                        # ASGI harnesses or upstream proxies that
+                        # omit the values (REQ-013 second scenario).
+                        "ip": (
+                            request.client.host
+                            if request.client
+                            else "unknown"
+                        ),
+                        "auth_method": (
+                            getattr(request.state, "auth_method", None)
+                            or "unknown"
+                        ),
+                        "user_agent": (
+                            request.headers.get("user-agent") or "unknown"
+                        ),
                     },
                 )
                 db.add(audit)

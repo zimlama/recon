@@ -8,7 +8,7 @@ Routes mounted under ``/api/v1/auth``:
 - GET  /me      → UserResponse      | 401
 - POST /keys    → 204               | 403 (admin-only — implemented in PR-J4)
 - DELETE /keys  → 204               | 403 (admin-only — implemented in PR-J4)
-- GET  /legacy-usage-stats → JSON   | 403 (admin-only — implemented in PR-J5)
+- GET  /legacy-usage-stats → JSON   | 403 (admin-only — PR-J3.7)
 
 The dual-auth wrapper (PR-J3.8) extracts ``request.state.user_id`` and
 writes it onto the Request so router handlers don't need to re-decode.
@@ -19,19 +19,32 @@ Every catchable error is an ``AuthError`` subclass; we route them
 through a FastAPI exception handler registered in the lifespan hook.
 The handler converts to ``HTTPException(status, detail=body)`` and adds
 the response headers (e.g. ``Retry-After`` on 423).
+
+PR-J3.7 ``GET /legacy-usage-stats`` adds three exception types:
+``AdminForbiddenError`` (403), ``InvalidSinceError`` (400) and
+``SinceTooOldError`` (400). The handler emits the same shape as the
+rest of the auth subsystem so operators get a stable parseable body.
 """
 
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.auth.deps import get_current_user_id
-from app.auth.errors import AuthError
+from app.auth.deps import get_current_user_id, require_admin
+from app.auth.errors import (
+    AuthError,
+    InvalidSinceError,
+    SinceTooOldError,
+)
 from app.auth.refresh import RefreshService
 from app.auth.schemas import (
+    LegacyUsageStatsResponse,
     LoginRequest,
     LogoutRequest,
     LogoutResponse,
@@ -40,8 +53,20 @@ from app.auth.schemas import (
     UserResponse,
 )
 from app.auth.service import AuthService
+from app.auth.usage import query_legacy_usage
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+
+# PR-J3.7 — defaults & cap for the ``?since`` query parameter.
+# Default 30 d lookback per spec REQ-LEG-004; hard cap at 365 d so
+# operators can't DoS the audit-log scan with an unbounded query.
+_LOOKBACK_DEFAULT_DAYS = 30
+_LOOKBACK_MAX_DAYS = 365
+# Apache-2.0 SPDX-header for the response header that advertises
+# the best-effort posture on the 200 path only.
+_BEST_EFFORT_HEADER = "X-Admin-Gate-Best-Effort"
+_BEST_EFFORT_VALUE = "true"
 
 
 def _to_http_exception(err: AuthError) -> HTTPException:
@@ -194,6 +219,105 @@ async def me_route(
     finally:
         db.close()
     return user.model_dump(mode="json")
+
+
+# ---------------------------------------------------------------------------
+# GET /legacy-usage-stats — PR-J3.7 (REQ-LEG-001..007)
+# ---------------------------------------------------------------------------
+
+
+def _parse_since(
+    since_raw: str | None,
+    now: datetime,
+) -> datetime:
+    """Parse the ``?since`` query parameter (REQ-LEG-004).
+
+    Default: ``now - 30 d``. Cap: ``now - 365 d`` — anything older
+    raises ``SinceTooOldError`` to prevent an unbounded audit_log
+    scan. Malformed values raise ``InvalidSinceError`` with the
+    parser's detail verbatim.
+
+    URL note: ``+`` is encoded as a space in query strings, so
+    ISO 8601 offsets like ``+00:00`` arrive as `` 00:00``. We
+    restore the ``+`` to keep Pydantic / ``fromisoformat`` happy.
+    """
+    if since_raw is None or since_raw == "":
+        return now - timedelta(days=_LOOKBACK_DEFAULT_DAYS)
+    normalised = since_raw.replace(" ", "+") if " " in since_raw else since_raw
+    if normalised.endswith("Z"):
+        normalised = normalised[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalised)
+    except ValueError as e:
+        raise InvalidSinceError(detail=str(e)) from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    floor = now - timedelta(days=_LOOKBACK_MAX_DAYS)
+    if parsed < floor:
+        raise SinceTooOldError(max_lookback_days=_LOOKBACK_MAX_DAYS)
+    return parsed
+
+
+@router.get(
+    "/legacy-usage-stats",
+    response_model=LegacyUsageStatsResponse,
+)
+async def legacy_usage_stats_route(
+    request: Request,
+    since: str | None = Query(
+        default=None,
+        description=(
+            "ISO 8601 lower bound for the lookback window. "
+            "Default: now-30d. Max: now-365d."
+        ),
+    ),
+    user_id: str = Depends(require_admin),
+) -> JSONResponse:
+    """Admin-only legacy-key usage stats (PR-J3.7).
+
+    Aggregation rules (engram #1431, REQ-LEG-003):
+
+    - Pure read from ``audit_log`` where ``username == 'legacy'``.
+    - Group by ``json_extract(details, '$.ip')`` (the additive
+      field written by ``AuditLogMiddleware`` since PR-J3.7).
+    - Per-IP ``sample_paths`` = top-5 distinct ``details.path``
+      by per-IP frequency DESC.
+
+    Response headers: every 200 emits
+    ``X-Admin-Gate-Best-Effort: true`` (REQ-LEG-002). The header is
+    NOT set on 4xx responses — the gate's posture is only
+    relevant when the gate succeeded.
+    """
+    now = datetime.now(tz=UTC)
+    since_dt = _parse_since(since, now)
+    state = request.app.state
+    db = state.db_session_factory()
+    try:
+        try:
+            rows, totals = await asyncio.to_thread(
+                query_legacy_usage, db, since=since_dt
+            )
+        except AuthError:
+            raise
+        except SQLAlchemyError:
+            raise
+    finally:
+        db.close()
+
+    window_days = (now - since_dt).days
+    response = LegacyUsageStatsResponse(
+        since=since_dt,
+        as_of=now,
+        window_days=window_days,
+        total_legacy_requests=totals["total_legacy_requests"],
+        unique_ips=totals["unique_ips"],
+        rows=rows,
+    )
+    payload = response.model_dump(mode="json")
+    return JSONResponse(
+        content=payload,
+        headers={_BEST_EFFORT_HEADER: _BEST_EFFORT_VALUE},
+    )
 
 
 __all__ = ["router"]

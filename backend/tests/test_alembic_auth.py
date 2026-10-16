@@ -391,10 +391,13 @@ def test_revision_2_downgrade_drops_columns_not_table(isolated_db: str) -> None:
             )
         )
 
-    # Upgrade all the way (both revisions)
+    # Upgrade all the way (current head — includes the PR-J3.7
+    # JSON-expression index migration atop the PR-J1 columns).
     alembic_command.upgrade(cfg, "head")
-    # Downgrade just rev 2 — keeps rev 1 (auth_users, refresh_tokens), drops new columns
-    alembic_command.downgrade(cfg, "-1")
+    # Downgrade past rev 2 — keeps rev 1 (auth_users, refresh_tokens),
+    # drops the rev 2 columns. We pin the target rev explicitly so
+    # the test stays correct as the migration graph grows.
+    alembic_command.downgrade(cfg, "20261014000001")
 
     with engine.connect() as conn:
         cols = {row[1] for row in conn.execute(text("PRAGMA table_info(audit_log)")).fetchall()}

@@ -142,6 +142,70 @@ class InsufficientScopeError(AuthError):
         )
 
 
+class AdminForbiddenError(AuthError):
+    """403 — authenticated but ``request.state.role`` is not ``"admin"``.
+
+    PR-J3.7 (REQ-LEG-002). Mirrors ``InsufficientScopeError``'s shape
+    so the router layer can render a single ``403 forbidden`` error
+    body for both scope-mismatch and role-mismatch — the body always
+    carries the missing privilege (``required_scope`` /
+    ``required_role``) so the client knows which one to request.
+    """
+
+    status_code = 403
+    code = "forbidden"
+    message = "Admin role required"
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(
+            message=message or self.message,
+            required_role="admin",
+        )
+
+
+class SinceTooOldError(AuthError):
+    """400 — ``?since`` precedes the hard lookback cap (365 d by default).
+
+    PR-J3.7 (REQ-LEG-004). The cap prevents operator DoS via
+    unbounded scans over a multi-million-row audit_log; surfaces
+    ``max_lookback_days`` so the client can clamp its own date
+    picker to the same window.
+    """
+
+    status_code = 400
+    code = "since_too_old"
+    message = "since exceeds max lookback"
+
+    def __init__(
+        self,
+        max_lookback_days: int,
+        message: str | None = None,
+    ) -> None:
+        super().__init__(
+            message=message or self.message,
+            max_lookback_days=max_lookback_days,
+        )
+
+
+class InvalidSinceError(AuthError):
+    """400 — ``?since`` is not a valid ISO 8601 datetime.
+
+    PR-J3.7 (REQ-LEG-004). The Pydantic ``detail`` is surfaced
+    verbatim so the client can show the operator exactly which
+    character was malformed.
+    """
+
+    status_code = 400
+    code = "invalid_since"
+    message = "since is not a valid ISO 8601 datetime"
+
+    def __init__(self, detail: str, message: str | None = None) -> None:
+        super().__init__(
+            message=message or self.message,
+            detail=detail,
+        )
+
+
 class AccountLockedError(AuthError):
     """423 — too many failures; account temporarily locked.
 
@@ -204,10 +268,13 @@ def to_http_response(err: AuthError) -> tuple[int, dict[str, str], dict[str, Any
 
 __all__ = [
     "AccountLockedError",
+    "AdminForbiddenError",
     "AuthError",
     "FamilyRevokedPublicError",
     "InsufficientScopeError",
     "InvalidCredentialsError",
+    "InvalidSinceError",
+    "SinceTooOldError",
     "TokenExpiredError",
     "TokenInvalidError",
     "TokenRevokedError",
