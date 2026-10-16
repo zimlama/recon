@@ -965,6 +965,43 @@ If vitest 3.x is ever adopted (deferred to #38), revisit the allowlist and remov
 
 ---
 
+## 11. OpenCode harness crashes with `n.content.map` on long sessions (2026-10-16)
+
+> **Full RCA + workaround + DRY write:** [`folio/wiki/concepts/OpenCode-V2-Session-Compaction-Bug.md`](../../mindos/folio/wiki/concepts/OpenCode-V2-Session-Compaction-Bug.md). This section is the operator-facing summary only.
+
+**Symptom** — the opencode TUI shows every user message producing:
+
+```
+[session] Failed to drain Session
+  cause: TypeError: undefined is not an object (evaluating 'n.content.map')
+    at SessionCompaction.compact (/$bunfs/root/opencode:6997:2228)
+```
+
+Once the first crash lands, **every** subsequent user message re-crashes at the same site. The session is unrecoverable in place. Symptom observed on `ses_eba8f9e0fffegK8V3vBAJctqGs` (134 msgs, 5 crashes), `ses_ec2f6befdffeqx6iS2NzI64013` (1415 msgs, 3 crashes), and 3 other sessions.
+
+**Diagnosis** — the v2.0.30 auto-compactor iterates over the message history and calls `n.content.map(...)` on every message, but `user` messages in opencode's wire format have `{text, files, agents}` — no `content` field. So `n.content` is `undefined` for every user message, and `.map()` throws. Trigger = session crosses the ~100-message compaction threshold, not the user input.
+
+**Fix (workaround)** — the bug is in opencode's bundled Bun code (`/$bunfs/root/opencode:6763:4682`); there is no in-place fix. Recover by:
+
+1. Verify the work is in git: `git -C /Users/leonardomejia/projects/zimlama-recon log --oneline -5 && git status -s`
+2. Find the most-recently-updated session for context:
+   ```bash
+   sqlite3 ~/.local/share/opencode/opencode.db \
+     "SELECT id, title, datetime(time_updated/1000,'unixepoch') FROM session_v2 WHERE parent_id IS NULL ORDER BY time_updated DESC LIMIT 5;"
+   ```
+3. Start a new session in the worktree with the same agent/model, paste the last 5–10 git log entries + `git status` + the last assistant message verbatim, then continue.
+4. Archive the broken session (do NOT delete — keep the data for future RCA):
+   ```bash
+   sqlite3 ~/.local/share/opencode/opencode.db \
+     "UPDATE session_v2 SET title = title || ' [CRASHED: n.content.map compaction bug]' WHERE id = '<broken-session-id>';"
+   ```
+
+**Mitigation** — keep new sessions < 100 messages (start a new session per PR, not per day); prefer the `plan` agent for design work; do not run the `gentle-orchestrator` for > 1 PR's worth of tool calls in a single session.
+
+**Status** — bug confirmed, no upstream fix in v2.0.30. Workaround verified. Tracked in Engram observation (search `n.content.map compaction`).
+
+---
+
 ## 9. Where to get more help
 
 For the **v0.2.1 install-failure series in detail** (timeline + commit messages + verbatim shell transcripts), see [postmortems/v0.2.1-release.md](postmortems/v0.2.1-release.md).
