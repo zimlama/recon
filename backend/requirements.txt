@@ -53,3 +53,13 @@ python-whois==0.9.4
 # in the IdentityMap table. Pulled in transitively by Authlib today, but
 # declared explicitly because it is now a direct backend dependency.
 cryptography==50.0.2
+
+# --- Authentication (PR-J1, sec-auth-jwt Issue #29, Phase 2) ---
+# argon2-cffi: argon2id KDF used to hash passwords stored in auth_users.password_hash.
+# The pure-Python fallback is too slow for prod; the C extension is built from
+# source wheels on linux/macOS and ships pre-built for common arches.
+argon2-cffi==23.1.0
+# pyjwt[crypto]: JWT encode/decode. The [crypto] extra pulls in `cryptography`
+# (already declared above) so RS256 keys load via cryptography.hazmat.primitives
+# without an extra install step.
+pyjwt[crypto]==2.8.0

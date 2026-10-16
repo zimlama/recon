@@ -336,6 +336,13 @@ class AuditLog(Base):
     target: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     user_id: Mapped[str] = mapped_column(String(100), default="local", nullable=False)
+    # sec-auth-jwt (Issue #29 PR-J3.7) — spec §5 audit_log extension.
+    # The migration ``20261014000002_extend_audit_log_with_user`` adds these
+    # to pre-existing deployments; ``Base.metadata.create_all`` (used by
+    # tests via ``conftest.client``) reads them from the model so both
+    # prod and test schemas share the same shape.
+    username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_jwt_jti: Mapped[str | None] = mapped_column(String(36), nullable=True)
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
     def __repr__(self) -> str:

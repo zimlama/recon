@@ -715,6 +715,653 @@ git commit -m "chore(frontend): add pnpm-lock.yaml"
 
 ---
 
+## 10. PR-G2 gate-flip lessons (Issue #30 Phase 1.5A2)
+
+This section collects the cross-cutting lessons from flipping the `npm audit` and `trivy fs` gates from advisory (`|| true` / `exit-code: 0`) to **blocking** in `main`. The follow-up chain (PR #51 → PR #52 → PR #54) uncovered five distinct root causes; each is below in the standard 4-part format. The verbatim error strings are what to grep for in CI logs.
+
+### 10.1 `pnpm overrides` in `package.json` is silently ignored by pnpm ≥ 11
+
+**Symptom** — `pnpm install` does not apply the `overrides` field declared at the root of `frontend/package.json`; the lockfile shows the old (vulnerable) version. pnpm prints no warning.
+
+```
+"overrides": {
+  "postcss-selector-parser": "^7.1.0"  // declared in package.json
+}
+// pnpm-lock.yaml still pins postcss-selector-parser@6.1.4 — no error
+```
+
+**Diagnosis** —
+```bash
+grep "postcss-selector-parser@" frontend/pnpm-lock.yaml   # → 6.1.4
+pnpm --version                                            # → 12.11.2
+```
+
+The `overrides` field is documented in `pnpm` docs as a **legacy** location. Since pnpm v11 it is no longer read; pnpm reads overrides only from `pnpm-workspace.yaml` (and the deprecated `"pnpm": { "overrides": ... }` in `package.json`).
+
+**Root cause** — the v0.2.0 release was set up with pnpm 9 and the legacy `overrides` field worked. We then upgraded pnpm locally to 12, but nobody re-read the docs. The lockfile kept the old (vulnerable) resolutions because the override was effectively a no-op.
+
+**Fix** — move the field to `frontend/pnpm-workspace.yaml`:
+```yaml
+# /frontend/pnpm-workspace.yaml
+packages:
+  - '.'
+
+overrides:
+  postcss-selector-parser: ^7.1.0
+  glob: '>=10.5.0'
+  postcss: '>=8.5.18'
+```
+
+After `pnpm install`, the lockfile pins `postcss-selector-parser@7.1.6`, `glob@13.0.6`, `postcss@8.5.30` (verified by `pnpm why <pkg>` and `grep`).
+
+### 10.2 pnpm 9 vs pnpm 12 lockfile format incompatibility
+
+**Symptom** — CI's `Frontend install` job fails with:
+```
+ERROR  packages field missing or empty
+##[error]Process completed with exit code 1.
+```
+even though `pnpm install --frozen-lockfile` works fine locally.
+
+**Diagnosis** —
+```bash
+# CI:
+gh api .../jobs/<id>/logs | grep -A 1 "Setup Pnpm"
+# → pnpm 9.15.4 (via pnpm/action-setup@<sha> with version: 9)
+# Local:
+which pnpm   # → 12.11.2
+```
+
+**Root cause** — the lockfile was generated locally with pnpm 12 which writes a v9-format lockfile that pnpm 9's reader rejects. The lockfile IS valid v9 (it has `lockfileVersion: '9.0'` and a `packages:` block), but pnpm 9's stricter reader complains "packages field missing or empty" when the workspace file lacks an explicit `packages:` declaration.
+
+**Fix** —
+1. Add `packages: - '.'` to `frontend/pnpm-workspace.yaml` (declares the single-package workspace, pnpm 9's reader now happy).
+2. Regenerate `frontend/pnpm-lock.yaml` with the same pnpm version CI uses:
+   ```bash
+   # Local-only, NOT in package.json:
+   /Users/leonardomejia/Library/pnpm/pnpm install --no-frozen-lockfile
+   ```
+
+Long-term: pin pnpm in `package.json#packageManager` so local and CI always agree.
+
+### 10.3 `trivy-action` v0.36.0: use `trivyignores`, not `ignorefile`
+
+**Symptom** — CI fails on the `trivy fs` step with:
+```
+Unexpected input(s) 'ignorefile', valid inputs are
+['scan-type', 'image-ref', 'input', 'scan-ref', 'exit-code', ...]
+```
+
+**Diagnosis** —
+```bash
+gh api .../jobs/<id>/logs | grep -i "ignorefile"
+# → "Unexpected input(s) 'ignorefile'..."
+# But locally:
+trivy fs --ignorefile .trivyignore --exit-code 1 .   # → exit 0 (CLI works)
+```
+
+**Root cause** — the `aquasecurity/trivy-action` Action wraps the `trivy` CLI but uses its own input vocabulary. The CLI's `--ignorefile` flag is exposed in the Action as **`trivyignores`** (plural, comma-separated). Plain `ignorefile` is not a valid Action input, even though it sounds like the CLI flag.
+
+**Fix** — rename in the workflow `with:` block:
+```yaml
+- name: Run trivy filesystem scan
+  uses: aquasecurity/trivy-action@v0.36.0
+  with:
+    scan-type: "fs"
+    scan-ref: "."
+    trivyignores: ".trivyignore"   # ← correct input name
+    exit-code: "1"
+```
+
+### 10.4 SARIF mode in `trivy-action` silently unsets the severity filter
+
+**Symptom** — `trivy fs` exits 1 in CI after `.trivyignore` is in place, even though the same command exits 0 locally. CI duration: 161 ms (way too short for an actual scan — the action returned 1 without doing a real scan).
+
+```
+Found ignorefile '.trivyignore':   ← file IS being read
+# ... file contents echoed ...
+Building SARIF report with all severities
+Running Trivy with options: trivy fs .
+##[error]Process completed with exit code 1.
+```
+
+**Diagnosis** — read the `entrypoint.sh` of `trivy-action` v0.36.0 (the wrapper script that runs the action):
+```bash
+if [ "${TRIVY_FORMAT:-}" = "sarif" ]; then
+  if [ "${INPUT_LIMIT_SEVERITIES_FOR_SARIF:-false,,}" != "true" ]; then
+    echo "Building SARIF report with all severities"
+    unset TRIVY_SEVERITY            # ← HERE
+  fi
+fi
+```
+
+**Root cause** — the SARIF spec wants all severities in the report, so the Action **unsets** `TRIVY_SEVERITY` before invoking `trivy` when `format=sarif` and `limit-severities-for-sarif != true`. Combined with `exit-code: "1"`, ANY non-ignored CVE of ANY severity (including moderate/low) blocks the build. The `.trivyignore` covers CRITICAL+HIGH, but the next 14.x advisories also include 11 MODERATE + 2 LOW that aren't allowlisted.
+
+**Fix** — set the explicit severity-cap in the Action:
+```yaml
+- name: Run trivy filesystem scan
+  uses: aquasecurity/trivy-action@v0.36.0
+  with:
+    scan-type: "fs"
+    scan-ref: "."
+    format: "sarif"
+    severity: "HIGH,CRITICAL"
+    limit-severities-for-sarif: "true"   # ← preserve the filter
+    trivyignores: ".trivyignore"
+    exit-code: "1"
+```
+
+`limit-severities-for-sarif: "true"` keeps `TRIVY_SEVERITY=HIGH,CRITICAL` in the env, so the SARIF report only contains HIGH+CRITICAL findings, and `exit-code: 1` only blocks on those.
+
+### 10.5 `pnpm dlx` in `security.yml` needs `corepack enable`
+
+**Symptom** — the `npm audit` job in `security.yml` fails immediately:
+```
+/usr/bin/bash: line 1: pnpm: command not found
+##[error]Process completed with exit code 127.
+```
+
+**Diagnosis** —
+```bash
+gh api .../jobs/<id>/logs | grep -B 1 "pnpm dlx"
+# → "pnpm: command not found" before any pnpm command runs
+# Compare with the frontend CI workflow (ci.yml) which has:
+#   - uses: pnpm/action-setup@v4
+#   - run: pnpm install --frozen-lockfile
+# The security workflow only had actions/setup-node@v4 — installs node + npm, NOT pnpm.
+```
+
+**Root cause** — `actions/setup-node` installs node + npm but not pnpm. The original `npm audit ... || true` didn't need pnpm, so the security workflow was written without it. Switching to `pnpm dlx audit-ci@^7` requires pnpm on `PATH`.
+
+**Fix** — add `corepack enable` after `Setup Node`:
+```yaml
+- name: Setup Node
+  uses: actions/setup-node@v4
+  with:
+    node-version: "20"
+
+- name: Enable corepack (pnpm shim)
+  run: corepack enable
+```
+
+`corepack` (bundled with node ≥ 16.9) shims `pnpm` (and `yarn`) to the version declared in `package.json#packageManager`. If that's not set, install pnpm via `pnpm/action-setup` like the frontend CI workflow does.
+
+### 10.6 Audit-ci vs npm audit: per-advisory allowlist
+
+**Symptom** — `npm audit --audit-level=high` blocks merges on the 13 next 14.x HIGH advisories (all of which require a MAJOR bump to next 15.5+, deferred to v0.3.0). We want the gate blocking, but we cannot bump next today.
+
+**Diagnosis** — `npm-audit` has no per-advisory allowlist. `--audit-level` only filters by severity. The only way to keep the gate blocking while tolerating known-deferred CVEs is to either:
+- Bump the deps (deferred, see #38)
+- Use a different tool that supports per-advisory allowlist
+
+**Root cause** — `npm audit` is a strict tool. Audit-ci (`IBM/audit-ci`, `pnpm dlx audit-ci@^7`) is a thin wrapper around `npm`/`pnpm`/`yarn` audit that adds per-advisory allowlist, JSON output, and better CI integration. It's the right tool for "block on new CVEs, allow known-deferred ones".
+
+**Fix** — install audit-ci via `pnpm dlx`, declare the allowlist in a JSONC file:
+```jsonc
+// frontend/audit-ci.jsonc
+{
+  "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
+  "critical": true,            // ← only block on CRITICAL
+  "package-manager": "pnpm",
+  "report-type": "full",
+  "output-format": "json",
+  "allowlist": [
+    // 2 next.js 14.x CRITICAL — fix in next 15.5.24+ (MAJOR, #38)
+    "GHSA-p293-qw3h-jr36",
+    "GHSA-2xp9-vwfh-vxw4",
+    // 1 vitest 1.6.1 CRITICAL — fix in vitest 3.2.6+ (MAJOR, #38)
+    "GHSA-5xrq-8626-4rwp",
+    // 2 tinypool 0.8.4 FALSE POSITIVES — vitest 1.x requires tinypool@^0.8.3
+    "GHSA-5gmw-xhrv-c9v3",
+    "GHSA-85c8-ppgw-ccpr"
+  ]
+}
+```
+
+```yaml
+# .github/workflows/security.yml (npm-audit step)
+- name: npm audit (blocking — gate flipped in PR-G2 via audit-ci)
+  working-directory: frontend
+  run: |
+    mkdir -p ../reports
+    pnpm dlx audit-ci@^7 --config ./audit-ci.jsonc --output-format json \
+      > ../reports/npm-audit.json
+```
+
+> [!info] Why a JSONC file and not `.npmrc` or `package.json`?
+> audit-ci is config-format-agnostic and the JSONC schema is editor-friendly (hover-completion, validation, inline comments with rationale). Each allowlist entry has a comment explaining *why* it's allowlisted, with a `Refs #<issue>` pointing at the deferred-bump issue. New engineers reviewing the file can see the plan without leaving the editor.
+
+### 10.7 Tinypool / vite / next false-positive triage pattern
+
+**Symptom** — pnpm audit reports `tinypool@0.8.4` as vulnerable to `GHSA-5gmw-xhrv-c9v3` (Prototype Pollution → RCE in 2.x), and `vite@5.4.21` as vulnerable to GHSAs that apply to vite ≤ 6.4.2.
+
+**Diagnosis** —
+```bash
+# tinypool:
+pnpm why tinypool
+# → tinypool@0.8.4 └─┬ vitest@1.6.1 (transitive)
+#    vitest 1.x's package.json: "tinypool": "^0.8.3"
+#    Tinypool 0.x and 2.x are DIFFERENT APIs. The 2.x RCE code path
+#    doesn't exist in 0.x.
+# But the advisory's vulnerable_versions is "<=2.1.0", which technically
+# includes 0.8.4 (semver-wise 0.8.4 < 2.1.0).
+
+# vite:
+pnpm why vite
+# → vite@5.4.21
+#    vite 5.4.21 is < the vuln range floor 6.4.x. The advisory
+#    doesn't actually apply to vite 5.x.
+```
+
+**Root cause** — pnpm-audit (like npm-audit) flags any package whose name matches, even when the installed version is older than the vulnerable code path. For tinypool, the vuln was introduced in 2.x; for vite, the vuln is in 6.4.0–6.4.2. Both advisories are over-broad.
+
+**Fix** — add to the audit-ci allowlist (see 10.6) with comments explaining "vitest 1.x requires tinypool@^0.8.3; bumping tinypool to 2.x would BREAK vitest (different API)". Then add a CI-side assertion that the vitest 1.x constraint is still in effect:
+```bash
+# local sanity:
+grep '"tinypool":' frontend/node_modules/vitest/package.json   # → "^0.8.3"
+```
+
+If vitest 3.x is ever adopted (deferred to #38), revisit the allowlist and remove the tinypool entries.
+
+---
+
+## 11. OpenCode harness crashes with `n.content.map` on long sessions (2026-10-16)
+
+> **Full RCA + workaround + DRY write:** [`folio/wiki/concepts/OpenCode-V2-Session-Compaction-Bug.md`](../../mindos/folio/wiki/concepts/OpenCode-V2-Session-Compaction-Bug.md). This section is the operator-facing summary only.
+
+**Symptom** — the opencode TUI shows every user message producing:
+
+```
+[session] Failed to drain Session
+  cause: TypeError: undefined is not an object (evaluating 'n.content.map')
+    at SessionCompaction.compact (/$bunfs/root/opencode:6997:2228)
+```
+
+Once the first crash lands, **every** subsequent user message re-crashes at the same site. The session is unrecoverable in place. Symptom observed on `ses_eba8f9e0fffegK8V3vBAJctqGs` (134 msgs, 5 crashes), `ses_ec2f6befdffeqx6iS2NzI64013` (1415 msgs, 3 crashes), and 3 other sessions.
+
+**Diagnosis** — the v2.0.30 auto-compactor iterates over the message history and calls `n.content.map(...)` on every message, but `user` messages in opencode's wire format have `{text, files, agents}` — no `content` field. So `n.content` is `undefined` for every user message, and `.map()` throws. Trigger = session crosses the ~100-message compaction threshold, not the user input.
+
+**Fix (workaround)** — the bug is in opencode's bundled Bun code (`/$bunfs/root/opencode:6763:4682`); there is no in-place fix. Recover by:
+
+1. Verify the work is in git: `git -C /Users/leonardomejia/projects/zimlama-recon log --oneline -5 && git status -s`
+2. Find the most-recently-updated session for context:
+   ```bash
+   sqlite3 ~/.local/share/opencode/opencode.db \
+     "SELECT id, title, datetime(time_updated/1000,'unixepoch') FROM session_v2 WHERE parent_id IS NULL ORDER BY time_updated DESC LIMIT 5;"
+   ```
+3. Start a new session in the worktree with the same agent/model, paste the last 5–10 git log entries + `git status` + the last assistant message verbatim, then continue.
+4. Archive the broken session (do NOT delete — keep the data for future RCA):
+   ```bash
+   sqlite3 ~/.local/share/opencode/opencode.db \
+     "UPDATE session_v2 SET title = title || ' [CRASHED: n.content.map compaction bug]' WHERE id = '<broken-session-id>';"
+   ```
+
+**Mitigation** — keep new sessions < 100 messages (start a new session per PR, not per day); prefer the `plan` agent for design work; do not run the `gentle-orchestrator` for > 1 PR's worth of tool calls in a single session.
+
+**Status** — bug confirmed, no upstream fix in v2.0.30. Workaround verified. Tracked in Engram observation (search `n.content.map compaction`).
+
+---
+
+## 12. PR #56 (sec-auth-jwt) BLOCKER fixes (2026-10-16)
+
+The PR #56 4R review of 2026-10-16 flagged four BLOCKER findings against the
+sec-auth-jwt feature branch. Each was fixed in its own atomic commit, with a
+failing test written FIRST (strict TDD). Cross-references: commits
+`15d7ea4` (B1), `f247ee3` (B2), `864a876` (B3), `abc9c96` (B4) on
+`feature/sec-auth-jwt`.
+
+The four lessons below are deliberately short and grep-able; the full
+commits carry the Symptom / Diagnosis / Root cause / Fix blocks per the
+opencode lessons-doc rule, and the engram observation #1376
+(`sdd/sec-auth-jwt/apply-progress`) carries the cumulative TDD evidence
+table across the four fix batches.
+
+### Lesson index (section 12)
+
+| # | Symptom (grep-able) | Blocker |
+|---|---------------------|---------|
+| 12.1 | `audit_log` row has `user_id='local'` after a JWT login | B1 |
+| 12.2 | `role='admin'` every request in a misconfigured production deploy | B2 |
+| 12.3 | Lifespan logs `jwt_keys_init_failed warning=...` then says `app_ready` | B3 |
+| 12.4 | `ruff check backend/` reports `F811 redefined-while-unused` on `status` in `main.py` | B4 |
+
+---
+
+### 12.1 AuditLogMiddleware writes `user_id='local'` regardless of auth
+
+**Symptom** — after a successful JWT login the audit_log row records the
+request as anonymous:
+
+```sql
+SELECT user_id, username, request_jwt_jti
+  FROM audit_log
+ WHERE action LIKE '%/auth/login%'
+ ORDER BY id DESC LIMIT 1;
+-- user_id='local'   username='local'   request_jwt_jti=NULL
+```
+
+The principal who just authenticated as `alice@example.com` is logged
+anonymously; replay / revocation analysis is impossible because every
+row looks identical.
+
+**Diagnosis** — two things must hold simultaneously for the row to
+carry the JWT identity:
+
+1. `backend/app/audit/middleware.py` must read from `request.state`:
+
+   ```bash
+   grep -n 'user_id' backend/app/audit/middleware.py
+   # → line 41 (pre-fix):  user_id='local'        ← hardcoded literal
+   ```
+
+2. The SQLAlchemy `AuditLog` model must declare the columns that the
+   Alembic migration adds in production:
+
+   ```bash
+   grep -nE 'username|request_jwt_jti' backend/app/models.py
+   # → no column declarations (only an unrelated `USERNAME` enum value)
+   ```
+
+**Root cause** — PR-J3.7a (audit) landed BEFORE PR-J3.8 (dual-auth).
+The audit middleware was merged with a hardcoded `user_id='local'` and
+SQLAlchemy model columns that did not declare `username` /
+`request_jwt_jti`. The Alembic migration
+`20261014000002_extend_audit_log_with_user` correctly added the
+columns in production, but `Base.metadata.create_all()` (used by
+`tests/conftest.client`) only mirrors declared columns so the test DB
+never saw them. The dual-auth middleware populated
+`request.state.{user_id, username, jwt_jti}` correctly but nothing
+downstream read them.
+
+**Fix** — two coupled changes:
+
+1. Add the columns to the SQLAlchemy `AuditLog` model so test DB mirrors
+   production shape:
+
+   ```python
+   # backend/app/models.py — AuditLog class additions
+   username:        Mapped[str|None] = mapped_column(String(64), nullable=True)
+   request_jwt_jti: Mapped[str|None] = mapped_column(String(36), nullable=True)
+   ```
+
+2. `AuditLogMiddleware` reads `request.state` with `getattr(...)` defaults:
+
+   ```python
+   # backend/app/audit/middleware.py (post-call_next)
+   user_id  = getattr(request.state, "user_id",   "local")
+   username = getattr(request.state, "username", "local")
+   jwt_jti  = getattr(request.state, "jwt_jti",  None)
+   ...
+   AuditLog(...,
+            user_id=user_id,
+            username=username,
+            request_jwt_jti=jwt_jti,
+            ...,
+   )
+   ```
+
+The `getattr` defaults preserve the pre-B1 fallback for endpoints that
+bypass auth (`/health`, `/docs`, `/api/v1/auth/*`).
+
+New pinning test: `backend/tests/test_audit_middleware_jwt.py` —
+four tests covering JWT vs legacy vs unauthenticated rows.
+
+---
+
+### 12.2 Dev-mode admin bypass authenticates as `admin` in production
+
+**Symptom** — with `.env` missing both `RECON_API_KEY` and the JWT key
+files, a production deploy serves every route to anonymous callers
+with `role='admin'`:
+
+```bash
+APP_ENV=production RECON_API_KEY= \
+    uvicorn app.main:app --port 8000 &
+curl -sS -o /dev/null -w '%{http_code}\n' \
+    http://prod-host/api/v1/modules
+# → 200     (should be 401 or 503)
+
+curl -X POST -d '{"target":"competitor.example",
+                  "selected_modules":["subdomain_enum"]}' \
+    -H 'Content-Type: application/json' \
+    http://prod-host/api/v1/jobs
+# → 200 / job created   (red-team drives the API anonymously)
+```
+
+**Diagnosis** — confirm the bypass is reachable and that `APP_ENV` is
+not consulted:
+
+```bash
+grep -n 'role = "admin"' backend/app/auth/middleware.py
+# → line 170 (pre-fix): unconditional hardcode
+
+grep -n 'APP_ENV\|is_production' backend/app/auth/middleware.py | head -5
+# → 0 hits in the bypass block — no gate, anywhere
+```
+
+**Root cause** — `DualAuthMiddleware` dev-bypass (lines 159-172) was
+written before sec-auth-jwt to preserve single-user local-install
+behavior with zero env vars. After PR-J1 added pydantic-level
+PRODUCTION-aware validators (`PEPPER_SECRET`, `REFRESH_HASH_KEY`,
+`PERSON_DOSSIER_ENCRYPTION_KEY`), the middleware-level and
+lifespan-level checks were never added. A half-configured production
+boot silently serves admin-wide.
+
+**Fix** — gate the bypass on `APP_ENV != "production"` and refuse with
+HTTP 503 (Retry-After: 5) when in production AND both secrets are
+missing. The new helper resolves `APP_ENV` per request through the
+settings provider so tests can monkey-patch between requests:
+
+```python
+# backend/app/auth/middleware.py
+def _is_production_now(settings_provider) -> bool:
+    if settings_provider is None:
+        return False
+    try:
+        return bool(settings_provider().APP_ENV == "production")
+    except Exception:
+        return False
+
+# Inside dispatch(), at the bypass branch:
+if not current_legacy and not self._jwt_keys_configured:
+    if _is_production_now(self._settings_provider):
+        logger.error(
+            "auth_subsystem_not_configured "
+            "RECON_API_KEY=unset JWT_PRIVATE_KEY_PATH=unset "
+            "APP_ENV=production - refusing anonymous admin bypass"
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "auth_subsystem_not_configured",
+                "message": (
+                    "Authentication is not configured for "
+                    "APP_ENV=production. Set RECON_API_KEY or "
+                    "JWT_PRIVATE_KEY_PATH + JWT_PUBLIC_KEY_PATH "
+                    "before serving requests. See spec section 7."
+                ),
+            },
+            headers={"Retry-After": "5"},
+        )
+    # dev/staging/test: keep the pre-existing bypass
+    request.state.user_id = "local"
+    ...
+    request.state.role = "admin"
+```
+
+New pinning test: `backend/tests/test_auth_middleware_admin_bypass.py`
+— three tests covering production-503 / dev-200 / production+secret-200.
+
+---
+
+### 12.3 Lifespan silently swallows JWT/RefreshService init failures
+
+**Symptom** — production deploy with `JWT_PRIVATE_KEY_PATH` unset (or
+pointing at a typo'd file) boots happily and only fails at the first
+`/auth/login`:
+
+```bash
+APP_ENV=production JWT_PRIVATE_KEY_PATH=/nonexistent/priv.pem \
+    uvicorn app.main:app --port 8000 2>&1 | grep -E 'app_ready|init_failed'
+# INFO  app_starting    env=production version=0.2.1
+# INFO  db_initialized
+# WARN  jwt_keys_init_failed error=private key not found: /nonexistent/priv.pem
+# INFO  app_ready                                          ← misleading!
+#
+curl -X POST http://prod-host/api/v1/auth/login -d '{...}'
+# 500 Internal Server Error: 'NoneType' object has no attribute 'verify'
+```
+
+A scanner that doesn't probe `/api/v1/auth/login` thinks the service is
+healthy.
+
+**Diagnosis** — confirm the swallowing code and that `APP_ENV` is not
+consulted:
+
+```bash
+grep -n 'except Exception.*# noqa.*log + continue\|logger.warning.*init_failed' \
+    backend/app/main.py
+# → lines 84-85 (JwtKeyManager) and 100-101 (RefreshService) in pre-fix
+
+grep -n 'APP_ENV\|is_production' backend/app/main.py | head -5
+# → 0 hits in the except branch (pre-fix)
+```
+
+**Root cause** — asymmetry with the PR-J1 pydantic validators. Those
+raise at `Settings()` construction in production, so operators see the
+failure immediately. JWT keys live on disk (RSA PEM files); their
+absence is checked at runtime when `JwtKeyManager` opens the file —
+and that path was wrapped in `try/except (Exception): logger.warning(...)`,
+swallowing the failure in EVERY environment, including production.
+Net effect: PR-J1 fail-loud contract violated at the runtime boundary
+even though it was satisfied at construction.
+
+**Fix** — branch the except on `APP_ENV` and re-raise as
+`RuntimeError` in production:
+
+```python
+# backend/app/main.py lifespan (now extracted to _init_jwt_subsystem)
+is_production = s.APP_ENV == "production"
+try:
+    app.state.jwt_keys = _JwtKeyManager(...)
+except Exception as exc:
+    msg = f"JwtKeyManager init failed: {exc}"
+    if is_production:
+        logger.error("jwt_keys_init_failed_fatal error=%s", exc)
+        raise RuntimeError(
+            msg + " - production deploys refuse to boot without a "
+            "working JWT subsystem. Set JWT_PRIVATE_KEY_PATH and "
+            "JWT_PUBLIC_KEY_PATH to readable RSA PEM files."
+        ) from exc
+    logger.warning("jwt_keys_init_failed error=%s", exc)
+elif is_production:
+    raise RuntimeError(
+        "JWT_PRIVATE_KEY_PATH and JWT_PUBLIC_KEY_PATH must both be set "
+        "in production. ..."
+    )
+```
+
+Same fail-loud branch for `RefreshService` and a belt-and-suspenders
+guard for the short-`REFRESH_HASH_KEY` path (`elif is_production: raise`).
+
+New pinning tests in `backend/tests/test_main.py` — four tests covering
+production-missing-keys / production-bad-paths / dev-missing-keys /
+healthy-config regression.
+
+---
+
+### 12.4 `ruff F811 redefined-while-unused` on `status` (PR-introduced lint)
+
+**Symptom** — PR-J3.8 introduced (and B3 amplified) three PR-introduced
+ruff items in `backend/app/main.py`:
+
+```bash
+$ ruff check backend/app/main.py --select F811,C901
+F811 Redefinition of unused status from line 12
+  --> backend/app/main.py:298:9
+C901 create_app is too complex (11 > 10)
+  --> backend/app/main.py:201:5
+C901 lifespan   is too complex (12 > 10)
+  --> backend/app/main.py:57:11
+```
+
+Plus two cosmetic items in `alembic/versions/` (excluded from ruff but
+listed in the spec for hygiene): W292 trailing-newline + RUF003 en-dash.
+
+**Diagnosis** — three independent smells bundled together:
+
+```bash
+# 1) The F811 collision
+grep -n "^from fastapi import\|status, headers, body" backend/app/main.py
+# → import line at 12 + closure tuple-unpacking
+
+# 2) The C901 complexity (McCabe threshold = 10)
+# create_app accumulated middleware, exception-handler, router and
+# health-endpoint wiring since PR-J1.
+# lifespan picked up +2 branches from B3 (the is_production gate +
+# the new RuntimeError raise).
+```
+
+**Root cause** — three coupled issues:
+
+1. The `_auth_error_handler` closure unpacks `(status, headers, body)`
+   from `to_http_response()` and reuses the bare name `status`,
+   shadowing the unused `from fastapi import status` (which is also
+   F401 noise in the baseline).
+
+2. `create_app` accumulated middleware, exception handler, router and
+   health-endpoint wiring since PR-J1. Each additive change pushed
+   branch count up by 1-2 paths until McCabe crossed 10.
+
+3. PR-J3.8's B3 fail-loud work added two new branches inside both the
+   JWT-init and RefreshService-init ifs (the `is_production` gate and
+   the new `RuntimeError` raise), pushing lifespan complexity from
+   10 to 12.
+
+**Fix** — three coupled changes in `backend/app/main.py`:
+
+```python
+# 1) F811 — rename the local var
+@app.exception_handler(_AuthError)
+async def _auth_error_handler(request, exc) -> JSONResponse:
+    http_status, headers, body = _auth_to_http(exc)
+    return JSONResponse(status_code=http_status, content=body, headers=headers)
+
+# 2) C901 create_app — extract helpers (create_app shrinks to C(5))
+def _resolve_settings(): ...                  # Settings per call
+def _install_middlewares(app, s): ...         # CORS + RequestId +
+                                             # RoE + Audit + DualAuth
+def _register_exception_handlers(app): ...    # AuthError handler
+def _mount_routers(app): ...                 # 7 routers
+def _register_health_endpoints(app): ...     # /health + /health/ready
+
+# 3) C901 lifespan — extract helpers (lifespan shrinks to C(4))
+def _init_jwt_subsystem(app, s): ...
+def _init_refresh_subsystem(app, s): ...
+async def _drain_and_close(app): ...
+```
+
+The alembic items are fixed as named in the spec — trailing newlines
+added to both rev files, en-dash `~10–15` → ASCII hyphen `~10-15`.
+
+Verification target per the spec:
+
+```bash
+$ cd backend && pytest -q
+870 passed, 1 xfailed, 22 warnings in 69.21s
+   # 859 baseline + 4 (B1) + 3 (B2) + 4 (B3) = 870; no regressions
+
+$ ruff check backend/ --statistics
+Found 110 errors.   # baseline 114 -> 110 (-4 PR-introduced items +
+                    #  -1 incidental F401 from lifespan helper extraction)
+```
+
+Cross-references: commit `abc9c96` (B4) on `feature/sec-auth-jwt`;
+engram obs #1376 (`sdd/sec-auth-jwt/apply-progress`); 4R review
+2026-10-16 R4 Resilience.
+
+---
+
 ## 9. Where to get more help
 
 For the **v0.2.1 install-failure series in detail** (timeline + commit messages + verbatim shell transcripts), see [postmortems/v0.2.1-release.md](postmortems/v0.2.1-release.md).

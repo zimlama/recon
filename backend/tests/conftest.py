@@ -11,12 +11,23 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 # Set test env BEFORE importing the app
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+# Use a per-process tempfile for the DB so connections share the same
+# schema (the per-connection semantics of sqlite:///:memory: break
+# auth-table visibility across handler / seed connections).
+import tempfile
+_test_db_dir = tempfile.mkdtemp(prefix="recon-conftest-db-")
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{_test_db_dir}/conftest.db")
 os.environ.setdefault("MINIMAX_API_KEY", "test-dummy-key")
 os.environ.setdefault("MINIMAX_BASE_URL", "http://localhost:9999/v1")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
 os.environ.setdefault("APP_ENV", "test")
+
+# Auth-specific (PR-J3.5+J3.8). Set here so they're in env before
+# get_settings() is first called and cached.
+os.environ.setdefault("REFRESH_HASH_KEY", "x" * 64)
+os.environ.setdefault("PEPPER_SECRET", "p" * 64)
+os.environ.setdefault("ALLOW_LEGACY_API_KEY", "false")
 
 # Ensure data dirs exist
 Path("./data").mkdir(parents=True, exist_ok=True)

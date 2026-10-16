@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -30,52 +30,55 @@ logger = structlog.get_logger(__name__)
 settings = get_settings()
 
 
-# ---- API key auth (closes audit finding C1) ----
-# Lightweight Bearer-token gate for single-user local installs. If
-# RECON_API_KEY is unset, auth is bypassed (dev mode). When set, every
-# business route requires 'Authorization: Bearer <RECON_API_KEY>'.
-# Health and docs routes stay open by NOT attaching this dependency to them.
+# ---- Dual-auth wrapper (sec-auth-jwt, Issue #29 PR-J3.8) --------------------
+# Replaces the legacy static ``RECON_API_KEY`` Bearer gate. Accepts JWTs
+# (preferred path) and falls back to the legacy static token for
+# ALLOW_LEGACY_API_KEY releases per spec section 6. We import here (not
+# at top of file) so the lifespan below can resolve the cycle cleanly.
+from app.auth.errors import AuthError as _AuthError  # noqa: E402
+from app.auth.jwt import JwtKeyManager as _JwtKeyManager  # noqa: E402
+from app.auth.middleware import DualAuthMiddleware as _DualAuthMiddleware  # noqa: E402
+from app.auth.refresh import RefreshService as _RefreshService  # noqa: E402
 
 
-async def verify_api_key(
-    authorization: str | None = Header(default=None),
-) -> None:
-    """Validate Authorization: Bearer <RECON_API_KEY>.
+def _app_state_jwt_keys(req: Request) -> _JwtKeyManager:
+    """Resolve the live JwtKeyManager from ``app.state`` for the middleware.
 
-    Skipped entirely when settings.RECON_API_KEY is None (dev mode).
-    Returns 401 when the header is missing, malformed, or carries the wrong
-    token. Reads `settings` from the module namespace on each call so tests
-    can monkey-patch `main.settings` to flip auth on/off per case.
+    The lifespan hook (``create_app`` -> ``lifespan``) populates
+    ``app.state.jwt_keys`` at startup; this helper is the middleware's
+    factory closure.
     """
-    if not settings.RECON_API_KEY:
-        return  # dev mode — auth disabled
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Authorization header",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    token = authorization[len("Bearer ") :]
-    if token != settings.RECON_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    from app.auth.deps import get_jwt_keys
+
+    return get_jwt_keys(req)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: init resources on startup, cleanup on shutdown."""
-    logger.info("app_starting", version=__version__, env=settings.APP_ENV)
+    # Re-read settings here so test fixtures that mutate env (e.g. via
+    # get_settings.cache_clear()) are honored. The module-level
+    # ``settings`` reference is frozen at first import; lifespan must
+    # see the current value.
+    s = get_settings()
+    logger.info("app_starting", version=__version__, env=s.APP_ENV)
 
     # Initialize database tables
     init_db()
     logger.info("db_initialized")
 
+    # ---- sec-auth-jwt (Issue #29, PR-J3.8) ----
+    # Populate app.state with the JWT keys, the refresh service, and the
+    # DB session factory the auth router depends on. We do this BEFORE
+    # the LLM client init so an auth subsystem misconfig (e.g. missing
+    # JWT_PRIVATE_KEY_PATH) fails the boot, not the first /auth/login.
+    _init_jwt_subsystem(app, s)
+    app.state.db_session_factory = SessionLocal
+    _init_refresh_subsystem(app, s)
+
     # Initialize LLM client
     app.state.llm_client = LLMClient()
-    logger.info("llm_client_initialized", has_key=settings.has_ai_key)
+    logger.info("llm_client_initialized", has_key=s.has_ai_key)
 
     # Initialize AI validator + job runner
     app.state.ai_validator = AIValidator(llm_client=app.state.llm_client)
@@ -88,7 +91,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Sweep jobs stuck in VALIDATING from a previous crash.
     # Audit finding H2: a crash between `job.status = VALIDATING` and
     # `job.status = COMPLETED` would otherwise leave the job orphaned.
-    # Swallow exceptions — a failed sweep must not block app startup.
+    # Swallow exceptions - a failed sweep must not block app startup.
     try:
         swept = await app.state.job_runner.sweep_stuck_jobs(max_age_minutes=30)
         logger.info("startup_sweep_complete", swept_jobs=swept)
@@ -98,12 +101,104 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("app_ready")
     yield
 
-    # Cleanup — graceful shutdown.
-    # Audit R4-H3: in-flight HTTP background jobs used to be killed
-    # on `SIGTERM` because `BackgroundTasks` from FastAPI only drains
-    # on response, not on shutdown. We now drain explicitly by
-    # awaiting any tasks registered during the lifetime, with a 30s
-    # cap so we don't hang forever on stuck work.
+    await _drain_and_close(app)
+
+
+def _init_jwt_subsystem(app: FastAPI, s) -> None:
+    """Populate ``app.state.jwt_keys`` from on-disk RSA PEM files.
+
+    R4 Resilience review 2026-10-16: in APP_ENV=production any failure
+    raises RuntimeError so the orchestrator (Docker Compose / K8s)
+    restarts the pod until the operator fixes the config. In dev /
+    staging / test the failure is logged as a warning so single-user
+    local installs can still boot with zero secrets.
+    """
+    is_production = s.APP_ENV == "production"
+
+    if s.JWT_PRIVATE_KEY_PATH and s.JWT_PUBLIC_KEY_PATH:
+        try:
+            app.state.jwt_keys = _JwtKeyManager(
+                private_path=s.JWT_PRIVATE_KEY_PATH,
+                public_path=s.JWT_PUBLIC_KEY_PATH,
+                kid="k1",
+                issuer=s.JWT_ISSUER,
+            )
+            logger.info("jwt_keys_initialized")
+        except Exception as exc:
+            msg = f"JwtKeyManager init failed: {exc}"
+            if is_production:
+                # Fail the boot, not the first /auth/login (R4 + PR-J1 B-2).
+                logger.error("jwt_keys_init_failed_fatal error=%s", exc)
+                raise RuntimeError(
+                    msg
+                    + " - production deploys refuse to boot without a "
+                    "working JWT subsystem. Set JWT_PRIVATE_KEY_PATH and "
+                    "JWT_PUBLIC_KEY_PATH to readable RSA PEM files."
+                ) from exc
+            logger.warning("jwt_keys_init_failed error=%s", exc)
+    elif is_production:
+        raise RuntimeError(
+            "JWT_PRIVATE_KEY_PATH and JWT_PUBLIC_KEY_PATH must both be set "
+            "in production. See spec section 7 - app/auth/middleware.py "
+            "DualAuthMiddleware requires a working JWT subsystem at boot."
+        )
+
+
+def _init_refresh_subsystem(app: FastAPI, s) -> None:
+    """Populate ``app.state.refresh_service`` if a usable HMAC key is set.
+
+    Behavior:
+    - ``len(REFRESH_HASH_KEY) >= 32`` in any env: try to construct;
+      on success, populate ``app.state.refresh_service``. On failure
+      in production, fail-loud; in dev, log + carry on.
+    - Key shorter than 32 bytes: in production raise (pydantic catches
+      most paths but a module-level swap could bypass it). In dev,
+      log + skip - the refresh endpoint returns a 503 at request time.
+    """
+    is_production = s.APP_ENV == "production"
+
+    if len(s.REFRESH_HASH_KEY) >= 32:
+        try:
+            app.state.refresh_service = _RefreshService(
+                session_factory=SessionLocal,
+                hash_key=s.REFRESH_HASH_KEY,
+                refresh_ttl_seconds=s.JWT_REFRESH_TTL_SECONDS,
+            )
+            logger.info("refresh_service_initialized")
+        except Exception as exc:
+            msg = f"RefreshService init failed: {exc}"
+            if is_production:
+                logger.error("refresh_service_init_failed_fatal error=%s", exc)
+                raise RuntimeError(
+                    msg
+                    + " - production deploys refuse to boot without a "
+                    "working refresh-token subsystem. Set REFRESH_HASH_KEY "
+                    "to a 32+ byte secret."
+                ) from exc
+            logger.warning("refresh_service_init_failed error=%s", exc)
+    elif is_production:
+        # Belt-and-suspenders: pydantic normally catches this at
+        # Settings() but be explicit so future changes don't regress
+        # the fail-loud gate.
+        raise RuntimeError(
+            "REFRESH_HASH_KEY must be at least 32 bytes in production. "
+            "See spec section 7 - RefreshService refuses to construct "
+            "without a usable HMAC-SHA256 key."
+        )
+    else:
+        logger.warning(
+            "refresh_service_disabled reason=REFRESH_HASH_KEY too short"
+        )
+
+
+async def _drain_and_close(app: FastAPI) -> None:
+    """Graceful-shutdown helper for the lifespan teardown half.
+
+    Audit R4-H3: in-flight HTTP background jobs used to be killed
+    on SIGTERM because BackgroundTasks from FastAPI only drains on
+    response, not on shutdown. Drain explicitly with a 30s cap so a
+    stuck worker does not block forever.
+    """
     logger.info("app_shutting_down")
     from app.routes.jobs import (
         drain_background_job_tasks_async,
@@ -126,11 +221,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     """Application factory."""
+    # Re-read settings for runtime/test mutations (env override, cache_clear).
+    # If the module-level `settings` has been monkey-patched by a test
+    # (e.g. test_app_wiring sets ROE_ENABLED=NotABool in env but swaps
+    # `main.settings` to a valid Settings object), prefer the swap over
+    # the live env read so the test's intent is honored.
+    s = _resolve_settings()
+
     # ---- CORS startup validation (fail closed) ----
     # Browsers reject responses whose Access-Control-Allow-Origin is "*"
     # when credentials are enabled. Allowing that combo silently in the
     # backend is misleading and dangerous. Refuse to boot instead.
-    if "*" in settings.cors_origins_list:
+    if "*" in s.cors_origins_list:
         raise RuntimeError(
             "CORS misconfiguration: '*' is not a permitted value in "
             "CORS_ORIGINS when allow_credentials=True. Use an explicit "
@@ -139,7 +241,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="zimlama recon API",
-        description="Phase 1 ethical hacking reconnaissance framework — backend API",
+        description="Phase 1 ethical hacking reconnaissance framework - backend API",
         version=__version__,
         docs_url="/docs",
         redoc_url="/redoc",
@@ -147,56 +249,147 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS middleware — explicit allowlist (no wildcard methods/headers).
+    _install_middlewares(app, s)
+    _register_exception_handlers(app)
+    _mount_routers(app)
+
+    _register_health_endpoints(app)
+
+    @app.get("/", tags=["root"])
+    async def root() -> dict[str, str]:
+        """Root endpoint. Returns service info."""
+        return {
+            "service": "zimlama-recon",
+            "version": __version__,
+            "docs": "/docs",
+            "health": "/health",
+        }
+
+    return app
+
+
+def _resolve_settings():
+    """Resolve the live Settings instance, honoring test-time swaps.
+
+    create_app() must read settings per-call so tests that mutate the
+    module-level binding (or ``get_settings.cache_clear()``) are
+    honored. Falls back to the module-level swap on any exception
+    (typically pydantic ValidationError from a test's deliberate
+    bad-config monkey-patch).
+    """
+    try:
+        return get_settings()
+    except Exception:
+        import app.main as _self
+        return _self.settings
+
+
+def _install_middlewares(app: FastAPI, s) -> None:
+    """Wire CORS, Request-ID, RoE, AuditLog, and DualAuth middlewares.
+
+    Order is significant — see PR-J3.4 sequence diagram. CORS first
+    (outermost, so preflight is answered), then Request-ID (so every
+    downstream middleware + response phase share a correlation ID),
+    then RoE (gates POSTs), then AuditLog (logs everything including
+    RoE 403s), then DualAuth (the actual auth gate).
+    """
+    # CORS middleware - explicit allowlist (no wildcard methods/headers).
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins_list,
+        allow_origins=s.cors_origins_list,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
     )
 
-    # Request-ID middleware — first in the chain so downstream
+    # Request-ID middleware - first inside CORS so downstream
     # middlewares (RoEMiddleware, AuditLog) and the response phase
-    # all see the same correlation ID (audit R4-H4). Wired before
-    # RoEMiddleware so a 403 carries the request_id.
+    # all see the same correlation ID (audit R4-H4).
     app.add_middleware(RequestIdMiddleware)
 
     # Rules-of-Engagement enforcement (REQ-021a, env-disabled by default).
     # Order rationale: added AFTER CORS (so pre-flight CORS requests skip
-    # RoE — only POSTs are gated) and BEFORE Audit (so 403 denials are
+    # RoE - only POSTs are gated) and BEFORE Audit (so 403 denials are
     # still captured by the audit middleware on the way out).
-    if settings.ROE_ENABLED:
+    if s.ROE_ENABLED:
         app.add_middleware(RoEMiddleware, session_factory=SessionLocal)
 
     # Audit middleware
-    if settings.AUDIT_LOGGING_ENABLED:
+    if s.AUDIT_LOGGING_ENABLED:
         app.add_middleware(AuditLogMiddleware)
 
-    # Routers — every business route requires API key when RECON_API_KEY is
-    # set. Health, docs, openapi, and redoc endpoints (defined below) are
-    # NOT included here, so they remain public.
-    _auth = [Depends(verify_api_key)]
-    app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["jobs"], dependencies=_auth)
-    app.include_router(
-        modules.router, prefix="/api/v1/modules", tags=["modules"], dependencies=_auth
+    # Dual-auth wrapper (sec-auth-jwt, PR-J3.8). Installed LAST so it
+    # sits outermost in the chain - must run before any router-level
+    # guard. Replaces verify_api_key for the whole app: accepts JWTs,
+    # falls back to legacy API key.
+    jwt_keys_present = bool(
+        s.JWT_PRIVATE_KEY_PATH and s.JWT_PUBLIC_KEY_PATH
     )
-    app.include_router(findings.router, prefix="/api/v1", tags=["findings"], dependencies=_auth)
-    app.include_router(reports.router, prefix="/api/v1", tags=["reports"], dependencies=_auth)
-    app.include_router(handoff.router, prefix="/api/v1", tags=["handoff"], dependencies=_auth)
-    app.include_router(ai.router, prefix="/api/v1", tags=["ai"], dependencies=_auth)
+    app.add_middleware(
+        _DualAuthMiddleware,
+        jwt_keys_factory=lambda req: _app_state_jwt_keys(req),
+        allow_legacy_api_key=bool(s.ALLOW_LEGACY_API_KEY),
+        legacy_api_key=s.RECON_API_KEY,
+        jwt_keys_configured=jwt_keys_present,
+        settings_provider=get_settings,
+    )
 
-    # Health endpoints — kept distinct per K8s liveness-vs-readiness semantics.
-    #
-    # - `/health` is the **liveness** probe: returns 200 as long as the
-    #   Python process is up and the request handler dispatch works.
-    #   No dependency checks. Used by Docker / Compose / K8s livenessProbe.
-    #
-    # - `/health/ready` is the **readiness** probe: returns 200 only if
-    #   every hard dependency (DB, LLMClient construct) responds. Used by
-    #   K8s readinessProbe; returns 503 if a dep is unreachable so traffic
-    #   is steered away. Audit finding R4-H1 — the previous version just
-    #   returned a literal 200 dict without probing anything.
+
+def _register_exception_handlers(app: FastAPI) -> None:
+    """Register ``app.exception_handler`` hooks for the auth subsystem.
+
+    The auth layer raises ``AuthError`` subclasses that already encode
+    the HTTP status, headers and body. Centralising the conversion
+    keeps the routers free of import-time errors and side-effects.
+    """
+    from app.auth.errors import to_http_response as _auth_to_http
+
+    @app.exception_handler(_AuthError)
+    async def _auth_error_handler(request: Request, exc: _AuthError) -> JSONResponse:
+        # F811 fix (PR #56 B4): rename the local ``status`` to avoid
+        # shadowing ``from fastapi import status`` at the top of the
+        # file.
+        http_status, headers, body = _auth_to_http(exc)
+        return JSONResponse(status_code=http_status, content=body, headers=headers)
+
+
+def _mount_routers(app: FastAPI) -> None:
+    """Wire the business routers under the dual-auth umbrella.
+
+    Health, docs, and ``/api/v1/auth/*`` are intentionally NOT here -
+    they stay public so the auth lifecycle (login/refresh/logout) and
+    the orchestrator probes work without a token.
+    """
+    # No ``Depends(verify_api_key)`` - the dual-auth middleware already gated.
+    app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["jobs"])
+    app.include_router(modules.router, prefix="/api/v1/modules", tags=["modules"])
+    app.include_router(findings.router, prefix="/api/v1", tags=["findings"])
+    app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
+    app.include_router(handoff.router, prefix="/api/v1", tags=["handoff"])
+    app.include_router(ai.router, prefix="/api/v1", tags=["ai"])
+
+    # Auth router (Issue #29 PR-J3.5).
+    from app.auth.router import router as auth_router
+
+    app.include_router(auth_router)
+
+
+def _register_health_endpoints(app: FastAPI) -> None:
+    """Register ``/health`` (liveness) and ``/health/ready`` (readiness).
+
+    Kept distinct per K8s liveness-vs-readiness semantics.
+
+    - ``/health`` is the **liveness** probe: returns 200 as long as the
+      Python process is up and the request handler dispatch works.
+      No dependency checks. Used by Docker / Compose / K8s livenessProbe.
+
+    - ``/health/ready`` is the **readiness** probe: returns 200 only if
+      every hard dependency (DB, LLMClient construct) responds. Used by
+      K8s readinessProbe; returns 503 if a dep is unreachable so traffic
+      is steered away. Audit finding R4-H1 - the previous version just
+      returned a literal 200 dict without probing anything.
+    """
+
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, str]:
         """Liveness probe. Returns 200 if the process is up."""
@@ -204,18 +397,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health/ready", tags=["health"])
     async def ready() -> JSONResponse:
-        """Readiness probe. Returns 200 only if DB and LLMClient are OK.
-
-        Probes:
-          1. SQLAlchemy — ``SELECT 1`` against SessionLocal. Any
-             SQLAlchemyError (OperationalError, DisconnectionError, …)
-             returns 503.
-          2. LLMClient — instantiates the client (no network IO). Surfaces
-             misconfiguration (e.g. malformed MiniMax API key) at
-             readiness time so K8s can steer traffic away.
-
-        A single dependency failure is enough to mark the pod not-ready.
-        """
+        """Readiness probe. Returns 200 only if DB and LLMClient are OK."""
         # 1) Database round-trip
         try:
             with SessionLocal() as db:
@@ -233,7 +415,7 @@ def create_app() -> FastAPI:
                 headers={"Retry-After": "5"},
             )
 
-        # 2) LLMClient — construct only, no network IO. Failure here
+        # 2) LLMClient - construct only, no network IO. Failure here
         # usually means MINIMAX_API_KEY is missing/malformed.
         try:
             LLMClient()
@@ -259,18 +441,6 @@ def create_app() -> FastAPI:
                 "env": settings.APP_ENV,
             },
         )
-
-    @app.get("/", tags=["root"])
-    async def root() -> dict[str, str]:
-        """Root endpoint. Returns service info."""
-        return {
-            "service": "zimlama-recon",
-            "version": __version__,
-            "docs": "/docs",
-            "health": "/health",
-        }
-
-    return app
 
 
 app = create_app()
