@@ -62,4 +62,4 @@ argon2-cffi==23.1.0
 # pyjwt[crypto]: JWT encode/decode. The [crypto] extra pulls in `cryptography`
 # (already declared above) so RS256 keys load via cryptography.hazmat.primitives
 # without an extra install step.
-pyjwt[crypto]==2.8.0
+pyjwt[crypto]==2.15.0  # 2026-10-16 bump: closes 14 vulns (PYSEC-2025-183 through PYSEC-2026-4183); 2.13.0+ decoders handle the older 2.8.0 tokens still in flight
