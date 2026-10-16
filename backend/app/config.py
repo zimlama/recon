@@ -429,7 +429,7 @@ class Settings(BaseSettings):
             # pydantic-settings serializes tuples as JSON arrays on
             # env-driven loads — so accept either tuple or list of
             # length 2 with int entries.
-            seq = raw if isinstance(raw, (tuple, list)) else None
+            seq = raw if isinstance(raw, tuple | list) else None
             if seq is None or len(seq) != 2:
                 raise ValueError(
                     f"RATE_LIMITS[{key!r}] must be (requests_limit, "

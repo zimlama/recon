@@ -721,7 +721,7 @@ class PersonDossierModule(BaseReconModule):
             .limit(MAX_SIBLING_FINDINGS)
             .all()
         )
-        return [(row, module_name) for row, module_name in rows]
+        return list(rows)
 
     @staticmethod
     def _row_to_finding(row: Any) -> Finding:

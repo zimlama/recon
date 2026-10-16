@@ -83,7 +83,7 @@ class AIValidator:
                 return LDMValidationResult.model_validate(response)
             except ValidationError as e:
                 logger.warning("ai_schema_mismatch module=%s error=%s", module.name, e)
-                char_count = len(response) if isinstance(response, (str, list)) else 0
+                char_count = len(response) if isinstance(response, str | list) else 0
                 return LDMValidationResult(
                     verdicts=[],
                     summary=(

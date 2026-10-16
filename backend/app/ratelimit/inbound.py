@@ -257,7 +257,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._limiter = limiter or RateLimiter(clock=clock or time.monotonic)
         if policies:
-            self._limiter.configure({(scope, ep): p for (scope, ep), p in _scope_policies(policies).items()})
+            self._limiter.configure(dict(_scope_policies(policies).items()))
         self._bypass_token = bypass_token
         self._allow_bypass = allow_bypass
         self._app_state = app_state  # resolved from request.app.state at dispatch time
