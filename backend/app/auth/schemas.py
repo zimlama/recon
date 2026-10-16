@@ -151,10 +151,7 @@ class LegacyUsageStatsResponse(BaseModel):
     rows are excluded because they wouldn't be served by the
     legacy static API key.
 
-    The body NEVER advertises ``require_admin``'s best-effort
-    posture — that caveat lives on the ``X-Admin-Gate-Best-Effort``
-    response header (REQ-LEG-002) so the JSON body stays
-    parseable for non-admin operators who got the 403.
+    The admin gate is JWT-verified (PR-J4 / REQ-ADM-001).
     """
 
     model_config = ConfigDict(extra="forbid")
