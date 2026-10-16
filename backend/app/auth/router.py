@@ -1,4 +1,4 @@
-"""FastAPI router for auth lifecycle endpoints (PR-J3.5).
+"""FastAPI router for auth lifecycle endpoints (PR-J3.5 + PR-J4).
 
 Routes mounted under ``/api/v1/auth``:
 
@@ -12,6 +12,9 @@ Routes mounted under ``/api/v1/auth``:
 
 The dual-auth wrapper (PR-J3.8) extracts ``request.state.user_id`` and
 writes it onto the Request so router handlers don't need to re-decode.
+PR-J4: the admin gate ``require_admin`` re-verifies the JWT signature
+at every call (REQ-ADM-001); ``request.state.role`` is NOT trusted
+for the gate decision.
 
 Errors
 ------
@@ -63,10 +66,6 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 # operators can't DoS the audit-log scan with an unbounded query.
 _LOOKBACK_DEFAULT_DAYS = 30
 _LOOKBACK_MAX_DAYS = 365
-# Apache-2.0 SPDX-header for the response header that advertises
-# the best-effort posture on the 200 path only.
-_BEST_EFFORT_HEADER = "X-Admin-Gate-Best-Effort"
-_BEST_EFFORT_VALUE = "true"
 
 
 def _to_http_exception(err: AuthError) -> HTTPException:
@@ -273,7 +272,7 @@ async def legacy_usage_stats_route(
     ),
     user_id: str = Depends(require_admin),
 ) -> JSONResponse:
-    """Admin-only legacy-key usage stats (PR-J3.7).
+    """Admin-only legacy-key usage stats (PR-J3.7 + PR-J4).
 
     Aggregation rules (engram #1431, REQ-LEG-003):
 
@@ -283,10 +282,8 @@ async def legacy_usage_stats_route(
     - Per-IP ``sample_paths`` = top-5 distinct ``details.path``
       by per-IP frequency DESC.
 
-    Response headers: every 200 emits
-    ``X-Admin-Gate-Best-Effort: true`` (REQ-LEG-002). The header is
-    NOT set on 4xx responses — the gate's posture is only
-    relevant when the gate succeeded.
+    The admin gate is JWT-verified (PR-J4 / REQ-ADM-001) — no
+    ``X-Admin-Gate-Best-Effort`` response header is emitted.
     """
     now = datetime.now(tz=UTC)
     since_dt = _parse_since(since, now)
@@ -314,10 +311,7 @@ async def legacy_usage_stats_route(
         rows=rows,
     )
     payload = response.model_dump(mode="json")
-    return JSONResponse(
-        content=payload,
-        headers={_BEST_EFFORT_HEADER: _BEST_EFFORT_VALUE},
-    )
+    return JSONResponse(content=payload)
 
 
 __all__ = ["router"]
