@@ -13,11 +13,11 @@ Sliding-window per-(scope, key, endpoint) counter:
    via the compiled regex set on ``app.state.rate_limit_patterns``.
 
 2. ``RateLimiter.is_allowed(scope, key, endpoint, *, count_it, now=None)``
-   does the lazy-evict + check + append under a per-``(scope, key,
-   endpoint)`` ``asyncio.Lock`` (the C-1 C-2 + HIGH-1 + HIGH-2
-   contracts from the gate review). Returns ``(allowed, retry_after)``
-   where ``retry_after`` is ``None`` on allow and ``>= 1`` on reject
-   (clamped via ``max(1, ceil(...))`` per MED-4).
+   does the lazy-evict + check + append synchronously (no ``await``,
+   so no other coroutine can interleave mid-call — see Concurrency).
+   Returns ``(allowed, retry_after)`` where ``retry_after`` is
+   ``None`` on allow and ``>= 1`` on reject (clamped via
+   ``max(1, ceil(...))`` per MED-4).
 
 3. ``RateLimitMiddleware(BaseHTTPMiddleware)`` calls ``is_allowed``
    twice per request: pre-call per-IP (decision D1), and post-call
@@ -37,10 +37,12 @@ Sliding-window per-(scope, key, endpoint) counter:
 
 Concurrency
 -----------
-Per-(scope, key, endpoint) ``asyncio.Lock`` so concurrent calls on the
-same key serialize the lazy-evict + check + append sequence without
-blocking the event loop (``threading.Lock`` would deadlock under
-``BaseHTTPMiddleware.dispatch`` — HIGH-1).
+``RateLimiter.is_allowed`` is fully synchronous — no ``await`` and no
+``asyncio.Lock`` on the hot path. Coroutines on the same event loop
+cannot interleave mid-call, so the lazy-evict + check + append
+sequence is atomic per key without explicit locking. (An
+``asyncio.Lock`` would be over-engineered here and a ``threading.Lock``
+would deadlock under ``BaseHTTPMiddleware.dispatch`` — HIGH-1.)
 
 Memory bound
 ------------
@@ -102,11 +104,6 @@ class RateLimiter:
         self._buckets: dict[tuple[str, str, str], deque[float]] = {}
         # {(scope, endpoint): (limit, window)}
         self._policies: dict[tuple[str, str], tuple[int, int]] = dict(policies or {})
-        # {(scope, key, endpoint): asyncio.Lock} — created on demand
-        import asyncio as _asyncio
-
-        self._locks: dict[tuple[str, str, str], _asyncio.Lock] = {}
-        self._lock_init_lock = _asyncio.Lock()
 
     # ---- Inspectors (read-only; used in unit tests) --------------------
 
@@ -114,21 +111,6 @@ class RateLimiter:
     def buckets(self) -> dict[tuple[str, str, str], deque[float]]:
         """Read-only view of the internal bucket dict (for assertions)."""
         return self._buckets
-
-    def _get_lock(self, key: tuple[str, str, str]) -> Any:
-        """Lazily create an ``asyncio.Lock`` for ``key``."""
-        lock = self._locks.get(key)
-        if lock is not None:
-            return lock
-        # Lazy + guaranteed-single-init by reusing the same LazyLock pattern
-        # the outbound ``orchestrator.rate_limiter`` uses, but with an
-        # ``asyncio.Lock`` so we yield cooperatively under
-        # ``BaseHTTPMiddleware.dispatch``.
-        import asyncio as _asyncio
-
-        lock = _asyncio.Lock()
-        self._locks[key] = lock
-        return lock
 
     # ---- Decision algorithm -------------------------------------------
 
