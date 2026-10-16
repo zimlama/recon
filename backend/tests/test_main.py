@@ -69,10 +69,13 @@ def test_create_app_rejects_wildcard_cors_with_credentials(monkeypatch: pytest.M
     import app.config as cfg_mod
     import app.main as main_mod
 
-    # Swap the module-level ``settings`` for a fresh Settings whose
-    # CORS_ORIGINS is the dangerous wildcard. Using a fresh Settings
-    # avoids lru_cache / module-reload side effects.
+    # PR-J3.8: create_app now re-reads settings via get_settings(). Patch
+    # the reference imported into main_mod (not cfg_mod) so the call site
+    # sees the wildcard CORS_ORIGINS.
     wildcard_settings = cfg_mod.Settings(CORS_ORIGINS="*")
+    monkeypatch.setattr(main_mod, "get_settings", lambda: wildcard_settings)
+    # Belt-and-suspenders: also patch the module-level reference for
+    # any code path that still reads it.
     monkeypatch.setattr(main_mod, "settings", wildcard_settings)
 
     with pytest.raises(RuntimeError, match="CORS misconfiguration"):
@@ -84,7 +87,8 @@ def test_create_app_accepts_explicit_cors_origin_list(monkeypatch: pytest.Monkey
     import app.main as main_mod
 
     # Explicit allowlist (the conftest default) — keep the original settings.
-    monkeypatch.setattr(main_mod, "settings", main_mod.get_settings.__wrapped__())
+    main_mod.get_settings.cache_clear()
+    monkeypatch.setattr(main_mod, "settings", main_mod.get_settings())
     app = main_mod.create_app()
     assert app is not None
 

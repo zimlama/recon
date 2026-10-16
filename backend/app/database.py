@@ -93,6 +93,7 @@ def init_db() -> None:
     """
     # Import all models to register them with Base.metadata
     from app import models  # noqa: F401
+    from app.auth import models as _auth_models  # noqa: F401 — PR-J3.x tables
 
     Base.metadata.create_all(bind=engine, checkfirst=True)
 
@@ -100,5 +101,6 @@ def init_db() -> None:
 def drop_all_tables() -> None:
     """Drop all tables. USE WITH CAUTION — for tests only."""
     from app import models  # noqa: F401
+    from app.auth import models as _auth_models  # noqa: F401
 
     Base.metadata.drop_all(bind=engine)

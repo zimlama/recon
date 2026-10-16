@@ -64,6 +64,9 @@ def _make_job(db: Session, target: str = "example.com", completed: bool = True) 
     )
     db.add(job)
     db.flush()
+    # Commit so the row is visible to other connections (file-based test
+    # DB uses WAL mode; uncommitted writes are invisible to readers).
+    db.commit()
     return job
 
 
@@ -83,6 +86,7 @@ def _make_module_run(
     )
     db.add(mr)
     db.flush()
+    db.commit()
     return mr
 
 
@@ -100,6 +104,7 @@ def _make_finding(
     )
     db.add(f)
     db.flush()
+    db.commit()
     return f
 
 
