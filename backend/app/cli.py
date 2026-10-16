@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from typing import Optional
 from pathlib import Path
 
 import typer
@@ -42,7 +41,7 @@ def init_db_cmd() -> None:
 @cli.command()
 def run(
     target: str = typer.Argument(..., help="Target domain to recon"),
-    modules: Optional[list[str]] = typer.Option(
+    modules: list[str] | None = typer.Option(
         None, "--module", "-m", help="Module names to run (repeatable)"
     ),
 ) -> None:
@@ -108,7 +107,7 @@ def run(
 @cli.command()
 def handoff(
     job_id: str = typer.Argument(..., help="Job ID to export handoff for"),
-    output: Optional[Path] = typer.Option(
+    output: Path | None = typer.Option(
         None, "--output", "-o", help="Output file path (default: stdout)"
     ),
 ) -> None:

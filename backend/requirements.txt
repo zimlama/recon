@@ -40,7 +40,7 @@ aiohttp==3.14.5
 structlog==24.1.0
 
 # --- CLI ---
-typer==0.12.1
+typer>=0.15.0  # 2026-10-16 bump: 0.12.1 incompat with click 8.x (make_metavar() signature change); 0.15+ also adds PEP 604 union support (`X | None` syntax)
 
 # --- Recon module dependencies ---
 # dnspython is used by the dns_enum module (sync API, run in thread executor)
