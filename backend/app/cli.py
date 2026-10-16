@@ -18,8 +18,8 @@ from pathlib import Path
 import typer
 
 from app.database import SessionLocal, init_db
-from app.models import Handoff, Job
 from app.handoff.schema import HandoffPacket
+from app.models import Handoff, Job
 from app.modules import MODULE_REGISTRY
 
 cli = typer.Typer(

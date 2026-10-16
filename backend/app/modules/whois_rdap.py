@@ -9,14 +9,12 @@ MITRE ATT&CK: T1596.002 (WHOIS), T1590.001 (IP WHOIS)
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import asyncio
-import logging
 import re
 import time
 from typing import Any, cast
 
+from app.logging import get_logger
 from app.models import ModuleTier
 from app.modules.base import (
     BaseReconModule,

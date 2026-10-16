@@ -35,10 +35,7 @@ Design notes:
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import json
-import logging
 import os
 from collections.abc import Callable, Iterable
 
@@ -49,6 +46,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.types import ASGIApp
 
+from app.logging import get_logger
 from app.models import ScopeType
 from app.orchestrator.roe import RoEValidator
 

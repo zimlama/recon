@@ -63,7 +63,7 @@ from app.database import Base
 _TEST_HASH_KEY = "x" * 64
 
 
-@pytest.fixture()
+@pytest.fixture
 def engine():
     """Per-test in-memory SQLite engine with auth tables only."""
     eng = create_engine("sqlite:///:memory:")
@@ -75,13 +75,13 @@ def engine():
     eng.dispose()
 
 
-@pytest.fixture()
+@pytest.fixture
 def session_factory(engine):
     """Return a ``session_factory`` callable for ``RefreshService``."""
     return sessionmaker(bind=engine)
 
 
-@pytest.fixture()
+@pytest.fixture
 def user(engine, session_factory) -> Iterator[AuthUser]:
     """Insert an ``AuthUser`` and yield it; rollback tears it down."""
     with session_factory() as session:
@@ -98,7 +98,7 @@ def user(engine, session_factory) -> Iterator[AuthUser]:
         yield u
 
 
-@pytest.fixture()
+@pytest.fixture
 def service(session_factory) -> RefreshService:
     """Return a ``RefreshService`` bound to the per-test session factory."""
     return RefreshService(
@@ -108,7 +108,7 @@ def service(session_factory) -> RefreshService:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def db(session_factory) -> Iterator:
     """Yield a sync session bound to the per-test in-memory engine."""
     session = session_factory()
@@ -118,7 +118,7 @@ def db(session_factory) -> Iterator:
         session.close()
 
 
-@pytest.fixture()
+@pytest.fixture
 def short_ttl_service(session_factory) -> RefreshService:
     """Variant with a 1-second TTL — used by J2.4 expiry purge tests."""
     return RefreshService(

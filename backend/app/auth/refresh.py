@@ -493,10 +493,10 @@ class RefreshService:
 
 __all__ = [
     "DEFAULT_REFRESH_TTL_SECONDS",
+    "TOKEN_PREFIX",
     "FamilyRevokedError",
     "RefreshService",
     "RefreshTokenIssued",
     "RefreshTokenRotated",
-    "TOKEN_PREFIX",
     "TokenInvalidError",
 ]

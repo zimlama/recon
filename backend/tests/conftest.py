@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 import os
+
+# Set test env BEFORE importing the app
+# Use a per-process tempfile for the DB so connections share the same
+# schema (the per-connection semantics of sqlite:///:memory: break
+# auth-table visibility across handler / seed connections).
+import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -10,11 +16,6 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-# Set test env BEFORE importing the app
-# Use a per-process tempfile for the DB so connections share the same
-# schema (the per-connection semantics of sqlite:///:memory: break
-# auth-table visibility across handler / seed connections).
-import tempfile
 _test_db_dir = tempfile.mkdtemp(prefix="recon-conftest-db-")
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_test_db_dir}/conftest.db")
 os.environ.setdefault("MINIMAX_API_KEY", "test-dummy-key")

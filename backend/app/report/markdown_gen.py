@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
-import logging
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.logging import get_logger
 from app.models import Job, ModuleRun, _now
 
 logger = get_logger(__name__)

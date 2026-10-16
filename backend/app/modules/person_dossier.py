@@ -23,11 +23,8 @@ already-gathered data, no new network IO).
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import asyncio
 import contextlib
-import logging
 import re
 import time
 from dataclasses import dataclass
@@ -37,6 +34,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 
 from app.config import get_settings
+from app.logging import get_logger
 from app.models import (
     FindingType,
     IdentityMap,

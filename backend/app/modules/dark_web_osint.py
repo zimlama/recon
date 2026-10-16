@@ -14,14 +14,12 @@ MITRE ATT&CK: T1589.001, T1593.001
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
-import logging
 import shutil
 import time
 
 import httpx
 
+from app.logging import get_logger
 from app.models import ModuleTier
 from app.modules.base import (
     BaseReconModule,

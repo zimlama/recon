@@ -22,6 +22,7 @@ from app.auth.errors import (
     TokenRevokedError,
     to_http_response,
 )
+from app.auth.password import MIN_PASSWORD_LENGTH
 from app.auth.schemas import (
     LoginRequest,
     LogoutRequest,
@@ -30,8 +31,6 @@ from app.auth.schemas import (
     TokenPairResponse,
     UserResponse,
 )
-from app.auth.password import MIN_PASSWORD_LENGTH
-
 
 # ---------------------------------------------------------------------------
 # Section 1 — Schemas (J3.1)

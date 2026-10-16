@@ -4,11 +4,8 @@
 
 from __future__ import annotations
 
-from app.logging import get_logger
-
 import contextlib
 import json
-import logging
 import os
 import tempfile
 from pathlib import Path
@@ -29,6 +26,7 @@ from app.handoff.schema import (
     HandoffTarget,
     HandoffTechStack,
 )
+from app.logging import get_logger
 from app.models import (
     AIValidation,
     Finding,

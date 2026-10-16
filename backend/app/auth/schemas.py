@@ -17,7 +17,6 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.auth.password import MIN_PASSWORD_LENGTH
 
-
 # ---------------------------------------------------------------------------
 # Requests
 # ---------------------------------------------------------------------------
