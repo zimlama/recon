@@ -23,6 +23,22 @@ The middleware writes ``request.state`` for downstream handlers:
 Health-check routes (``/health``, ``/ready``, ``/docs``, ``/openapi.json``)
 are explicitly bypassed so they stay open even in production.
 
+Dev-mode bypass (R1 Risk fix 2026-10-16)
+----------------------------------------
+When both ``RECON_API_KEY`` is unset AND no JWT keys are configured,
+the middleware used to assign ``role='admin'`` for every request so
+single-user local installs boot with zero env vars. R1 Risk review
+flagged that as admin-open posture in any misconfigured production
+deployment.
+
+The bypass is now gated on ``settings.APP_ENV != "production"``.
+
+- APP_ENV=development (or staging/test): the bypass runs, single-user
+  local installs keep working.
+- APP_ENV=production: the bypass REFUSES with HTTP 503
+  ``"auth subsystem not configured"`` so a misconfigured production
+  deployment fails the FIRST request, not silently opens admin-wide.
+
 Logging
 -------
 The path used (``auth.jwt`` vs ``auth.legacy``) is logged at INFO for
@@ -40,6 +56,22 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
+
+
+def _is_production_now(settings_provider) -> bool:
+    """Return True iff the live settings say we're in production.
+
+    Resolved per request via ``settings_provider`` so a test that
+    monkey-patches ``settings.APP_ENV`` between requests is honored.
+    Falls back to False if no provider is wired (matches the
+    pre-hardening default; ``create_app`` always wires a provider).
+    """
+    if settings_provider is None:
+        return False
+    try:
+        return bool(settings_provider().APP_ENV == "production")
+    except Exception:
+        return False
 
 
 # Routes that NEVER need authentication. Keep this list TIGHT — adding to
@@ -159,10 +191,37 @@ class DualAuthMiddleware(BaseHTTPMiddleware):
         # 2. Dev-mode bypass — if RECON_API_KEY is unset AND no JWT
         # keys are configured, allow the request through (matches the
         # pre-sec-auth-jwt behavior so single-user local installs
-        # continue to work without any setup). Production deployments
-        # MUST set RECON_API_KEY (or a JWT keypair) — see spec section 7.
+        # continue to work without any setup).
+        #
+        # R1 Risk review 2026-10-16: gated on APP_ENV != "production".
+        # Production deployments MUST set RECON_API_KEY (or a JWT
+        # keypair) — spec section 7 — and the middleware refuses rather
+        # than silently letting the request through as role='admin'.
         current_legacy = self._legacy_api_key_now()
         if not current_legacy and not self._jwt_keys_configured:
+            if _is_production_now(self._settings_provider):
+                # Fail-loud. Refuse so the operator notices the
+                # misconfig at first request, not after a security
+                # incident. The message names BOTH secrets so the
+                # operator knows which one to set.
+                logger.error(
+                    "auth_subsystem_not_configured "
+                    "RECON_API_KEY=unset JWT_PRIVATE_KEY_PATH=unset "
+                    "APP_ENV=production — refusing anonymous admin bypass"
+                )
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "error": "auth_subsystem_not_configured",
+                        "message": (
+                            "Authentication is not configured for "
+                            "APP_ENV=production. Set RECON_API_KEY or "
+                            "JWT_PRIVATE_KEY_PATH + JWT_PUBLIC_KEY_PATH "
+                            "before serving requests. See spec section 7."
+                        ),
+                    },
+                    headers={"Retry-After": "5"},
+                )
             request.state.user_id = "local"
             request.state.username = "local"
             request.state.jwt_jti = None
