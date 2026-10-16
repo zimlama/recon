@@ -127,24 +127,42 @@ async def test_auth_with_wrong_key(monkeypatch: pytest.MonkeyPatch, client: Asyn
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason=(
-        "PR-J3.8: DualAuthMiddleware caches the settings at construction time. "
-        "The legacy Bearer-key test relied on the old verify_api_key (a "
-        "Depends that re-read settings on every request). The test needs to "
-        "be rewritten to use a fresh app with an explicit settings provider, "
-        "or migrated to the JWT path. Tracked for post-v0.2.2 cleanup."
-    ),
-    strict=False,
-)
-async def test_auth_with_correct_key(monkeypatch: pytest.MonkeyPatch, client: AsyncClient) -> None:
-    """Correct token → 200."""
-    _enable_auth(monkeypatch)
-    response = await client.get(
-        "/api/v1/modules",
-        headers={"Authorization": "Bearer testkey"},
-    )
-    assert response.status_code == 200
+async def test_auth_with_correct_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Correct token → 200 (with fresh app + settings; conftest's `client`
+    fixture is avoided because the shared `app` instance caches settings
+    at construction time, so monkeypatching `app.main.settings` after
+    the fact has no effect on the dual-auth middleware that was built
+    during the conftest's import)."""
+    import os
+    from app.config import Settings
+
+    # Force ALLOW_LEGACY_API_KEY=true for this test's fresh app.
+    monkeypatch.setenv("ALLOW_LEGACY_API_KEY", "true")
+    monkeypatch.setenv("RECON_API_KEY", "testkey")
+
+    # Build a fresh Settings + fresh app on demand.
+    s = Settings()
+    assert s.RECON_API_KEY == "testkey"
+    assert s.ALLOW_LEGACY_API_KEY is True
+
+    from app.main import create_app
+    from app.database import Base, engine
+    from httpx import ASGITransport, AsyncClient
+
+    fresh_app = create_app()
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=fresh_app), base_url="http://test"
+        ) as ac:
+            response = await ac.get(
+                "/api/v1/modules",
+                headers={"Authorization": "Bearer testkey"},
+            )
+        assert response.status_code == 200
+    finally:
+        Base.metadata.drop_all(bind=engine)
 
 
 @pytest.mark.asyncio
