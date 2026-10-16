@@ -12,6 +12,20 @@ The middleware in ``app/auth/middleware.py`` sets
 ``request.state.jwt_jti`` AFTER successful JWT verification; this
 module is for endpoints that want to re-verify a token (e.g. when a
 service-to-service bearer arrives that the middleware didn't catch).
+
+PR-J3.7 (legacy-usage-stats): ``require_admin`` was a stub. The
+deprecation-window endpoint ``GET /api/v1/auth/legacy-usage-stats``
+(REQ-LEG-001) needs the dep to actually 403 when the cached role is
+not ``"admin"`` — otherwise the SQL aggregation leaks to any
+authenticated operator. ``require_admin`` now reads
+``request.state.role`` from the dual-auth middleware and raises
+``AdminForbiddenError`` (403, code ``forbidden``) when it is not
+``"admin"``. The posture is still **best-effort** at the dep layer
+(``require_admin`` does NOT re-verify the JWT signature — JWT 900s
+TTL bounds the blast radius; PR-J4 hardens with a DB-backed
+role lookup). Each 200 response from the legacy-usage endpoint
+advertises this with an ``X-Admin-Gate-Best-Effort: true`` header
+so operators know the gate is cached-state.
 """
 
 from __future__ import annotations
@@ -20,7 +34,11 @@ from typing import Any
 
 from fastapi import Depends, Request
 
-from app.auth.errors import InsufficientScopeError, TokenInvalidError
+from app.auth.errors import (
+    AdminForbiddenError,
+    InsufficientScopeError,
+    TokenInvalidError,
+)
 from app.auth.jwt import JwtKeyManager
 from app.config import get_settings
 
@@ -82,17 +100,30 @@ def get_current_user_id(
     return sub
 
 
-def require_admin(user_id: str = Depends(get_current_user_id)) -> str:
+def require_admin(
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+) -> str:
     """Assert the bearer token has ``role=admin``; return ``user_id``.
 
-    For ergonomic decoupling we DO NOT hit the DB to re-check the role
-    every call (the JWT is the source of truth for the lifetime of
-    the access token — 900s). If a privilege downgrade is needed the
-    operator MUST revoke the user's refresh family via the CLI.
+    The role is read from ``request.state.role`` populated by
+    ``DualAuthMiddleware`` (``"admin"`` / ``"operator"`` /
+    ``"service"``). When the role is not ``"admin"`` the dep raises
+    ``AdminForbiddenError`` (HTTP 403, code ``"forbidden"``,
+    body carries ``required_role="admin"``).
+
+    Best-effort posture: the dep does NOT re-verify the JWT signature.
+    The JWT access TTL is 900s, so a stolen-admin-token blast radius
+    is bounded by that window; PR-J4 (admin tier) will swap the
+    cached role for a DB-backed role lookup. The
+    ``X-Admin-Gate-Best-Effort: true`` response header on the
+    legacy-usage-stats endpoint advertises this limitation; this
+    dep stays silent because the header is an endpoint-level
+    concern, not a dep-level one.
     """
-    # The role is in the cached state from the middleware.
-    # For now this is best-effort; the router exposes an admin-only
-    # endpoint that the middleware also gates on `role`.
+    role = getattr(request.state, "role", None)
+    if role != "admin":
+        raise AdminForbiddenError()
     return user_id
 
 

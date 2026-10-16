@@ -112,7 +112,64 @@ class LogoutResponse(BaseModel):
     family_revoked_count: int = Field(ge=0)
 
 
+# ---------------------------------------------------------------------------
+# PR-J3.7 — legacy RECON_API_KEY usage-stats response (REQ-LEG-005)
+# ---------------------------------------------------------------------------
+
+
+class LegacyUsageStatsRow(BaseModel):
+    """One row of the legacy-usage-stats aggregation.
+
+    Each row corresponds to ONE client ``ip`` seen by the legacy
+    ``RECON_API_KEY`` Bearer path over the requested window (filter
+    from ``details.ip`` written by ``AuditLogMiddleware`` — see
+    REQ-013 mod). ``sample_paths`` is bounded to the top-5 distinct
+    paths the IP hit, ordered by per-IP frequency DESC
+    (REQ-LEG-010).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ip: str
+    request_count: int = Field(ge=0)
+    first_used_at: datetime
+    last_used_at: datetime
+    first_user_agent: str
+    last_user_agent: str
+    sample_paths: list[str] = Field(max_length=5)
+
+
+class LegacyUsageStatsResponse(BaseModel):
+    """GET /api/v1/auth/legacy-usage-stats response body.
+
+    The deprecation-window operator dashboard. Carries the
+    lookback window (``since`` → ``as_of``, ``window_days``), the
+    aggregated totals (``total_legacy_requests`` /
+    ``unique_ips``), and the per-IP rows ordered
+    ``request_count DESC`` (REQ-LEG-003). Rows from
+    ``username='legacy'`` only — JWT-authenticated and dev-bypass
+    rows are excluded because they wouldn't be served by the
+    legacy static API key.
+
+    The body NEVER advertises ``require_admin``'s best-effort
+    posture — that caveat lives on the ``X-Admin-Gate-Best-Effort``
+    response header (REQ-LEG-002) so the JSON body stays
+    parseable for non-admin operators who got the 403.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    since: datetime
+    as_of: datetime
+    window_days: int = Field(ge=0, le=366)
+    total_legacy_requests: int = Field(ge=0)
+    unique_ips: int = Field(ge=0)
+    rows: list[LegacyUsageStatsRow]
+
+
 __all__ = [
+    "LegacyUsageStatsResponse",
+    "LegacyUsageStatsRow",
     "LoginRequest",
     "LogoutRequest",
     "LogoutResponse",
