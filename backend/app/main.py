@@ -72,6 +72,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # DB session factory the auth router depends on. We do this BEFORE
     # the LLM client init so an auth subsystem misconfig (e.g. missing
     # JWT_PRIVATE_KEY_PATH) fails the boot, not the first /auth/login.
+    #
+    # R4 Resilience review 2026-10-16: in APP_ENV=production any failure
+    # below MUST raise RuntimeError so the orchestrator (Docker Compose /
+    # K8s) restarts the pod until the operator fixes the config. In dev /
+    # staging / test the failure is logged as a warning so single-user
+    # local installs can still boot with zero secrets.
+    is_production = s.APP_ENV == "production"
+
     if s.JWT_PRIVATE_KEY_PATH and s.JWT_PUBLIC_KEY_PATH:
         try:
             app.state.jwt_keys = _JwtKeyManager(
@@ -81,14 +89,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 issuer=s.JWT_ISSUER,
             )
             logger.info("jwt_keys_initialized")
-        except Exception as exc:  # noqa: BLE001 — log + continue
+        except Exception as exc:
+            msg = f"JwtKeyManager init failed: {exc}"
+            if is_production:
+                # Fail the boot, not the first /auth/login (R4 + PR-J1 B-2).
+                logger.error("jwt_keys_init_failed_fatal error=%s", exc)
+                raise RuntimeError(
+                    msg
+                    + " — production deploys refuse to boot without a "
+                    "working JWT subsystem. Set JWT_PRIVATE_KEY_PATH and "
+                    "JWT_PUBLIC_KEY_PATH to readable RSA PEM files."
+                ) from exc
             logger.warning("jwt_keys_init_failed error=%s", exc)
+    elif is_production:
+        raise RuntimeError(
+            "JWT_PRIVATE_KEY_PATH and JWT_PUBLIC_KEY_PATH must both be set "
+            "in production. See spec section 7 — app/auth/middleware.py "
+            "DualAuthMiddleware requires a working JWT subsystem at boot."
+        )
 
     app.state.db_session_factory = SessionLocal
     # RefreshService is only required when the auth router is actually
-    # exercised. In dev/test with a 0-byte REFRESH_HASH_KEY, the
-    # constructor's fail-loud guard would prevent app boot — wrap in a
-    # try/except so a misconfig is logged but does NOT kill startup.
+    # exercised. In dev/test with a 0-byte REFRESH_HASH_KEY we skip
+    # construction entirely; in production a missing / too-short key is
+    # also a fail-loud gate (the pydantic validator on REFRESH_HASH_KEY
+    # catches empty/short in production). We belt-and-suspender it here
+    # in case a non-pydantic code path ever sets a short key.
     if len(s.REFRESH_HASH_KEY) >= 32:
         try:
             app.state.refresh_service = _RefreshService(
@@ -97,8 +123,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 refresh_ttl_seconds=s.JWT_REFRESH_TTL_SECONDS,
             )
             logger.info("refresh_service_initialized")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
+            msg = f"RefreshService init failed: {exc}"
+            if is_production:
+                logger.error("refresh_service_init_failed_fatal error=%s", exc)
+                raise RuntimeError(
+                    msg
+                    + " — production deploys refuse to boot without a "
+                    "working refresh-token subsystem. Set REFRESH_HASH_KEY "
+                    "to a 32+ byte secret."
+                ) from exc
             logger.warning("refresh_service_init_failed error=%s", exc)
+    elif is_production:
+        # Pydantic validator normally catches this in Settings() but be
+        # explicit so future changes don't regress the fail-loud gate.
+        raise RuntimeError(
+            "REFRESH_HASH_KEY must be at least 32 bytes in production. "
+            "See spec section 7 — RefreshService refuses to construct "
+            "without a usable HMAC-SHA256 key."
+        )
     else:
         logger.warning(
             "refresh_service_disabled reason=REFRESH_HASH_KEY too short"
