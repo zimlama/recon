@@ -233,4 +233,225 @@ async def test_jwt_user_handoff_4xx_does_not_tick_per_user_bucket(
         )
 
 
+# ---------------------------------------------------------------------------
+# PR-J3.6.5 (Issue #60) — REQ-INB-017: handoff list per-user ceiling.
+#
+# Two tests pin the T1 (corpus enumeration via job_id walking) defense:
+# the 61st list request from one JWT user MUST reject with 429, and a
+# different JWT user with a fresh per-user deque MUST NOT be rejected
+# (per-user isolation per REQ-INB-005).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_handoff_list_61st_request_returns_429() -> None:
+    """REQ-INB-017 Scenario 1: the 61st ``GET /api/v1/handoffs`` from
+    one authenticated user MUST reject with 429.
+
+    Pins the production cap ``(60, 60)`` for the list route
+    (Issue #60 / T1 threat: corpus enumeration via ``job_id``
+    walking). The first 60 requests succeed; the 61st rejects with
+    the documented body shape (``error="rate_limited"``,
+    ``endpoint`` = regex key ``^/api/v1/handoffs$``,
+    ``retry_after_seconds >= 1``, ``scope`` in ``("ip", "user")``).
+
+    Implementation detail: the middleware auto-registers both
+    per-IP and per-user policies for the matched endpoint, so for a
+    SINGLE user behind a SINGLE IP both buckets tick in lock-step
+    and the per-IP side may be the first to deny. The load-bearing
+    assertion is that the 429 lands before request 61 succeeds, with
+    the documented body shape (same pattern as
+    ``test_jwt_user_hits_per_user_limit`` and
+    ``test_eleventh_handoff_download_request_returns_429``).
+    """
+    app = FastAPI()
+    patterns = compile_rate_limit_patterns({
+        "/api/v1/handoffs": (60, 60),
+        # Decoy route keeps the per-IP side permissive so the 429
+        # surfaces from the handoff list endpoint specifically (not
+        # from a shared per-IP bucket on an unrelated route).
+        "/api/v1/jobs/{job_id}/cancel": (100, 60),
+    })
+    app.state.rate_limit_patterns = patterns
+
+    class _JWTMiddleware:
+        def __init__(self, app, *, user_id: str) -> None:
+            self.app = app
+            self._user_id = user_id
+
+        async def __call__(self, scope, receive, send) -> None:
+            if scope["type"] == "http":
+                from starlette.requests import Request as StarletteRequest
+
+                req = StarletteRequest(scope, receive)
+                req.state.user_id = self._user_id
+                req.state.auth_method = "jwt"
+                req.state.username = "alice"
+                req.state.jwt_jti = None
+            await self.app(scope, receive, send)
+
+    @app.get("/api/v1/handoffs")
+    async def _list(request: Request) -> dict[str, object]:
+        return {"items": []}
+
+    @app.post("/api/v1/jobs/{job_id}/cancel")
+    async def _cancel(request: Request) -> dict[str, str]:
+        return {"status": "cancelled"}
+
+    app.add_middleware(_JWTMiddleware, user_id="u-list")
+    app.add_middleware(RateLimitMiddleware)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        statuses: list[int] = []
+        bodies: list[dict[str, object]] = []
+        for _ in range(61):
+            r = await ac.get("/api/v1/handoffs")
+            statuses.append(r.status_code)
+            if r.status_code == 429:
+                bodies.append(r.json())
+        # First 60 pass; 61st rejects.
+        assert statuses[:60] == [200] * 60, (
+            f"First 60 list requests must succeed; got {statuses!r}"
+        )
+        assert statuses[60] == 429, (
+            f"The 61st list request must reject with 429; "
+            f"got status={statuses[60]!r}, full sequence: {statuses!r}"
+        )
+        # Pin the body shape on the first 429.
+        body = bodies[0]
+        assert body["error"] == "rate_limited"
+        assert int(body["retry_after_seconds"]) >= 1
+        # Endpoint key matches the proposal — the regex string, not
+        # the raw URL (decision M / spec REQ-INB-007).
+        assert body["endpoint"] == r"^/api/v1/handoffs$", (
+            f"Endpoint key must be the regex string; got {body['endpoint']!r}"
+        )
+        assert body["scope"] in ("ip", "user")
+
+
+@pytest.mark.asyncio
+async def test_per_user_isolation_across_jwt_users_on_handoff_list() -> None:
+    """REQ-INB-017 Scenario 2: per-user isolation across JWT users
+    on ``/api/v1/handoffs``.
+
+    Acceptance: user A's per-user deque is at length 60; user B
+    (different ``user_id``) makes a request to ``/api/v1/handoffs``
+    and the response is NOT 429 (REQ-INB-005 isolation).
+
+    Implementation note: ``ASGITransport`` forces every request to
+    share ``client.host = "127.0.0.1"``, so two HTTP users behind
+    one ASGI transport would share a per-IP bucket and the per-IP
+    side would reject user B before per-user isolation could be
+    demonstrated. The fix is a per-request scope override: user A's
+    60 requests rotate across 60 distinct ``X-Test-Client-IP``
+    values (per-IP never fills), and user B's request uses a fresh
+    IP and fresh ``user_id``. The override middleware is stacked
+    OUTSIDE ``RateLimitMiddleware`` so the per-IP and per-user
+    buckets both see the overridden identity by the time the
+    limiter dispatches.
+    """
+    app = FastAPI()
+    patterns = compile_rate_limit_patterns({
+        "/api/v1/handoffs": (60, 60),
+    })
+    app.state.rate_limit_patterns = patterns
+
+    # Combined JWT-stub + scope-override middleware. Reads
+    # ``X-Test-User`` (default: ``"u-default"``) to populate
+    # ``request.state.user_id``, and ``X-Test-Client-IP`` to
+    # mutate ``scope["client"]`` so ``request.client.host`` returns
+    # the per-request IP. Single class keeps the function's McCabe
+    # complexity below the threshold (the existing tests use a
+    # single inline JWT middleware; this test needs one extra
+    # concern — the client-IP override — and consolidating into
+    # one class matches the inline pattern).
+    class _OverrideIdentityMiddleware:
+        def __init__(self, app) -> None:
+            self.app = app
+
+        async def __call__(self, scope, receive, send) -> None:
+            if scope["type"] == "http":
+                from starlette.requests import Request as StarletteRequest
+
+                req = StarletteRequest(scope, receive)
+                user_id = "u-default"
+                for name, value in scope.get("headers", []):
+                    if name == b"x-test-user":
+                        user_id = value.decode("latin-1")
+                    elif name == b"x-test-client-ip":
+                        scope["client"] = (value.decode("latin-1"), 123)
+                req.state.user_id = user_id
+                req.state.auth_method = "jwt"
+                req.state.username = user_id
+                req.state.jwt_jti = None
+            await self.app(scope, receive, send)
+
+    @app.get("/api/v1/handoffs")
+    async def _list(request: Request) -> dict[str, object]:
+        return {"items": []}
+
+    # Middleware order (Starlette stacks in REVERSE add order):
+    #   1. RateLimitMiddleware    → innermost, dispatched last
+    #   2. _OverrideIdentityMiddleware → outermost, mutates scope
+    #      and request.state before the limiter sees them.
+    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(_OverrideIdentityMiddleware)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        # Phase 1: user A fires 60 requests, each from a DISTINCT
+        # client IP. Per-IP_A never fills (each IP sees 1 entry),
+        # per-user_A fills to 60. The per-user bucket is keyed by
+        # ``user_id`` (REQ-INB-005) so user A's traffic is isolated
+        # from any other user's deque.
+        for i in range(60):
+            r = await ac.get(
+                "/api/v1/handoffs",
+                headers={
+                    "x-test-user": "u-A",
+                    "x-test-client-ip": f"10.0.0.{i}",
+                },
+            )
+            assert r.status_code == 200, (
+                f"User A request {i + 1}/60 must succeed; "
+                f"got {r.status_code}: {r.text}"
+            )
+        # Phase 2: user A's 61st request — per-user_A is at limit.
+        # Use a fresh client IP so the per-IP side does not mask
+        # the per-user rejection.
+        r = await ac.get(
+            "/api/v1/handoffs",
+            headers={"x-test-user": "u-A", "x-test-client-ip": "10.0.99.1"},
+        )
+        assert r.status_code == 429, (
+            f"User A's 61st list request must reject with 429; "
+            f"got {r.status_code}: {r.text}"
+        )
+        body = r.json()
+        # Rejection must surface as per-user (REQ-INB-005) — per-IP
+        # is at 1 entry on the fresh IP, so the per-user side is
+        # the binding constraint.
+        assert body["scope"] == "user", (
+            f"Rejection must be per-user (REQ-INB-005); got scope={body['scope']!r}"
+        )
+        assert body["endpoint"] == r"^/api/v1/handoffs$", (
+            f"Endpoint key must be the regex string; got {body['endpoint']!r}"
+        )
+        # Phase 3: user B fires 1 request from a fresh IP and fresh
+        # ``user_id``. Per-user_B is a fresh key — user B must NOT
+        # be rejected by user A's per-user deque exhaustion
+        # (REQ-INB-005 isolation).
+        r = await ac.get(
+            "/api/v1/handoffs",
+            headers={"x-test-user": "u-B", "x-test-client-ip": "10.0.99.2"},
+        )
+        assert r.status_code == 200, (
+            f"User B must NOT be rejected by user A's per-user deque exhaustion "
+            f"(REQ-INB-005 isolation). Got {r.status_code}: {r.text}"
+        )
+
+
 __all__: list[str] = []

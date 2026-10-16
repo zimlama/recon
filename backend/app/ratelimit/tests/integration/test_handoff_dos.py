@@ -215,4 +215,124 @@ async def test_handoff_packet_route_caps_at_120_per_minute() -> None:
         )
 
 
+@pytest.mark.asyncio
+async def test_download_sliding_window_recovers_after_clock_advance() -> None:
+    """REQ-INB-019 Scenario 2: sliding-window eviction allows
+    recovery after the window passes.
+
+    Acceptance: with the per-user bucket at limit (10 entries for
+    user U within 0..60s), advancing the clock by ``window+1`` (an
+    injected clock per REQ-INB-014) causes the next request to be
+    accepted — the lazy-evict step in ``RateLimiter.is_allowed``
+    (REQ-INB-013) drops all 10 stale timestamps and the new request
+    lands in an empty deque.
+
+    Implementation note: the limiter is constructed with
+    ``clock=lambda: clock[0]`` (the same pattern as
+    ``test_429_retry_after_exact_when_window_unelapsed`` and
+    ``test_injected_clock_drives_window_decisions``) so the
+    advance is deterministic — no wall-clock dependency. The
+    middleware is constructed with the same injected limiter via
+    the ``limiter=...`` kwarg so both the pre-call per-IP check
+    and the post-call per-user check consult the frozen clock.
+    """
+    from app.ratelimit import RateLimiter
+
+    clock = [100.0]
+    limiter = RateLimiter(clock=lambda: clock[0])
+
+    app = FastAPI()
+    patterns = compile_rate_limit_patterns({
+        "/api/v1/jobs/{job_id}/handoff/download": (DOWNLOAD_LIMIT, WINDOW_SECONDS),
+    })
+    app.state.rate_limit_patterns = patterns
+
+    class _JWTMiddleware:
+        def __init__(self, app, *, user_id: str) -> None:
+            self.app = app
+            self._user_id = user_id
+
+        async def __call__(self, scope, receive, send) -> None:
+            if scope["type"] == "http":
+                from starlette.requests import Request as StarletteRequest
+
+                req = StarletteRequest(scope, receive)
+                req.state.user_id = self._user_id
+                req.state.auth_method = "jwt"
+                req.state.username = "alice"
+                req.state.jwt_jti = None
+            await self.app(scope, receive, send)
+
+    @app.get("/api/v1/jobs/{job_id}/handoff/download")
+    async def _download(request: Request, job_id: str) -> dict[str, str]:
+        return {"status": "ok", "job_id": job_id}
+
+    user_id = "u-dos-clock"
+    app.add_middleware(_JWTMiddleware, user_id=user_id)
+    # ``limiter=limiter`` shares the clock-injected limiter with the
+    # middleware; ``clock=...`` is also passed so the middleware's
+    # own ``RateLimiter`` would honor the clock if a fallback path
+    # exercised it (defensive — the limiter is the one actually used).
+    app.add_middleware(RateLimitMiddleware, clock=lambda: clock[0], limiter=limiter)
+
+    endpoint_key = r"^/api/v1/jobs/[^/]+/handoff/download$"
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        # Phase 1: fill the bucket with DOWNLOAD_LIMIT (= 10)
+        # successful requests at frozen clock = 100. Both per-IP and
+        # per-user buckets tick in lock-step.
+        for _ in range(DOWNLOAD_LIMIT):
+            r = await ac.get("/api/v1/jobs/abc/handoff/download")
+            assert r.status_code == 200, (
+                f"First {DOWNLOAD_LIMIT} download requests must succeed; "
+                f"got {r.status_code}: {r.text}"
+            )
+        # 11th request at the SAME frozen clock — bucket full, reject.
+        # This is a sanity check that the limiter is actually using the
+        # injected clock (a non-injected limiter would auto-advance
+        # and let the request through).
+        r = await ac.get("/api/v1/jobs/abc/handoff/download")
+        assert r.status_code == 429, (
+            f"11th download at frozen clock={clock[0]} must reject with 429; "
+            f"got {r.status_code}: {r.text}"
+        )
+        # Phase 2: advance the clock past the window boundary. The
+        # lazy-evict step in ``RateLimiter.is_allowed`` (REQ-INB-013)
+        # drops every timestamp older than ``now - window``; with
+        # ``now=161`` and ``window=60`` the threshold is 101 — every
+        # entry at t=100 is stale and gets popleft'd.
+        clock[0] += WINDOW_SECONDS + 1  # 100 -> 161, past the 60s window
+        # Next request — bucket drained, allowed. This is the
+        # recovery acceptance (REQ-INB-019 Scenario 2).
+        r = await ac.get("/api/v1/jobs/abc/handoff/download")
+        assert r.status_code == 200, (
+            f"After clock advance by window+1 ({WINDOW_SECONDS + 1}s), "
+            f"lazy eviction must drain the bucket and accept. "
+            f"Got {r.status_code}: {r.text}"
+        )
+        # Phase 3: pin the bucket state. After 10 stale entries were
+        # evicted and 1 fresh entry appended at t=161, the per-user
+        # deque MUST contain exactly 1 entry — proves the recovery
+        # went through the same lazy-evict path that REQ-INB-013
+        # guarantees (and that no stale entries leak through).
+        user_bucket = limiter.buckets[("user", user_id, endpoint_key)]
+        assert user_bucket is not None, (
+            f"Per-user bucket must exist after recovery; buckets={list(limiter.buckets)!r}"
+        )
+        assert len(user_bucket) == 1, (
+            f"After lazy eviction + 1 new entry, per-user bucket must have "
+            f"exactly 1 entry. Got {len(user_bucket)}: {list(user_bucket)!r}"
+        )
+        # And the single remaining entry must be at the post-advance
+        # timestamp (proves the stale entries were actually dropped,
+        # not silently retained).
+        remaining = next(iter(user_bucket))
+        assert remaining == clock[0], (
+            f"Single remaining entry must be at post-advance clock={clock[0]}; "
+            f"got {remaining!r}"
+        )
+
+
 __all__: list[str] = []
