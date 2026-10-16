@@ -18,7 +18,7 @@ python-multipart==0.0.32
 # --- Validation + settings ---
 # pydantic 2.7.0 is the minimum required by fastapi 0.135.0. 2.6.1 was
 # pinned for fastapi 0.110.0; bump is required for the fastapi upgrade.
-pydantic==2.7.0
+pydantic[email]==2.7.0  # email extra for EmailStr schemas (Pydantic 2.x); without it, fresh installs fail with `ImportError: email-validator is not installed, run \`pip install pydantic[email]\``
 pydantic-settings==2.3.0
 
 # --- Database ---
