@@ -334,6 +334,23 @@ def _install_middlewares(app: FastAPI, s) -> None:
         settings_provider=get_settings,
     )
 
+    # Inbound rate limiter (PR-J3.6 — sec-auth-jwt follow-up).
+    # Installed LAST under Starlette ``user_middleware`` semantics
+    # (LAST-ADDED = OUTERMOST) so it sits outside DualAuth and sees
+    # unauthenticated POST /api/v1/auth/login traffic — the
+    # credential-stuffing defense that motivated this PR.
+    from app.ratelimit import RateLimitMiddleware, compile_rate_limit_patterns
+
+    app.add_middleware(
+        RateLimitMiddleware,
+        bypass_token=s.RATE_LIMIT_BYPASS_TOKEN,
+        allow_bypass=bool(s.ALLOW_DEV_BYPASS),
+    )
+    # Compile the per-endpoint regex set ONCE at startup so the
+    # middleware never re-compiles per request (spec REQ-INB-016 /
+    # decision M). Storing on app.state lets tests swap them.
+    app.state.rate_limit_patterns = compile_rate_limit_patterns(s.RATE_LIMITS)
+
 
 def _register_exception_handlers(app: FastAPI) -> None:
     """Register ``app.exception_handler`` hooks for the auth subsystem.

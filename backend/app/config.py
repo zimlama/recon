@@ -173,6 +173,52 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Inbound rate limiting (PR-J3.6 — sec-auth-jwt follow-up) ----
+    # 7 route templates per spec REQ-INB-006, locked by proposal.md
+    # decision O (post-gate correction). Each tuple is
+    # ``(requests_limit, window_seconds)``. Keys are route TEMPLATES
+    # (with ``{job_id}`` and ``{module_name}`` placeholders preserved);
+    # the middleware compiles a regex per entry against
+    # ``request.url.path`` at app startup (spec REQ-INB-016 — using
+    # ``request.scope["route"].path`` would fail-open because that
+    # field is ``None`` inside ``BaseHTTPMiddleware.dispatch``).
+    RATE_LIMITS: dict[str, tuple[int, int]] = Field(
+        default_factory=lambda: {
+            "/api/v1/auth/login": (10, 60),
+            "/api/v1/auth/refresh": (60, 60),
+            "/api/v1/jobs": (10, 60),
+            "/api/v1/jobs/{job_id}/cancel": (30, 60),
+            "/api/v1/ai/jobs/{job_id}/validate": (10, 60),
+            "/api/v1/ai/jobs/{job_id}/modules/{module_name}/validate": (10, 60),
+            "/api/v1/jobs/{job_id}/report": (5, 60),
+        },
+        description=(
+            "Per-endpoint inbound rate-limit policy: route template → "
+            "(requests_limit, window_seconds). Endpoints not in this "
+            "dict are FAIL-OPEN (no policy applied) per spec REQ-INB-016. "
+            "Compilied at app startup into regexes against "
+            "``request.url.path``."
+        ),
+    )
+    ALLOW_DEV_BYPASS: bool = Field(
+        default=False,
+        description=(
+            "Enable the X-Bypass-Rate-Limit header for ops/loadtest "
+            "use. Validator forces False when APP_ENV=='production' "
+            "regardless of env var value (spec REQ-INB-010, gated to "
+            "match the PR #56 B2 dev-mode admin bypass pattern)."
+        ),
+    )
+    RATE_LIMIT_BYPASS_TOKEN: str = Field(
+        default="",
+        description=(
+            "Static token the client must send in the X-Bypass-Rate-Limit "
+            "header to skip the rate-limit check. REQUIRED (non-empty) "
+            "when ALLOW_DEV_BYPASS=True; validator enforces that. Empty "
+            "in production."
+        ),
+    )
+
     # ---- Privacy / encryption (PR 4 — person_dossier aggregator) ----
     PERSON_DOSSIER_ENCRYPTION_KEY: str | None = Field(
         default=None,
@@ -338,6 +384,103 @@ class Settings(BaseSettings):
             return False
         # Fail-open: garbage value → False (allow all modules)
         return False
+
+    @field_validator("RATE_LIMITS", mode="before")
+    @classmethod
+    def _validate_rate_limits(cls, v: object) -> dict[str, tuple[int, int]]:
+        """Validate the per-endpoint rate-limit table (spec REQ-INB-006).
+
+        Each entry MUST be a 2-tuple of ``(requests_limit, window_seconds)``.
+        ``requests_limit`` must be an int in ``[1, 1_000_000]``;
+        ``window_seconds`` must be a positive int. Default in
+        ``field.default_factory`` provides the 7-entry baseline; this
+        validator runs BEFORE that factory on env-driven loads.
+        """
+        if v is None:
+            return v  # type: ignore[return-value]
+        if not isinstance(v, dict):
+            raise ValueError(
+                f"RATE_LIMITS must be a dict[str, tuple[int, int]], "
+                f"got {type(v).__name__}"
+            )
+        out: dict[str, tuple[int, int]] = {}
+        for key, raw in v.items():
+            if not isinstance(key, str):
+                raise ValueError(
+                    f"RATE_LIMITS keys must be str route templates, "
+                    f"got {type(key).__name__}: {key!r}"
+                )
+            # pydantic-settings serializes tuples as JSON arrays on
+            # env-driven loads — so accept either tuple or list of
+            # length 2 with int entries.
+            seq = raw if isinstance(raw, (tuple, list)) else None
+            if seq is None or len(seq) != 2:
+                raise ValueError(
+                    f"RATE_LIMITS[{key!r}] must be (requests_limit, "
+                    f"window_seconds); got {raw!r}"
+                )
+            requests, window = seq[0], seq[1]
+            try:
+                requests_i = int(requests)
+                window_i = int(window)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"RATE_LIMITS[{key!r}] values must be ints; "
+                    f"got {raw!r}"
+                ) from exc
+            if requests_i < 1 or requests_i > 1_000_000:
+                raise ValueError(
+                    f"RATE_LIMITS[{key!r}] requests_limit must be in "
+                    f"[1, 1_000_000], got {requests_i}"
+                )
+            if window_i < 1:
+                raise ValueError(
+                    f"RATE_LIMITS[{key!r}] window_seconds must be a "
+                    f"positive int, got {window_i}"
+                )
+            out[key] = (requests_i, window_i)
+        return out
+
+    @field_validator("ALLOW_DEV_BYPASS", mode="before")
+    @classmethod
+    def _validate_allow_dev_bypass(cls, v: object, info: Any) -> bool:
+        """Coerce + gate ``ALLOW_DEV_BYPASS`` (spec REQ-INB-010).
+
+        Accepts the usual truthy strings (``true``, ``1``, ``yes``,
+        ``on``). Force-disables to ``False`` when ``APP_ENV=='production'``
+        regardless of env value — same dev-only pattern as the PR #56 B2
+        admin-bypass fix. Acts BEFORE ``info`` so we still see the
+        string on env loads.
+        """
+        if isinstance(v, bool):
+            coerced = v
+        elif v is None:
+            coerced = False
+        else:
+            s = str(v).strip().lower()
+            coerced = s in {"true", "1", "yes", "on"}
+        env = info.data.get("APP_ENV", "development")
+        if env == "production" and coerced:
+            return False
+        return coerced
+
+    @field_validator("RATE_LIMIT_BYPASS_TOKEN")
+    @classmethod
+    def _validate_bypass_token(cls, v: str, info: Any) -> str:
+        """Require non-empty bypass token whenever the feature is enabled.
+
+        Spec REQ-INB-010: "RATE_LIMIT_BYPASS_TOKEN MUST be required
+        (non-empty) when ALLOW_DEV_BYPASS is True." Reading the
+        already-validated ``ALLOW_DEV_BYPASS`` from ``info.data``.
+        """
+        allow = info.data.get("ALLOW_DEV_BYPASS", False)
+        if allow and not v:
+            raise ValueError(
+                "RATE_LIMIT_BYPASS_TOKEN must be set (non-empty) when "
+                "ALLOW_DEV_BYPASS=True. Set a static shared secret in "
+                "your env or disable the bypass."
+            )
+        return v
 
     @field_validator("PERSON_DOSSIER_ENCRYPTION_KEY")
     @classmethod
