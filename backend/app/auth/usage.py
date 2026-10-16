@@ -120,10 +120,6 @@ def _paths_per_ip(rows_for_ip: Iterable[str | None]) -> list[str]:
         if not isinstance(p, str) or not p:
             continue
         counts[p] = counts.get(p, 0) + 1
-    for p in rows_for_ip:
-        if not isinstance(p, str) or not p:
-            continue
-        counts[p] = counts.get(p, 0) + 1
 
     ranked = sorted(
         counts.items(), key=lambda kv: (-kv[1], kv[0])
