@@ -44,7 +44,7 @@ depends_on: str | Sequence[str] | None = None
 # Backfill batch size — kept conservative so SQLite write-lock windows stay
 # short. Production-shaped audit_log tables can hold millions of rows; this
 # keeps each UPDATE <1 s on the test machine (verified locally: 50k rows
-# complete in ~10–15 s). Bump only after benchmarking on real hardware.
+# complete in ~10-15 s). Bump only after benchmarking on real hardware.
 _BACKFILL_BATCH_SIZE = 10_000
 
 
