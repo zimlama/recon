@@ -1267,3 +1267,54 @@ Todos en `/home/zimlama/recon/.backups/2026-10-14/`:
 
 Para revertir cualquier fix de sistema: `cp /home/zimlama/recon/.backups/2026-10-14/<archivo> /home/zimlama/recon/<destino>/<archivo>`
 Para revertir solo los fixes de documentación: `cp /home/zimlama/recon/.backups/2026-10-14/TROUBLESHOOTING.md.before-docfix.bak /home/zimlama/recon/TROUBLESHOOTING.md`
+
+---
+
+## [2026-10-17] Censys API returns 401 — legacy `CENSYS_API_ID` + `CENSYS_API_SECRET` (Basic Auth) deprecated
+
+**Symptom**:
+```
+$ shodan_censys module run → 0 findings with source="censys"
+$ docker logs recon-backend-1 | grep censys
+censys_non_200 status=401 ip=...
+censys_http_error error="Client response 401: Unauthorized"
+```
+
+Or, when manually testing:
+```bash
+$ curl -u "$CENSYS_API_ID:$CENSYS_API_SECRET" \
+    "https://search.censys.io/api/v1/hosts/8.8.8.8"
+{"error":"unauthorized","message":"Legacy API credentials are no longer accepted"}
+```
+
+**Diagnosis**:
+```bash
+# 1. Verify the legacy fields exist in the running config
+docker exec recon-backend-1 env | grep CENSYS
+# → CENSYS_API_ID=cens_HZW5j9Rh_9f7whnVvyUt3nARYy2UKbdqt
+# → CENSYS_API_SECRET=q              ← only 1 char (broken)
+
+# 2. Try the legacy endpoint with the (alleged) credentials
+curl -sS -u "$ID:$SECRET" "https://search.censys.io/api/v1/hosts/8.8.8.8" | head -c 200
+# → {"error":"unauthorized","message":"Legacy API credentials are no longer accepted"}
+
+# 3. Check what the new platform expects
+curl -sS -H "Authorization: Bearer $PAT" "https://platform.censys.io/v2/hosts/8.8.8.8" | head -c 200
+# → {"ip":"8.8.8.8","services":[...]}    ← 200 OK with PAT
+```
+
+**Root cause**: Censys migrated to **Personal Access Tokens (PATs)** in 2024. The legacy `CENSYS_API_ID` + `CENSYS_API_SECRET` (HTTP Basic Auth) against `https://search.censys.io/api/v1/hosts` is deprecated. **New accounts only get PATs** (format: `cens_<8chars>_<32chars>`, ~40 chars total). The old `search.censys.io` endpoint returns `401 Unauthorized` with message `"Legacy API credentials are no longer accepted"` for any account created after the migration. The project's `backend/app/modules/shodan_censys.py` still uses Basic Auth against the old endpoint, so Censys returns 0 findings even when "configured".
+
+**Fix**: Replace the legacy pair with a single `CENSYS_API_TOKEN` (PAT) and switch to the new Platform API v2 endpoint with Bearer auth.
+```python
+# backend/app/config.py
+CENSYS_API_TOKEN: str | None = None  # PAT, format: cens_<8chars>_<32chars>
+
+# backend/app/modules/shodan_censys.py
+CENSYS_PLATFORM_URL = "https://platform.censys.io/v2/hosts/{ip}"
+headers = {"Authorization": f"Bearer {api_token}", "Accept": "application/json"}
+async with httpx.AsyncClient(timeout=CENSYS_TIMEOUT) as client:
+    response = await client.get(url, headers=headers)
+```
+
+To generate a PAT: log in at https://accounts.censys.io → "Personal Access Tokens" → "Create New Token" → copy the full token (Censys shows it **only once** at creation; afterwards only the first 8 chars are visible for reference).

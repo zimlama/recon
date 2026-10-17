@@ -116,8 +116,11 @@ class Settings(BaseSettings):
 
     # ---- Optional API keys (Tier 2 modules) ----
     SHODAN_API_KEY: str | None = None
-    CENSYS_API_ID: str | None = None
-    CENSYS_API_SECRET: str | None = None
+    # Censys migrated to Personal Access Tokens (PATs) in 2024. The legacy
+    # API ID + API Secret (Basic Auth) is deprecated — see
+    # backend/TROUBLESHOOTING.md row "censys-401-legacy-auth-deprecated".
+    # Use a single PAT (format: cens_<8chars>_<32chars>, ~40 chars total).
+    CENSYS_API_TOKEN: str | None = None
     HUNTER_API_KEY: str | None = None
     SERP_API_KEY: str | None = None
     GITHUB_TOKEN: str | None = None

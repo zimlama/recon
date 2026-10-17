@@ -97,8 +97,7 @@ async def test_censys_query_error_logged(module: ShodanCensysModule) -> None:
     """Censys query error is logged."""
     with patch("app.modules.shodan_censys.get_settings") as mock_settings:
         settings = MagicMock()
-        settings.CENSYS_API_ID = "test-id"
-        settings.CENSYS_API_SECRET = "test-secret"
+        settings.CENSYS_API_TOKEN = "cens_testtoken1234567890abcdef1234567890ab"
         mock_settings.return_value = settings
 
         with patch.object(module, "_resolve_to_ips", return_value=["1.2.3.4"]), respx.mock(
@@ -108,7 +107,7 @@ async def test_censys_query_error_logged(module: ShodanCensysModule) -> None:
                 return_value=httpx.Response(200, json={"ports": []})
             )
             # Censys endpoint raises connection error
-            mock.get(url__regex=r"https://search\.censys\.io/.*").mock(
+            mock.get(url__regex=r"https://platform\.censys\.io/.*").mock(
                 side_effect=httpx.ConnectError("Censys down")
             )
             result = await module.run(ModuleInput(target="example.com"))
@@ -205,7 +204,7 @@ async def test_shodan_internetdb_connection_error(
     so the run() loop just skips the IP without adding an error.
     """
     with patch("app.modules.shodan_censys.get_settings") as mock_settings:
-        mock_settings.return_value = MagicMock(CENSYS_API_ID=None, CENSYS_API_SECRET=None)
+        mock_settings.return_value = MagicMock(CENSYS_API_TOKEN=None)
         with patch.object(module, "_resolve_to_ips", return_value=["1.2.3.4"]), respx.mock(
             base_url="https://internetdb.shodan.io", assert_all_called=False
         ) as mock_router:
@@ -225,11 +224,10 @@ async def test_shodan_internetdb_connection_error(
 async def test_censys_skipped_without_keys(
     module: ShodanCensysModule,
 ) -> None:
-    """When CENSYS_API_ID/SECRET are not set, Censys is silently skipped."""
+    """When CENSYS_API_TOKEN is not set, Censys is silently skipped."""
     with patch("app.modules.shodan_censys.get_settings") as mock_settings:
         settings = MagicMock()
-        settings.CENSYS_API_ID = None
-        settings.CENSYS_API_SECRET = None
+        settings.CENSYS_API_TOKEN = None
         mock_settings.return_value = settings
 
         with patch.object(module, "_resolve_to_ips", return_value=["1.2.3.4"]), respx.mock(
@@ -240,26 +238,25 @@ async def test_censys_skipped_without_keys(
             )
             await module.run(ModuleInput(target="example.com"))
             # Censys endpoint was NOT called
-            assert not any("search.censys.io" in str(r) for r in mock_router.calls)
+            assert not any("platform.censys.io" in str(r) for r in mock_router.calls)
 
 
 @pytest.mark.asyncio
-async def test_censys_query_with_keys(
+async def test_censys_query_with_token(
     module: ShodanCensysModule,
 ) -> None:
-    """With Censys keys set, the Censys API is called."""
-    # Patch where the module uses get_settings
+    """With CENSYS_API_TOKEN set, the Censys Platform API v2 is called."""
+    test_token = "cens_testtoken1234567890abcdef1234567890ab"
     with patch("app.modules.shodan_censys.get_settings") as mock_settings:
         settings = MagicMock()
-        settings.CENSYS_API_ID = "test-id"
-        settings.CENSYS_API_SECRET = "test-secret"
+        settings.CENSYS_API_TOKEN = test_token
         mock_settings.return_value = settings
 
         with patch.object(module, "_resolve_to_ips", return_value=["1.2.3.4"]), respx.mock(assert_all_called=False) as mock:
             mock.get(url__regex=r"https://internetdb\.shodan\.io/.*").mock(
                 return_value=httpx.Response(200, json={"ports": []})
             )
-            mock.get(url__regex=r"https://search\.censys\.io/.*").mock(
+            mock.get(url__regex=r"https://platform\.censys\.io/.*").mock(
                 return_value=httpx.Response(
                     200,
                     json={
@@ -275,6 +272,78 @@ async def test_censys_query_with_keys(
     censys_findings = [f for f in result.findings if f.source == "censys"]
     assert len(censys_findings) == 2
     assert any(f.value == "1.2.3.4:443" for f in censys_findings)
+
+
+@pytest.mark.asyncio
+async def test_censys_sends_bearer_auth_header(
+    module: ShodanCensysModule,
+) -> None:
+    """Censys Platform API v2 requires `Authorization: Bearer <token>` (PAT auth).
+
+    Verifies the new endpoint is hit and the Bearer header is sent — the
+    legacy Basic Auth (`-u ID:SECRET`) against `search.censys.io` was
+    deprecated by Censys in 2024 and returns 401 for all post-2024 accounts.
+    See backend/TROUBLESHOOTING.md row "censys-401-legacy-auth-deprecated".
+    """
+    test_token = "cens_patwith40chars_total_aaabbbcccdddeeefff00"
+    with patch("app.modules.shodan_censys.get_settings") as mock_settings:
+        settings = MagicMock()
+        settings.CENSYS_API_TOKEN = test_token
+        mock_settings.return_value = settings
+
+        with patch.object(module, "_resolve_to_ips", return_value=["1.2.3.4"]), respx.mock(assert_all_called=False) as mock:
+            mock.get(url__regex=r"https://internetdb\.shodan\.io/.*").mock(
+                return_value=httpx.Response(200, json={"ports": []})
+            )
+            censys_route = mock.get(url__regex=r"https://platform\.censys\.io/.*").mock(
+                return_value=httpx.Response(200, json={"services": []})
+            )
+            await module.run(ModuleInput(target="example.com"))
+
+    # The Censys endpoint was called exactly once
+    assert censys_route.called
+    assert censys_route.call_count == 1
+
+    # The request used the v2 URL (not the legacy v1)
+    request = censys_route.calls[0].request
+    assert "platform.censys.io" in str(request.url)
+    assert "/v2/hosts/" in str(request.url)
+    assert "1.2.3.4" in str(request.url)
+
+    # The request sent the Bearer token (NOT Basic Auth)
+    auth_header = request.headers.get("Authorization", "")
+    assert auth_header == f"Bearer {test_token}", (
+        f"Expected 'Bearer {test_token}', got '{auth_header}'"
+    )
+
+
+@pytest.mark.asyncio
+async def test_censys_401_does_not_crash(
+    module: ShodanCensysModule,
+) -> None:
+    """A 401 from Censys (invalid/expired PAT) is logged and skipped, not raised."""
+    with patch("app.modules.shodan_censys.get_settings") as mock_settings:
+        settings = MagicMock()
+        settings.CENSYS_API_TOKEN = "cens_expired_or_invalid_token_xxxxxxxxxxxxxx"
+        mock_settings.return_value = settings
+
+        with patch.object(module, "_resolve_to_ips", return_value=["1.2.3.4"]), respx.mock(assert_all_called=False) as mock:
+            mock.get(url__regex=r"https://internetdb\.shodan\.io/.*").mock(
+                return_value=httpx.Response(200, json={"ports": []})
+            )
+            mock.get(url__regex=r"https://platform\.censys\.io/.*").mock(
+                return_value=httpx.Response(
+                    401,
+                    json={"error": "unauthorized", "message": "invalid API token"},
+                )
+            )
+            # Should NOT raise — the module swallows 401 and continues
+            result = await module.run(ModuleInput(target="example.com"))
+
+    # No Censys findings (401 means no data); no findings from Shodan either (empty ports)
+    assert result.findings == []
+    # The job still completes successfully (no exception, just empty findings)
+    assert result.module == "shodan_censys"
 
 
 # ---- Dedupe ----

@@ -2,7 +2,12 @@
 
 Queries internet-wide asset search engines:
 - Shodan InternetDB (https://internetdb.shodan.io/) — FREE, no key required
-- Censys Search API (https://search.censys.io/api/v1/hosts) — FREE tier with API ID + Secret
+- Censys Platform API v2 (https://platform.censys.io/v2/hosts/{ip}) — FREE tier
+  with a Personal Access Token (PAT). Censys deprecated the legacy
+  `CENSYS_API_ID` + `CENSYS_API_SECRET` (HTTP Basic Auth) in 2024 — only
+  PATs (prefix `cens_`) are accepted by the new endpoint. If
+  `CENSYS_API_TOKEN` is unset, Censys is silently skipped and the module
+  falls back to Shodan InternetDB only.
 
 Fully passive — never probes the target directly.
 
@@ -34,8 +39,10 @@ logger = get_logger(__name__)
 SHODAN_INTERNETDB_URL = "https://internetdb.shodan.io/{ip}"
 SHODAN_INTERNETDB_TIMEOUT = 15
 
-# Censys Search API — requires API ID + Secret
-CENSYS_SEARCH_URL = "https://search.censys.io/api/v1/hosts/{ip}"
+# Censys Platform API v2 — requires a Personal Access Token (PAT).
+# Endpoint migrated from https://search.censys.io/api/v1/hosts (legacy
+# Basic Auth) in 2024. New accounts only get PATs.
+CENSYS_PLATFORM_URL = "https://platform.censys.io/v2/hosts/{ip}"
 CENSYS_TIMEOUT = 15
 HTTP_TIMEOUT = 15
 
@@ -105,21 +112,19 @@ class ShodanCensysModule(BaseReconModule):
             except Exception as e:
                 errors.append(f"Shodan InternetDB query for {ip} failed: {e!s}")
 
-        # 4. Query Censys if keys are set (also only public IPs)
+        # 4. Query Censys if a PAT is set (also only public IPs)
         settings = get_settings()
-        if settings.CENSYS_API_ID and settings.CENSYS_API_SECRET:
+        if settings.CENSYS_API_TOKEN:
             for ip in public_ips:
                 try:
-                    censys_data = await self._query_censys(
-                        ip, settings.CENSYS_API_ID, settings.CENSYS_API_SECRET
-                    )
+                    censys_data = await self._query_censys(ip, settings.CENSYS_API_TOKEN)
                     if censys_data:
                         findings.extend(self._censys_to_findings(ip, censys_data))
                 except Exception as e:
                     errors.append(f"Censys query for {ip} failed: {e!s}")
         else:
-            # Not an error — just inform
-            logger.debug("censys_keys_not_set", module=self.name)
+            # Not an error — Censys is optional, fall back to Shodan-only
+            logger.debug("censys_token_not_set", module=self.name)
 
         # Dedupe
         unique = self._dedupe(findings)
@@ -187,14 +192,28 @@ Respond with structured JSON matching the LDMValidationResult schema."""
             logger.debug("shodan_internetdb_http_error", error=str(e), ip=ip)
             return None
 
-    async def _query_censys(self, ip: str, api_id: str, api_secret: str) -> dict[str, Any] | None:
-        """Query Censys Search API for an IP. Free tier with API ID + Secret."""
-        url = CENSYS_SEARCH_URL.format(ip=ip)
+    async def _query_censys(self, ip: str, api_token: str) -> dict[str, Any] | None:
+        """Query the Censys Platform API v2 for an IP. Free tier with a PAT.
+
+        Sends `Authorization: Bearer <token>` against the new endpoint
+        `https://platform.censys.io/v2/hosts/{ip}`. The legacy Basic Auth
+        (HTTP `-u ID:SECRET`) against `search.censys.io/api/v1/hosts` is
+        deprecated and returns 401 for any account created after 2024.
+
+        On 401 (invalid/expired PAT), the response is logged and the IP is
+        skipped — the module never raises for a single IP's failure.
+        """
+        url = CENSYS_PLATFORM_URL.format(ip=ip)
+        headers = {"Authorization": f"Bearer {api_token}", "Accept": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=CENSYS_TIMEOUT) as client:
-                response = await client.get(url, auth=(api_id, api_secret))
+                response = await client.get(url, headers=headers)
                 if response.status_code != 200:
-                    logger.debug("censys_non_200", status=response.status_code, ip=ip)
+                    logger.debug(
+                        "censys_non_200",
+                        status=response.status_code,
+                        ip=ip,
+                    )
                     return None
                 return cast(dict[str, Any], response.json())
         except httpx.HTTPError as e:
