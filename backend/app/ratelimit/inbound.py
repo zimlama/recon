@@ -175,8 +175,14 @@ class RateLimiter:
         return True, None
 
     def configure(self, policies: dict[tuple[str, str], tuple[int, int]]) -> None:
-        """Replace the policy map at runtime (test helper)."""
-        self._policies = dict(policies)
+        """Merge ``policies`` into the runtime policy map (test helper).
+
+        Uses ``dict.update`` (additive) rather than REPLACE because the
+        middleware calls this once per request with only the matched
+        endpoint's policy. A REPLACE would wipe every other endpoint's
+        policy on every request (4R review finding R3-#1, 2026-10-16).
+        """
+        self._policies.update(policies)
 
 
 # ---------------------------------------------------------------------------
