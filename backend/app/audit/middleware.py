@@ -30,7 +30,10 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.database import SessionLocal
+from app.logging import get_logger
 from app.models import AuditLog
+
+logger = get_logger(__name__)
 
 
 class AuditLogMiddleware(BaseHTTPMiddleware):
@@ -112,7 +115,19 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             finally:
                 db.close()
         except Exception:
-            # Audit logging must never break the request
-            pass
+            # Audit logging must never break the request, but a silent
+            # `pass` hides DB-down / schema-drift / disk-full from the
+            # operator (4R review R1-#3, 2026-10-16). Log at ERROR with
+            # exc_info so the operator sees a stack trace; the request
+            # itself still proceeds (audit failure is NOT a 5xx — the
+            # action the user requested is still fulfilled, but the
+            # operator's SOC gets a real signal that the audit trail
+            # has a hole).
+            logger.error(
+                "audit_log_write_failed",
+                exc_info=True,
+                method=request.method,
+                path=request.url.path,
+            )
 
         return response
