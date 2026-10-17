@@ -26,20 +26,41 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN --mount=type=tmpfs,target=/tmp \
     pnpm build
 
-# ---- Production runner (nginx) ----
-FROM nginx:1.25-alpine AS runner
+# ---- Production runner (Next.js standalone) ----
+# 2026-10-14 fix: rewrite from nginx to node server.js.
+#
+# Root cause (see TROUBLESHOOTING.md entry 2026-10-14 "Frontend devuelve HTTP 403"):
+#   output: 'standalone' in next.config.js produces a `server.js` Node bundle,
+#   NOT a static `index.html`. Serving it with nginx (root /app + try_files /index.html)
+#   fails with `directory index of "/app/" is forbidden` because there is no
+#   index.html — the runner must execute the Node server directly.
+#
+# Same rewrite preserves the proxy_pass behavior (frontend → backend on
+# /api/*) by declaring it via next.config.js → async rewrites() instead of
+# nginx `proxy_pass`. See the matching commit on next.config.js.
+FROM node:20-alpine AS runner
+ENV NODE_ENV=production \
+    HOSTNAME=0.0.0.0 \
+    PORT=80
 WORKDIR /app
 
-# Copy Next.js standalone build
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+# Non-root user (Alpine has `addgroup`/`adduser` — busybox applet equivalents)
+RUN addgroup -S recon && adduser -S -G recon recon -u 1001
+
+# Copy Next.js standalone build (server.js + node_modules + .next/static).
+# --chown ensures the non-root user can read everything.
+COPY --from=builder --chown=recon:recon /app/.next/standalone ./
+COPY --from=builder --chown=recon:recon /app/.next/static ./.next/static
 # /app/public is intentionally NOT copied: the directory is empty and the
 # app code references no public assets. If you later add static files
 # (favicon, robots.txt, OG image), reintroduce this COPY line:
-#   COPY --from=builder /app/public ./public
+#   COPY --from=builder --chown=recon:recon /app/public ./public
 
-# Copy nginx config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
+USER recon
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+
+# Health check — wget is part of busybox in node:20-alpine, no extra install.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1
+
+CMD ["node", "server.js"]
