@@ -408,9 +408,18 @@ async def _emit_429(
             )
             db.commit()
     except Exception:
-        # Audit must never break the response.  The structlog WARNING
-        # above is the load-bearing observability signal.
-        pass
+        # Audit must never break the 429 response. The structlog
+        # WARNING above (rate_limit_exceeded) is the load-bearing
+        # observability signal. We log at ERROR for the audit-row
+        # write failure too so the operator can distinguish "rate
+        # limit fired, audit captured" from "rate limit fired, audit
+        # lost" (4R review R1-#3, 2026-10-16).
+        logger.error(
+            "rate_limit_audit_write_failed",
+            exc_info=True,
+            endpoint=endpoint,
+            scope=scope,
+        )
     # 3. The 429 response itself — Retry-After header + JSON body.
     body = {
         "error": "rate_limited",
