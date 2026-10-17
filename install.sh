@@ -627,6 +627,11 @@ self_test() {
   fi
 }
 
+# Capture RECON_API_KEY for use in tests T2 and T3 (both require Bearer auth
+# after the JWT hardening in PRs #70-#74). Falls back to empty string so curl
+# without the header still attempts (and produces a clear 401 if missing).
+recon_api_key="$(get_env RECON_API_KEY)"
+
 # T1: backend /health
 self_test "Backend /health" \
   "curl -fsS http://localhost:8000/health" \
@@ -634,13 +639,13 @@ self_test "Backend /health" \
 
 # T2: /health/ready (probes DB + LLM dependency)
 self_test "Backend /health/ready (DB + LLM)" \
-  "curl -fsS http://localhost:8000/health/ready" \
-  "Check: docker compose logs backend | tail -50. If 'DB fail', verify DATABASE_URL. If 'LLM fail', verify MINIMAX_API_KEY."
+  "curl -fsS -H 'Authorization: Bearer ${recon_api_key}' http://localhost:8000/health/ready" \
+  "Check: docker compose logs backend | tail -50. If 'DB fail', verify DATABASE_URL. If 'LLM fail', verify MINIMAX_API_KEY. If 'unauthorized', ensure ALLOW_LEGACY_API_KEY=true or set RECON_API_KEY in .env."
 
 # T3: module registry
 self_test "Module registry returns modules" \
-  "curl -fsS http://localhost:8000/api/v1/modules | python3 -c 'import sys,json; assert len(json.load(sys.stdin)) > 0'" \
-  "Backend did not load modules. Check: docker compose logs backend | grep -i 'module\\|registry'"
+  "curl -fsS -H 'Authorization: Bearer ${recon_api_key}' http://localhost:8000/api/v1/modules | python3 -c 'import sys,json; assert len(json.load(sys.stdin)) > 0'" \
+  "Backend did not load modules. Check: docker compose logs backend | grep -i 'module\\|registry'. If 'unauthorized', set RECON_API_KEY in .env or ALLOW_LEGACY_API_KEY=true."
 
 # T4-T8: API key validation
 minimax="$(get_env MINIMAX_API_KEY)"
@@ -694,8 +699,10 @@ if [ -n "$fernet" ] && [ "$FERNET_AVAILABLE" = "true" ]; then
 fi
 
 # Docker containers
+# Note: docker compose --format json emits NDJSON (one JSON object per line,
+# NOT a single JSON array). Use json.loads per iteration, not json.load once.
 self_test "Docker containers running" \
-  "[ \$(docker compose ps --format json 2>/dev/null | python3 -c 'import sys,json; print(sum(1 for s in json.load(sys.stdin) if s.get(\"State\") == \"running\"))' 2>/dev/null) -gt 0 ]" \
+  "[ \$(docker compose ps --format json 2>/dev/null | python3 -c 'import sys,json; print(sum(1 for line in sys.stdin if line.strip() and json.loads(line).get(\"State\") == \"running\"))' 2>/dev/null) -gt 0 ]" \
   "Check: docker compose ps — restart with: docker compose --profile prod up -d"
 
 # Restore strict mode
