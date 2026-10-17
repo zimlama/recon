@@ -17,6 +17,22 @@ const nextConfig = {
   // Disable telemetry
   productionBrowserSourceMaps: false,
 
+  // 2026-10-14 fix: reverse-proxy /api/* to the FastAPI backend on the
+  // compose network. Replaces the `proxy_pass http://backend:8000;` that
+  // nginx did before the runner rewrite (nginx no longer exists in the
+  // standalone-node runner). The backend hostname can be overridden at
+  // build time via the REWRITE_API_TARGET env var; default is the
+  // docker-compose service name `backend`.
+  async rewrites() {
+    const target = process.env.REWRITE_API_TARGET || 'http://backend:8000';
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${target}/api/:path*`,
+      },
+    ];
+  },
+
   // Security headers
   async headers() {
     return [
