@@ -71,7 +71,7 @@ fi
 # ---- Check Docker backend state (warn-only if docker absent) ----
 if command -v docker >/dev/null 2>&1; then
     if ! (cd "$REPO_ROOT" && docker compose --profile prod ps --format json 2>/dev/null \
-            | jq -e '.[] | select(.Service=="backend") | .State == "running"' >/dev/null 2>&1); then
+            | jq -e 'select(.Service=="backend") | .State == "running"' >/dev/null 2>&1); then
         echo "❌ Backend container not running" >&2
         exit 1
     fi
