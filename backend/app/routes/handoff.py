@@ -75,6 +75,17 @@ async def download_handoff(
 
     handoff = db.query(Handoff).filter(Handoff.job_id == job_id).first()
     if not handoff or not handoff.file_path:
+        # Symmetric pre-check with get_job_handoff (L54-58). Without this,
+        # `export_handoff` raises ValueError("not yet completed") on a
+        # RUNNING job, which bubbles up as 500 + pollutes handoff_status=FAILED
+        # for what is actually a client error. OWASP API8: 4xx for client
+        # errors, not 5xx. Defense in depth: route pre-check + exporter's
+        # own completed_at check.
+        if job.status.value != "completed":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Job {job_id} not completed — handoff not available yet",
+            )
         # Auto-generate
         await export_handoff(job_id)
         db.refresh(job)

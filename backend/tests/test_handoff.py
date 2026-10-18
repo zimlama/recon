@@ -382,3 +382,69 @@ def test_resolve_under_handoffs_rejects_absolute_escape(tmp_path: Path) -> None:
     with pytest.raises(HTTPException) as exc:
         _resolve_under_handoffs("/etc/passwd", cfg)
     assert exc.value.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Route-layer pre-check: download_handoff returns 400 when job is not completed
+# (Fix for L-001 handoff "race condition" — actual cause was route inconsistency)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio()
+async def test_download_handoff_returns_400_when_job_not_completed(
+    client, db
+) -> None:
+    """download_handoff MUST return 400 (not 500) when the job exists but
+    has not reached COMPLETED.
+
+    Symmetry: get_job_handoff has this check at L54-58; download_handoff
+    lacked it, causing the user-observed "Job <id> not yet completed" 500 +
+    misleading handoff_status=FAILED pollution.
+
+    OWASP API8: appropriate HTTP status (4xx for client errors, not 5xx).
+    Defense in depth: route pre-check + exporter's own completed_at check.
+    """
+    from app.models import HandoffStatus, Job, JobStatus, _now
+
+    # Arrange: a RUNNING job with no Handoff row (the auto-generation path
+    # would otherwise be triggered).
+    job = Job(
+        target="example.com",
+        target_type="domain",
+        status=JobStatus.RUNNING,
+        selected_modules=["whois_rdap"],
+        user_consent=True,
+        typed_confirmation="example.com",
+        consent_modal_version="v1",
+        consent_timestamp=_now(),
+        started_at=_now(),
+        completed_at=None,
+        duration_seconds=None,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    job_id = job.id
+
+    # Act
+    response = await client.get(f"/api/v1/jobs/{job_id}/handoff/download")
+
+    # Assert: 400 (not 500) — appropriate HTTP semantics
+    assert response.status_code == 400, (
+        f"expected 400 for incomplete job, got {response.status_code}: {response.text}"
+    )
+    body = response.json()
+    assert "detail" in body
+    assert "not completed" in body["detail"].lower(), (
+        f"error message should mention 'not completed', got: {body['detail']!r}"
+    )
+
+    # Assert: handoff_status is NOT polluted to FAILED for client errors
+    db.refresh(job)
+    assert job.handoff_status != HandoffStatus.FAILED, (
+        "client error (job not ready) must NOT mark handoff_status=FAILED"
+    )
+    assert not job.error_message or "not yet completed" not in (job.error_message or ""), (
+        f"error_message should not contain 'not yet completed' for client 400, "
+        f"got: {job.error_message!r}"
+    )
